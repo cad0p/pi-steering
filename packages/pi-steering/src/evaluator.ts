@@ -465,12 +465,24 @@ async function formatReason(
 ): Promise<string> {
 	const tag = `[steering:${rule.name}@${source}]`;
 	const body = await resolveReasonBody(rule, source, ctx);
-	if (noOverride) return `${tag} ${body}`;
+	// Paragraph-aware tag separator: when the body contains a paragraph break
+	// (`\n\n`), render the tag on its own line so subsequent paragraphs don't
+	// orphan visually from the prefix. Single-paragraph bodies keep the
+	// existing single-space layout — backward-compatible for every existing
+	// rule (all current rule reasons are single-paragraph).
+	//
+	// Single-line:    `[steering:rule@src] body`
+	// Multi-paragraph: `[steering:rule@src]\n\npara1\n\npara2`
+	//
+	// Trigger is double-newline specifically; a single `\n` inside an
+	// otherwise single-paragraph body keeps the single-space layout.
+	const separator = body.includes("\n\n") ? "\n\n" : " ";
+	if (noOverride) return `${tag}${separator}${body}`;
 	const leader = tool === "bash" ? "#" : "//";
 	const hint =
 		` To override, include a comment: ` +
 		`\`${leader} steering-override: ${rule.name} — <reason>\`.`;
-	return `${tag} ${body}${hint}`;
+	return `${tag}${separator}${body}${hint}`;
 }
 
 /**

@@ -2783,6 +2783,110 @@ describe("buildEvaluator: Rule.reason function form", () => {
 });
 
 // ---------------------------------------------------------------------------
+// formatReason: paragraph-aware tag separator
+// ---------------------------------------------------------------------------
+
+describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
+	it("renders single-line body with single-space tag separator", async () => {
+		const rule: Rule = {
+			name: "single-line",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "a single-line body",
+			noOverride: true,
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work"),
+			0,
+		);
+		assert.ok(res);
+		assert.equal(
+			(res as { reason: string }).reason,
+			"[steering:single-line@user] a single-line body",
+		);
+	});
+
+	it("renders multi-paragraph body with `\\n\\n` separator (tag on its own line)", async () => {
+		const rule: Rule = {
+			name: "multi-para",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "first paragraph.\n\nsecond paragraph.",
+			noOverride: true,
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work"),
+			0,
+		);
+		assert.ok(res);
+		assert.equal(
+			(res as { reason: string }).reason,
+			"[steering:multi-para@user]\n\nfirst paragraph.\n\nsecond paragraph.",
+		);
+	});
+
+	it("treats single-newline-only body as single-paragraph (no `\\n\\n` trigger)", async () => {
+		// Pin the trigger as double-newline specifically: a single `\n` between
+		// two lines does NOT activate the paragraph-aware separator.
+		const rule: Rule = {
+			name: "single-newline",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "line one\nline two",
+			noOverride: true,
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work"),
+			0,
+		);
+		assert.ok(res);
+		assert.equal(
+			(res as { reason: string }).reason,
+			"[steering:single-newline@user] line one\nline two",
+		);
+	});
+
+	it("appends override hint after multi-paragraph body when rule is overridable", async () => {
+		// Override hint stays single-space-prefixed regardless of body's
+		// paragraph structure. Pin via overridable rule + multi-paragraph body.
+		const rule: Rule = {
+			name: "multi-para-overridable",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "first.\n\nsecond.",
+			noOverride: false,
+		};
+		const evaluator = buildEvaluator(
+			{ defaultNoOverride: false, rules: [rule] },
+			resolve(),
+			makeHost(),
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work"),
+			0,
+		);
+		assert.ok(res);
+		const reason = (res as { reason: string }).reason;
+		assert.match(
+			reason,
+			/^\[steering:multi-para-overridable@user\]\n\nfirst\.\n\nsecond\./,
+		);
+		assert.match(reason, / To override, include a comment: /);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Override comments + noOverride
 // ---------------------------------------------------------------------------
 

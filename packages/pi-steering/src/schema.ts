@@ -398,6 +398,15 @@ export interface BaseRule<
 	 * (`[steering:<rule>@<source>] (reason failed to format; see log)`).
 	 * The block verdict still lands - a broken reason doesn't release
 	 * the rule's guard or leak raw error text to the LLM.
+	 *
+	 * Tag→body separator is paragraph-aware: a body containing `\n\n`
+	 * renders with the `[steering:...]` tag on its own line followed by
+	 * a paragraph break (`\n\n`); otherwise the tag and body share a
+	 * single space-separated line. The trigger is double-newline
+	 * specifically — single `\n` characters inside an otherwise
+	 * single-paragraph body keep the single-space layout. Multi-paragraph
+	 * reasons get the prefix-on-its-own-line layout automatically without
+	 * the rule author managing leading whitespace.
 	 */
 	reason: string | ReasonFn;
 

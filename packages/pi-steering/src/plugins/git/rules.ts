@@ -142,13 +142,34 @@ export const noMainCommit = {
  *   - Per-invocation: `# steering-override: no-main-commit-github` comment
  *   - Customize: see gitPlugin's README "Customization" section
  *
- * Walker-unknown cwd produces the standard
- * {@link walkerUnknownCwdReason} text instead of the github-
- * specific guidance — under walker-unknown we haven't actually
- * verified the user is on a github clone's main branch, and
- * claiming so would be misleading. The `remote:` predicate's
- * `requireKnownCwd` wrap (inherited from `predicates.ts`) handles
- * the `when:` side; this ReasonFn handles the agent-facing message.
+ * @remarks Both `https://github.com/...` and `git@github.com:...`
+ *          clone URLs are matched (the `remote:` regex's `[/:]`
+ *          character class accepts both the HTTPS path separator
+ *          and the SSH user-host separator).
+ *
+ * @remarks `remote:` is wrapped as `{ pattern, onUnknown: "allow" }`.
+ *          A github-specialized rule should only fire when github
+ *          context is **confirmed** — under walker-unknown cwd or a
+ *          repo with no `origin` remote configured, the predicate
+ *          allows so the engine falls through to the generic
+ *          `noMainCommit` (correct generic message). The branch
+ *          predicate stays at default `onUnknown: "block"`
+ *          (fail-closed) so protected-branch detection isn't
+ *          weakened.
+ *
+ * Walker-unknown cwd: the reason fn falls back to the standard
+ * {@link walkerUnknownCwdReason} text. The `remote:` predicate
+ * also allows under walker-unknown (per the `onUnknown: "allow"`
+ * above), so on walker-unknown cwd this rule typically does NOT
+ * fire — the generic `noMainCommit` handles the block. The
+ * walker-unknown branch in the reason fn is defense-in-depth in
+ * case `remote:` resolves under known cwd but the engine reaches
+ * the reason fn with `cwd === "unknown"` for unrelated reasons.
+ *
+ * Walker-unknown branch: when `walkerState.branch === "unknown"`
+ * (dynamic checkout the walker couldn't resolve), the reason fn
+ * also routes to a "could not verify branch" message rather than
+ * asserting a specific branch the engine hasn't confirmed.
  *
  * Pattern is shared with `noMainCommit` via the module-private
  * {@link GIT_COMMIT_PATTERN} constant so the two rules' bash-
@@ -164,29 +185,65 @@ export const noMainCommitGithub = {
 	pattern: GIT_COMMIT_PATTERN,
 	when: {
 		branch: /^(main|master|mainline|trunk)$/,
-		remote: /github\.com[/:]/,
+		// `onUnknown: "allow"` posture: a github-specialized rule
+		// should only fire when github context is confirmed. Under no
+		// `origin` remote (fresh-init repo, repo with `upstream` but
+		// no `origin`) or walker-unknown cwd, the predicate allows so
+		// the engine falls through to the generic `noMainCommit` and
+		// the user gets the correct generic message rather than
+		// PR-flow guidance for a repo where there's no PR to open.
+		remote: { pattern: /github\.com[/:]/, onUnknown: "allow" },
 	},
 	reason: (ctx) => {
 		// Walker-unknown cwd: don't claim github-specific context when
-		// the walker couldn't verify it. Use the standard helper for
-		// the consistent "current directory:" message + the wrap's
-		// fail-closed framing. Same pattern as the dynamic-reason-
-		// runtime-cwd example.
+		// the walker couldn't verify it. Use a neutral topic — neither
+		// "github clone status" nor "main branch" overstate what's
+		// been verified, since under walker-unknown the engine hasn't
+		// confirmed either dimension. Same compositional pattern as
+		// the dynamic-reason-runtime-cwd example.
 		if (ctx.walkerState?.["cwd"] === "unknown") {
-			return walkerUnknownCwdReason(ctx, "github clone status");
+			return walkerUnknownCwdReason(
+				ctx,
+				"the repo's branch + remote configuration",
+			);
+		}
+		// Walker-unknown branch: the engine fired fail-closed via the
+		// branch predicate's default `onUnknown: "block"`, but we
+		// haven't confirmed which protected branch (main / master /
+		// mainline / trunk) is involved — don't make an unverified
+		// positive claim. Sibling early-return symmetric with the
+		// walker-unknown-cwd branch above.
+		const branchRes = walkerString(ctx, "branch", NO_CHECKOUT_IN_CHAIN);
+		if (branchRes.kind === "unknown") {
+			return (
+				`Could not verify the current branch — your command used a ` +
+				`dynamic checkout target (\`git checkout $VAR\`) that ` +
+				`couldn't be statically resolved. If you're on a protected ` +
+				`branch (main / master / mainline / trunk) on a github ` +
+				`clone, open a PR for review instead of committing directly.` +
+				`\n\n` +
+				`Safety: NEVER merge a PR or mark it ready-for-review unless ` +
+				`the user explicitly asks. Wait for explicit user instruction.`
+			);
 		}
 		// Reuse the same walkerString-based branch interpolation idiom
 		// noMainCommit's reason fn uses (single source of truth for
 		// tracker-sentinel semantics).
-		const res = walkerString(ctx, "branch", NO_CHECKOUT_IN_CHAIN);
 		const branch =
-			res.kind === "value" && res.value !== "" ? res.value : undefined;
+			branchRes.kind === "value" && branchRes.value !== ""
+				? branchRes.value
+				: undefined;
 		const onClause =
 			branch !== undefined ? ` You are on '${branch}'.` : "";
+		// Prose says "protected branch" rather than "main branch":
+		// the `when:` clause matches all four protected branch names
+		// (main / master / mainline / trunk). Mirrors
+		// `noMainCommit`'s wording, which lists them.
 		return (
-			`You're on a github clone's main branch.${onClause} Open a PR ` +
-			`for review; \`gh pr merge\` lands the change after approval. ` +
-			`Direct commits to main bypass review and break PR discipline.` +
+			`You're on a github clone's protected branch.${onClause} Open ` +
+			`a PR for review; \`gh pr merge\` lands the change after ` +
+			`approval. Direct commits to a protected branch bypass review ` +
+			`and break PR discipline.` +
 			`\n\n` +
 			`Safety: NEVER merge a PR or mark it ready-for-review unless ` +
 			`the user explicitly asks. Wait for explicit user instruction.`

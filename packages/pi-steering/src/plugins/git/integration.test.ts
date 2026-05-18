@@ -86,10 +86,14 @@ function buildRuntime(
 
 /**
  * Stub exec that reports a given branch name for `git branch
- * --show-current`. Also stubs `git config --get remote.origin.url`
- * to a non-github URL so the `noMainCommitGithub` specialization
- * (more specific via `remote: /github\.com/`) cleanly falls through
- * and tests in this scope exercise the generic `noMainCommit` rule.
+ * --show-current`. Every other `git` call (including `git config
+ * --get remote.origin.url`) returns exit 1, so predicates fall back
+ * to their `onUnknown` policy. The github-flavored
+ * `noMainCommitGithub` specialization is more specific via
+ * `remote: { pattern: ..., onUnknown: "allow" }`; on the resulting
+ * no-origin signal the github rule skips and the engine cleanly
+ * falls through to the generic `noMainCommit` for tests in this
+ * scope.
  *
  * Tests that need to exercise the github-flavored rule (or its
  * non-github fall-through) construct their own exec stub that
@@ -103,19 +107,6 @@ function branchExec(name: string) {
 			args[1] === "--show-current"
 		) {
 			return { stdout: `${name}\n`, stderr: "", code: 0, killed: false };
-		}
-		if (
-			cmd === "git" &&
-			args[0] === "config" &&
-			args[1] === "--get" &&
-			args[2] === "remote.origin.url"
-		) {
-			return {
-				stdout: "git@gitfarm.amazon.com:Foo/Bar.git\n",
-				stderr: "",
-				code: 0,
-				killed: false,
-			};
 		}
 		return { stdout: "", stderr: "", code: 1, killed: false };
 	};
@@ -484,7 +475,7 @@ describe("git plugin: no-main-commit-github walker-unknown cwd", () => {
 		);
 		assert.doesNotMatch(
 			res.reason!,
-			/github clone's main branch/,
+			/github clone's protected branch/,
 			"reason must NOT claim github-specific context under walker-unknown",
 		);
 	});

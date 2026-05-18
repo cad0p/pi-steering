@@ -45,12 +45,13 @@ function bashEvent(command: string): BashToolCallEvent {
 /**
  * Build an evaluator that includes the git plugin with a stub `exec`
  * returning the given fake branch on `git branch --show-current`.
- * Also stubs `git config --get remote.origin.url` to a non-github
- * URL so the `noMainCommitGithub` specialization (which is more
- * specific via `remote: /github\.com/`) cleanly falls through and
- * tests in this scope exercise the generic `noMainCommit` rule.
- * Every other `git` call returns exit 1 so predicates fall back to
- * their `onUnknown` policy.
+ * Every other `git` call (including `git config --get
+ * remote.origin.url`) returns exit 1, so predicates fall back to
+ * their `onUnknown` policy. The github-flavored
+ * `noMainCommitGithub` specialization (more specific via
+ * `remote: { pattern: ..., onUnknown: "allow" }`) skips on the
+ * resulting no-origin signal, and tests in this scope cleanly
+ * exercise the generic `noMainCommit` rule.
  *
  * Tests that need to exercise the github-flavored rule (or the
  * non-github fall-through path) use {@link buildWithBranchAndRemote}
@@ -66,19 +67,6 @@ function buildWithBranch(branchName: string) {
 			) {
 				return {
 					stdout: `${branchName}\n`,
-					stderr: "",
-					code: 0,
-					killed: false,
-				};
-			}
-			if (
-				cmd === "git" &&
-				args[0] === "config" &&
-				args[1] === "--get" &&
-				args[2] === "remote.origin.url"
-			) {
-				return {
-					stdout: "git@gitfarm.amazon.com:Foo/Bar.git\n",
 					stderr: "",
 					code: 0,
 					killed: false,
@@ -377,8 +365,8 @@ describe("rules: no-main-commit-github", () => {
 		);
 		assert.match(
 			res.reason!,
-			/github clone's main branch/,
-			"reason must include the github-specific anchor",
+			/github clone's protected branch/,
+			"reason must include the github-specific anchor (protected-branch wording mirrors the four-name when: clause)",
 		);
 		assert.match(
 			res.reason!,
@@ -415,7 +403,7 @@ describe("rules: no-main-commit-github", () => {
 		);
 		assert.doesNotMatch(
 			res.reason!,
-			/github clone's main branch/,
+			/github clone's protected branch/,
 			"reason must not claim github-specific context on non-github remotes",
 		);
 	});

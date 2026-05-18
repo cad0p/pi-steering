@@ -407,22 +407,47 @@ describe("git plugin: walker-driven branch state (the KEY test)", () => {
 //
 // The github-flavored specialization's reason fn has a dedicated
 // walker-unknown branch — under `cd "$VAR" && git commit`, the engine
-// can't verify the user is actually in a github clone or on main, so
-// the reason switches to the standard `walkerUnknownCwdReason` text
-// instead of claiming github-specific context the engine couldn't
-// confirm. This test pins both sides: the rule still FIRES (fail-
-// closed via the `remote:` predicate's `requireKnownCwd` wrap) AND
-// the reason text doesn't claim verified github context.
+// can't verify the user is actually in a github clone or on a
+// protected branch, so the reason switches to the standard
+// `walkerUnknownCwdReason` text instead of claiming github-specific
+// context the engine couldn't confirm. This test pins both sides:
+// the rule still FIRES under walker-unknown cwd AND the reason text
+// doesn't claim verified github context.
+//
+// What this test ACTUALLY exercises (counterfactual rationale):
+//
+//   1. The `branch:` predicate matches `main` via the test stub
+//      (the stub returns "main\n" for `git branch --show-current`
+//      regardless of the runtime cwd that gets passed to it; in
+//      production the same exec at `cwd === "unknown"` would fail
+//      and the predicate would fall back to its `onUnknown:
+//      "block"` default — same firing verdict, different code
+//      path).
+//   2. The `remote:` predicate is `requireKnownCwd`-wrapped — under
+//      `walkerState.cwd === "unknown"` the wrap fires fail-closed
+//      (returns `true`) BEFORE the inner predicate's exec or
+//      no-origin path runs. This wrap-level fail-closed is
+//      independent of the inner `onUnknown: "allow"` policy on the
+//      `remote:` arg — the wrap and the inner argument govern
+//      different failure modes (unresolvable cwd vs. resolvable
+//      cwd + exec/no-origin).
+//   3. The reason fn detects `walkerState.cwd === "unknown"` and
+//      routes to `walkerUnknownCwdReason` rather than asserting
+//      protected-branch context the engine hasn't confirmed.
+//
+// Pinned: the steering tag is rendered, the `walkerUnknownCwdReason`
+// helper's `current directory:` anchor is present, and the
+// protected-branch claim is absent.
 // ---------------------------------------------------------------------------
 
 describe("git plugin: no-main-commit-github walker-unknown cwd", () => {
 	it("`cd \"$VAR\" && git commit` on main + github remote → fires with walker-unknown reason", async () => {
-		// Explicit exec stubs are LOAD-BEARING here. Without them the
-		// `branch:` predicate (NOT `requireKnownCwd`-wrapped) execs at
-		// the test runner's actual cwd and the test outcome depends on
-		// whatever branch / remote that workspace happens to be on —
-		// flaky. Stub branch=main + remote=github so the firing path
-		// is deterministic regardless of the runner's git state.
+		// Explicit exec stubs make the test deterministic regardless
+		// of the runner's actual git state. Without the stubs, the
+		// `branch:` predicate (NOT `requireKnownCwd`-wrapped) would
+		// shell out at the test runner's cwd — the test outcome would
+		// depend on whatever branch / remote that workspace happens
+		// to be on (flaky).
 		const { evaluator } = buildRuntime(
 			{ plugins: [gitPlugin], rules: [] },
 			async (cmd: string, args: string[]): Promise<PiExecResult> => {
@@ -461,7 +486,7 @@ describe("git plugin: no-main-commit-github walker-unknown cwd", () => {
 		);
 		assert.ok(
 			res && res.block === true,
-			"walker-unknown cwd must fail-closed and fire no-main-commit-github",
+			"walker-unknown cwd must fire no-main-commit-github",
 		);
 		assert.match(
 			res.reason!,

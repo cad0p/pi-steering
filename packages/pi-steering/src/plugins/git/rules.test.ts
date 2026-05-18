@@ -378,6 +378,26 @@ describe("rules: no-main-commit-github", () => {
 			/NEVER merge a PR or mark it ready-for-review/,
 			"reason must include the safety reminder",
 		);
+		// Multi-paragraph render-shape pin: the steering tag renders
+		// on its own line followed by a paragraph break, and the
+		// safety reminder stays a separate paragraph from the PR-flow
+		// body. Pins both the engine's paragraph-aware tag separator
+		// (in formatReason) AND this rule's `\n\n` body separator at
+		// one site. Counterfactual: a regression in either (e.g.,
+		// engine refactor that strips trailing/leading whitespace, or
+		// a future cleanup that changes `\n\n` → `\n` in the rule's
+		// reason text) would silently degrade rendering — the .match
+		// checks above don't catch newline drift.
+		assert.match(
+			res.reason!,
+			/^\[steering:no-main-commit-github@[^\]]+\]\n\nYou're on a github clone's protected branch/,
+			"tag must render on its own line followed by paragraph break",
+		);
+		assert.match(
+			res.reason!,
+			/\n\nSafety: NEVER merge a PR/,
+			"safety reminder must remain a separate paragraph from the PR-flow body",
+		);
 	});
 
 	it("non-github remote + on main → falls through to generic no-main-commit", async () => {
@@ -438,13 +458,234 @@ describe("rules: no-main-commit-github", () => {
 		);
 	});
 
-	it("`disabledRules: ['no-main-commit-github']` → does not fire", async () => {
-		// Mirrors the disable pattern documented in the gitPlugin
-		// README's Customization section. With the github rule disabled,
-		// the engine still has the generic `no-main-commit` available
-		// (which DOES fire on github clones because its `when:` is just
-		// branch-based) — to exercise the github-specific disable in
-		// isolation, also disable the generic one.
+	it("vault path + on main + github remote → fires github rule (gitPlugin has no built-in vault knowledge)", async () => {
+		// Counterfactual rationale: a future refactor that adds a
+		// cwd-based vault exemption to the rule (e.g.,
+		// `not: { cwd: VAULT_DIRS }` baked into the default `when:`)
+		// would silently change this behavior — vault paths would skip
+		// the rule. The README's Customization section is built on
+		// the contract that vault exemption is downstream-consumer
+		// responsibility, NOT a built-in default; this test pins that
+		// contract.
+		const { evaluator } = buildWithBranchAndRemote(
+			"main",
+			"https://github.com/user/Goldmine.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git commit -m 'note'"),
+			makeCtx("/home/user/Goldmine/notes"),
+			0,
+		);
+		assert.ok(
+			res && res.block === true,
+			"vault path must NOT bypass the rule — gitPlugin doesn't ship vault awareness",
+		);
+		assert.match(
+			res.reason!,
+			/\[steering:no-main-commit-github@[^\]]+\]/,
+			"vault paths still get the github-flavored message; vault exemption is a downstream-consumer override",
+		);
+	});
+
+	it("SSH-form github URL (`git@github.com:...`) → fires github rule", async () => {
+		// The `remote:` regex `/github\.com[/:]/` accepts both the
+		// HTTPS path separator (`github.com/`) and the SSH user-host
+		// separator (`github.com:`). Pins the broader character class
+		// against an accidental narrowing back to `/github\.com\//`.
+		const { evaluator } = buildWithBranchAndRemote(
+			"main",
+			"git@github.com:cad0p/repo.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(res && res.block === true);
+		assert.match(
+			res.reason!,
+			/\[steering:no-main-commit-github@[^\]]+\]/,
+			"SSH-form github URL must route to the github-flavored message",
+		);
+	});
+
+	it("overridable via `# steering-override: no-main-commit-github` comment", async () => {
+		// Mirrors the override-comment test on the generic rule. The
+		// rule's `noOverride: false` field is set explicitly with a
+		// JSDoc rationale ("workflow rules are intentionally
+		// overridable") — this test exercises the engine's actual
+		// override-comment path on the github specialization, rather
+		// than relying on the rule-shape `assert.equal(noOverride,
+		// false)` pin alone. A future refactor that drops the field
+		// or flips the schema default would surface here as a failed
+		// override + a missing audit entry.
+		//
+		// Both `no-main-commit-github` and the generic
+		// `no-main-commit` fire on a github clone + main. Stacked
+		// override comments suppress both — the engine accepts
+		// multiple override markers on a single command (see
+		// `extractOverride`'s JSDoc on stacked overrides). The audit
+		// entry assertion specifically targets the github rule to pin
+		// the github-side override path was exercised.
+		const { evaluator, host } = buildWithBranchAndRemote(
+			"main",
+			"https://github.com/cad0p/repo.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent(
+				"git commit -m 'release' " +
+					"# steering-override: no-main-commit-github - release process " +
+					"# steering-override: no-main-commit - release process",
+			),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(res, undefined);
+		assert.ok(
+			host.appended.some(
+				(e) =>
+					e.type === "steering-override" &&
+					(e.data as { rule?: string } | undefined)?.rule ===
+						"no-main-commit-github",
+			),
+			"expected a steering-override audit entry for no-main-commit-github (proves the github rule's override path was exercised)",
+		);
+	});
+
+	it("rule-shape pin: `noOverride: false` + `when:` includes both branch + remote", () => {
+		const rule = gitPlugin.rules?.find(
+			(r) => r.name === "no-main-commit-github",
+		);
+		assert.ok(rule);
+		assert.equal(rule.tool, "bash");
+		assert.equal(rule.field, "command");
+		assert.equal(
+			rule.noOverride,
+			false,
+			"workflow rule must stay overridable via `# steering-override:` comment",
+		);
+		assert.ok(
+			rule.when !== undefined &&
+				"branch" in (rule.when as Record<string, unknown>) &&
+				"remote" in (rule.when as Record<string, unknown>),
+			"when: must include both branch + remote (specialization shape)",
+		);
+	});
+
+	it("`disabledRules: ['no-main-commit-github']` only + github clone → generic fires (clean fall-through)", async () => {
+		// Pins the canonical "swap to generic message" customization:
+		// disable just the github specialization, generic stays
+		// active, user gets the generic feature-branch reminder
+		// instead of PR-flow guidance. This is the user-facing
+		// behavior README's Customization section advertises for the
+		// disable-only path — pinned so a regression in the
+		// disabledRules filter (e.g., name-prefix-matching that
+		// accidentally disables both rules) surfaces here as a
+		// missing block.
+		const host = makeTrackedHost({
+			exec: async (cmd, args): Promise<PiExecResult> => {
+				if (
+					cmd === "git" &&
+					args[0] === "branch" &&
+					args[1] === "--show-current"
+				) {
+					return {
+						stdout: "main\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				if (
+					cmd === "git" &&
+					args[0] === "config" &&
+					args[1] === "--get" &&
+					args[2] === "remote.origin.url"
+				) {
+					return {
+						stdout: "https://github.com/cad0p/repo.git\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				return { stdout: "", stderr: "", code: 1, killed: false };
+			},
+		});
+		const resolved = resolvePlugins([gitPlugin], {
+			disabledRules: ["no-main-commit-github"],
+		});
+		const evaluator = buildEvaluator({}, resolved, host);
+		const res = await evaluator.evaluate(
+			bashEvent("git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			res && res.block === true,
+			"generic rule must still fire on protected branch when only the github rule is disabled",
+		);
+		assert.match(
+			res.reason!,
+			/\[steering:no-main-commit@[^\]]+\]/,
+			"generic no-main-commit fires on github clones too (its when: is just branch-based)",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/no-main-commit-github@/,
+			"github-flavored rule must NOT fire when listed in disabledRules",
+		);
+	});
+
+	it("`disabledRules: ['no-main-commit-github']` only + non-github → generic fires (disable doesn't affect generic routing)", async () => {
+		// Sibling pin to the above: disabling the github rule must
+		// not affect the generic rule's routing on non-github
+		// remotes. A regression where `disabledRules` accidentally
+		// name-prefix-matched (`startsWith` instead of equality)
+		// would disable both rules here and surface as `res ===
+		// undefined`.
+		const host = makeTrackedHost({
+			exec: async (cmd, args): Promise<PiExecResult> => {
+				if (
+					cmd === "git" &&
+					args[0] === "branch" &&
+					args[1] === "--show-current"
+				) {
+					return {
+						stdout: "main\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				return { stdout: "", stderr: "", code: 1, killed: false };
+			},
+		});
+		const resolved = resolvePlugins([gitPlugin], {
+			disabledRules: ["no-main-commit-github"],
+		});
+		const evaluator = buildEvaluator({}, resolved, host);
+		const res = await evaluator.evaluate(
+			bashEvent("git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			res && res.block === true,
+			"generic rule fires on non-github too — disable name-equality must scope cleanly",
+		);
+		assert.match(
+			res.reason!,
+			/\[steering:no-main-commit@[^\]]+\]/,
+		);
+	});
+
+	it("`disabledRules: ['no-main-commit-github', 'no-main-commit']` → no commit-on-main rule fires", async () => {
+		// Sanity-check pin for the both-disabled case. With both
+		// rules disabled, the engine has no commit-on-main guard at
+		// all → block does not surface. Useful as a regression seal
+		// against an accidental third commit-on-main rule being
+		// added without being listed here.
 		const host = makeTrackedHost({
 			exec: async (cmd, args): Promise<PiExecResult> => {
 				if (

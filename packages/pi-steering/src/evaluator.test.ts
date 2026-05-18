@@ -569,6 +569,254 @@ describe("buildEvaluator: when.cwd", () => {
 	});
 });
 
+// ---------------------------------------------------------------------------
+// when.cwd: Pattern[] / { pattern: Pattern[]; onUnknown? } array form
+// ---------------------------------------------------------------------------
+//
+// Pins the array shorthand and `{ pattern: Pattern[]; onUnknown }` form
+// for the engine's built-in `cwd` predicate. Mirror tests for the
+// gitPlugin's pattern-valued predicates (branch / upstream / remote)
+// live in `plugins/git/predicates.test.ts`.
+//
+// Array semantics: OR-of-matches. Empty array invalid (rule skips);
+// arrays with non-Pattern elements invalid (rule skips uniformly
+// regardless of walker-cwd state).
+
+describe("buildEvaluator: when.cwd array form", () => {
+	it("shorthand Pattern[] matches when cwd matches any pattern", async () => {
+		const rule: Rule = {
+			name: "vault-only",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "vault paths",
+			when: { cwd: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//] },
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/home/me/Goldmine/notes"),
+			0,
+		);
+		assert.ok(res, "first array pattern must match cwd");
+	});
+
+	it("shorthand Pattern[] skips when cwd matches no pattern", async () => {
+		const rule: Rule = {
+			name: "vault-only",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "vault paths",
+			when: { cwd: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//] },
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/home/me/code/project"),
+			0,
+		);
+		assert.equal(res, undefined, "no array pattern matches — rule skips");
+	});
+
+	it("single-element array equivalent to single-pattern shorthand", async () => {
+		const rule: Rule = {
+			name: "single-elem",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "single elem",
+			when: { cwd: [/^\/work$/] },
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const hit = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work"),
+			0,
+		);
+		assert.ok(hit);
+		const miss = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/elsewhere"),
+			0,
+		);
+		assert.equal(miss, undefined);
+	});
+
+	it("empty array is invalid (rule skips, regardless of walker cwd)", async () => {
+		const rule: Rule = {
+			name: "empty-arr",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "empty arr",
+			when: { cwd: [] as RegExp[] },
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work"),
+			0,
+		);
+		assert.equal(res, undefined, "empty array invalid — rule skips");
+	});
+
+	it("array with non-Pattern element is invalid (rule skips, NOT a fail-open coercion)", async () => {
+		// Without the explicit `Array.isArray(value) && return false` guard
+		// in evaluateCwd, this would fall through to the malformed-shorthand
+		// path and silently regex-match `String([/foo/, 123])` (fail-open
+		// under known cwd) or fire under unknown cwd. Pinned uniformly to
+		// fail-skip mode — same as gitPlugin's null-→-skip path.
+		const rule: Rule = {
+			name: "mixed-arr",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "mixed arr",
+			when: { cwd: [/\/work\//, 123] as unknown as RegExp[] },
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const known = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work/proj"),
+			0,
+		);
+		assert.equal(
+			known,
+			undefined,
+			"non-Pattern element in array — rule skips (no fail-open)",
+		);
+	});
+
+	it("object form { pattern: Pattern[]; onUnknown: 'allow' } skips on walker-unknown", async () => {
+		const rule: Rule = {
+			name: "vault-allow-unknown",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "vault",
+			when: {
+				cwd: {
+					pattern: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//],
+					onUnknown: "allow",
+				},
+			},
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$UNDEF" && rm foo'),
+			makeCtx("/start"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"onUnknown: 'allow' on Pattern[] skips when walker can't resolve cwd",
+		);
+	});
+
+	it("object form { pattern: Pattern[]; onUnknown: 'block' } fires on walker-unknown (default)", async () => {
+		const rule: Rule = {
+			name: "vault-block-unknown",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "vault",
+			when: {
+				cwd: {
+					pattern: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//],
+				},
+			},
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$UNDEF" && rm foo'),
+			makeCtx("/start"),
+			0,
+		);
+		assert.ok(
+			res,
+			"default onUnknown: 'block' on Pattern[] fires when walker can't resolve cwd",
+		);
+	});
+
+	it("object form { pattern: Pattern[] } matches OR-of-patterns under known cwd", async () => {
+		const rule: Rule = {
+			name: "vault-known",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "vault",
+			when: {
+				cwd: {
+					pattern: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//],
+				},
+			},
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const hit = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/home/me/.cache/napkin-distill/x"),
+			0,
+		);
+		assert.ok(hit, "second pattern in array matches");
+		const miss = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/home/me/code"),
+			0,
+		);
+		assert.equal(miss, undefined, "neither pattern matches — rule skips");
+	});
+
+	it("single-pattern shorthand fast-path preserved (behavioral equivalence with single-element array)", async () => {
+		// Pin the fast-path's behavioral equivalence with the array form.
+		// The engine's evaluateCwd reads the single-pattern shorthand
+		// directly without allocating a normalization object; the array
+		// path takes a separate branch. Both must produce the same verdict
+		// for the same effective input.
+		const withArray: Rule = {
+			name: "shorthand-array",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "r",
+			when: { cwd: [/^\/work\/proj$/] },
+		};
+		const withSingle: Rule = {
+			name: "shorthand-single",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "r",
+			when: { cwd: /^\/work\/proj$/ },
+		};
+		const evalArr = buildEvaluator(
+			{ rules: [withArray] },
+			resolve(),
+			makeHost(),
+		);
+		const evalSingle = buildEvaluator(
+			{ rules: [withSingle] },
+			resolve(),
+			makeHost(),
+		);
+		const arr = await evalArr.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work/proj"),
+			0,
+		);
+		const single = await evalSingle.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work/proj"),
+			0,
+		);
+		assert.ok(arr);
+		assert.ok(single);
+		assert.equal((arr as { block: boolean }).block, true);
+		assert.equal((single as { block: boolean }).block, true);
+	});
+});
+
 describe("buildEvaluator: when.happened", () => {
 	// "Fires when NOT happened." — the mental model is inverted from
 	// the rule author's perspective (they say "block cr unless sync

@@ -58,6 +58,7 @@ import type {
 	PredicateHandler,
 } from "../../schema.ts";
 import { requireKnownCwd } from "../../helpers/require-known-state.ts";
+import { isPattern } from "../../internal/pattern-utils.ts";
 import { NO_CHECKOUT_IN_CHAIN } from "./branch-tracker.ts";
 import {
 	getCommitsAhead,
@@ -72,26 +73,45 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Normalize the two shorthand forms accepted by string-valued
- * predicates:
+ * Normalize the shorthand forms accepted by the pattern-valued
+ * predicates (`branch`, `upstream`, `remote`) into a canonical
+ * `{ patterns, onUnknown }` shape:
  *
- *   - `Pattern`                              -> `{ pattern, onUnknown: "block" }`
- *   - `{ pattern, onUnknown? }`              -> object used as-is,
- *                                                `onUnknown` defaults
- *                                                to `"block"`.
+ *   - `Pattern`                                  -> `{ patterns: [pattern], onUnknown: "block" }`
+ *   - `Pattern[]`  (non-empty, all-Pattern)      -> `{ patterns, onUnknown: "block" }`
+ *   - `{ pattern: Pattern, onUnknown? }`         -> object used as-is,
+ *                                                    `pattern` re-wrapped
+ *                                                    into a single-element
+ *                                                    array; `onUnknown`
+ *                                                    defaults to `"block"`.
+ *   - `{ pattern: Pattern[], onUnknown? }`       -> array preserved,
+ *                                                    same `onUnknown`
+ *                                                    handling.
+ *
+ * Array semantics are OR-of-matches: the rule fires when the input
+ * matches ANY of the listed patterns. Array form requires at least
+ * one pattern (empty arrays are invalid).
  *
  * Returning `null` means the author supplied something that isn't a
- * valid value for this predicate (e.g. a bare number); handlers treat
- * that as a non-match and don't throw - invalid config shouldn't
- * crash the evaluator, but it also shouldn't silently fire.
+ * valid value for this predicate (e.g. a bare number, an empty array,
+ * or an array containing a non-Pattern value); handlers treat that as
+ * a non-match and don't throw - invalid config shouldn't crash the
+ * evaluator, but it also shouldn't silently fire.
  */
 function unwrapPatternArg(value: unknown): {
-	pattern: Pattern;
+	patterns: Pattern[];
 	onUnknown: "allow" | "block";
 } | null {
-	if (typeof value === "string" || value instanceof RegExp) {
-		return { pattern: value, onUnknown: "block" };
+	// Shorthand: single Pattern.
+	if (isPattern(value)) {
+		return { patterns: [value], onUnknown: "block" };
 	}
+	// Shorthand: Pattern[] (must be non-empty + all-Pattern).
+	if (Array.isArray(value) && value.every(isPattern)) {
+		if (value.length === 0) return null;
+		return { patterns: value, onUnknown: "block" };
+	}
+	// Object form: { pattern: Pattern | Pattern[]; onUnknown? }.
 	if (
 		value !== null &&
 		typeof value === "object" &&
@@ -101,11 +121,13 @@ function unwrapPatternArg(value: unknown): {
 			pattern?: unknown;
 			onUnknown?: "allow" | "block";
 		};
-		if (typeof obj.pattern === "string" || obj.pattern instanceof RegExp) {
-			return {
-				pattern: obj.pattern,
-				onUnknown: obj.onUnknown === "allow" ? "allow" : "block",
-			};
+		const onUnknown = obj.onUnknown === "allow" ? "allow" : "block";
+		if (isPattern(obj.pattern)) {
+			return { patterns: [obj.pattern], onUnknown };
+		}
+		if (Array.isArray(obj.pattern) && obj.pattern.every(isPattern)) {
+			if (obj.pattern.length === 0) return null;
+			return { patterns: obj.pattern, onUnknown };
 		}
 	}
 	return null;
@@ -238,10 +260,17 @@ export function walkerString(
  * Accepted arg shapes:
  *
  *   ```ts
- *   when: { branch: /^main$/ }
- *   when: { branch: "^feat-" }
- *   when: { branch: { pattern: /^main$/, onUnknown: "allow" } }
+ *   when: { branch: /^main$/ }                                  // single Pattern
+ *   when: { branch: "^feat-" }                                   // single Pattern (string)
+ *   when: { branch: [/^main$/, /^master$/, /^trunk$/] }          // Pattern[] (any-of)
+ *   when: { branch: { pattern: /^main$/, onUnknown: "allow" } }  // object form
+ *   when: { branch: { pattern: [/^main$/, /^master$/], onUnknown: "allow" } }
  *   ```
+ *
+ * Array semantics: OR-of-matches (rule fires when the resolved
+ * branch matches ANY of the listed patterns). Empty arrays are
+ * invalid (rule skips); arrays containing non-Pattern values are
+ * invalid (rule skips).
  *
  * Resolution order:
  *   1. `ctx.walkerState.branch` - set by the branch tracker when the
@@ -270,7 +299,7 @@ export const branch: PredicateHandler = async (value, ctx) => {
 	// 1. Walker state (tracker-resolved mid-command).
 	const fromWalker = walkerString(ctx, "branch", NO_CHECKOUT_IN_CHAIN);
 	if (fromWalker.kind === "value") {
-		return matchPattern(arg.pattern, fromWalker.value);
+		return arg.patterns.some((p) => matchPattern(p, fromWalker.value));
 	}
 	if (fromWalker.kind === "unknown") {
 		// Dynamic in-chain checkout. Exec would return the PRE-checkout
@@ -282,7 +311,7 @@ export const branch: PredicateHandler = async (value, ctx) => {
 	// 2. Shell out (tracker saw no in-chain checkout).
 	const out = await tryExec(ctx, "git", ["branch", "--show-current"], ctx.cwd);
 	if (out === null || out.length === 0) return unknownVerdict(arg.onUnknown);
-	return matchPattern(arg.pattern, out);
+	return arg.patterns.some((p) => matchPattern(p, out));
 };
 
 // ---------------------------------------------------------------------------
@@ -324,7 +353,7 @@ export const upstream: PredicateHandler = requireKnownCwd(
 
 		const out = await getUpstream(ctx);
 		if (out === null) return unknownVerdict(arg.onUnknown);
-		return matchPattern(arg.pattern, out);
+		return arg.patterns.some((p) => matchPattern(p, out));
 	},
 );
 
@@ -510,7 +539,7 @@ export const remote: PredicateHandler = requireKnownCwd(
 
 		const out = await getRemoteUrl(ctx);
 		if (out === null) return unknownVerdict(arg.onUnknown);
-		return matchPattern(arg.pattern, out);
+		return arg.patterns.some((p) => matchPattern(p, out));
 	},
 );
 

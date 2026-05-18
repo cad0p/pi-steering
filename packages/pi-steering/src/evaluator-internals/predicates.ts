@@ -32,6 +32,7 @@ import type {
 	PredicateHandler,
 	WhenClause,
 } from "../schema.ts";
+import { isPattern } from "../internal/pattern-utils.ts";
 import { AGENT_LOOP_INDEX_KEY } from "./context.ts";
 import type { SyntheticEntry } from "./speculative-synthesis.ts";
 
@@ -117,15 +118,22 @@ export class UnknownPredicateError extends Error {
 }
 
 /**
- * Built-in `when.cwd` predicate. Accepts shorthand `Pattern` or the
- * `{ pattern, onUnknown }` object form. Applies the `onUnknown` policy
- * when the walker-supplied `walkerCwd` equals the cwd tracker's
- * `"unknown"` sentinel.
+ * Built-in `when.cwd` predicate. Accepts shorthand `Pattern`,
+ * shorthand `Pattern[]` (OR-of-matches), or the object form
+ * `{ pattern: Pattern | Pattern[]; onUnknown? }`. Applies the
+ * `onUnknown` policy when the walker-supplied `walkerCwd` equals the
+ * cwd tracker's `"unknown"` sentinel.
  *
  *   - `onUnknown: "block"` (default, fail-closed) → predicate PASSES on
  *     unknown so the rule fires (block the command).
  *   - `onUnknown: "allow"`                        → predicate FAILS on
  *     unknown so the rule skips (allow the command).
+ *
+ * Array semantics: OR-of-matches (predicate matches when the resolved
+ * cwd matches ANY of the listed patterns). Empty arrays are invalid
+ * (rule skips, fail-closed under unknown handled before this branch);
+ * arrays containing non-Pattern values are invalid (rule skips uniformly
+ * — see explicit early-return below).
  *
  * Fast path: the common shorthand form `when.cwd: /regex/` (or a
  * string pattern) is read directly — no normalization object
@@ -133,7 +141,9 @@ export class UnknownPredicateError extends Error {
  * the slightly-slower path of reading two fields. Matters because
  * `when.cwd` runs once per rule per extracted ref per tool_call,
  * so cutting the per-call allocation saves micro-seconds on hot
- * configs with many cwd-scoped rules.
+ * configs with many cwd-scoped rules. The array shorthand keeps the
+ * fast-path: no normalization object allocated, just an `every`
+ * iteration to validate element types before `.some`-matching.
  */
 function evaluateCwd(
 	value: unknown,
@@ -144,22 +154,43 @@ function evaluateCwd(
 		if (walkerCwd === "unknown") return true; // onUnknown default: block
 		return matchesPattern(value, walkerCwd);
 	}
-	// Object form: { pattern, onUnknown? }.
+	// Shorthand Pattern[] form (non-empty, all-Pattern).
+	if (Array.isArray(value) && value.every(isPattern)) {
+		if (value.length === 0) return false; // empty array invalid → rule skips
+		if (walkerCwd === "unknown") return true; // onUnknown default: block
+		return value.some((p) => matchesPattern(p, walkerCwd));
+	}
+	// Object form: { pattern: Pattern | Pattern[]; onUnknown? }.
 	if (
 		value !== null &&
 		typeof value === "object" &&
 		"pattern" in (value as Record<string, unknown>)
 	) {
 		const obj = value as {
-			pattern: Pattern;
+			pattern: unknown;
 			onUnknown?: "allow" | "block";
 		};
-		if (walkerCwd === "unknown") {
-			return (obj.onUnknown ?? "block") === "block";
+		const block = (obj.onUnknown ?? "block") === "block";
+		if (isPattern(obj.pattern)) {
+			if (walkerCwd === "unknown") return block;
+			return matchesPattern(obj.pattern, walkerCwd);
 		}
-		return matchesPattern(obj.pattern, walkerCwd);
+		if (Array.isArray(obj.pattern) && obj.pattern.every(isPattern)) {
+			if (obj.pattern.length === 0) return false;
+			if (walkerCwd === "unknown") return block;
+			return obj.pattern.some((p) => matchesPattern(p, walkerCwd));
+		}
 	}
-	// Malformed input — treat as shorthand Pattern with fail-closed default.
+	// Explicit fail-skip for array-shaped input that isn't all-Pattern.
+	// Without this, `cwd: [/foo/, 123]` falls through to the malformed
+	// shorthand path below — silently regex-matching `String([/foo/, 123])`
+	// (fail-OPEN under known cwd) or firing under unknown cwd. Asymmetric
+	// with the gitPlugin sites' clean null-→-skip path; pin uniformly.
+	if (Array.isArray(value)) return false;
+	// Malformed non-array input — treat as fail-closed shorthand attempt
+	// (preserves existing pre-extension behavior for non-array malformed
+	// values: under unknown cwd, fire; under known cwd, attempt a regex
+	// coercion which almost certainly produces `false`).
 	if (walkerCwd === "unknown") return true;
 	return matchesPattern(value as Pattern, walkerCwd);
 }

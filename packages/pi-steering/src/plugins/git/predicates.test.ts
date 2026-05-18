@@ -943,3 +943,193 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 		assert.equal(execCalls.length, 1);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Pattern-matcher array form (cwd / branch / upstream / remote)
+// ---------------------------------------------------------------------------
+//
+// Pins the array shorthand and `{ pattern: Pattern[]; onUnknown }` form
+// across the gitPlugin's three pattern-valued predicates. (`cwd` lives in
+// the engine's `evaluator-internals/predicates.ts`; its array-form tests
+// are in evaluator.test.ts.)
+//
+// Array semantics: OR-of-matches. Empty arrays are invalid (rule skips);
+// arrays with non-Pattern elements are invalid (rule skips).
+
+describe("predicate: branch (array form)", () => {
+	it("matches when walker branch matches any pattern in the array", async () => {
+		const { ctx, execCalls } = makeCtx([], {
+			walkerState: { branch: "trunk" },
+		});
+		assert.equal(await branch([/^main$/, /^master$/, /^trunk$/], ctx), true);
+		assert.equal(execCalls.length, 0);
+	});
+
+	it("skips when walker branch matches none of the array patterns", async () => {
+		const { ctx } = makeCtx([], {
+			walkerState: { branch: "feature-x" },
+		});
+		assert.equal(await branch([/^main$/, /^master$/], ctx), false);
+	});
+
+	it("accepts mixed string + RegExp Pattern[]", async () => {
+		const { ctx } = makeCtx([], {
+			walkerState: { branch: "main" },
+		});
+		assert.equal(await branch(["^main$", /^master$/], ctx), true);
+	});
+
+	it("empty array is invalid (rule skips)", async () => {
+		const { ctx, execCalls } = makeCtx([], {
+			walkerState: { branch: "main" },
+		});
+		assert.equal(await branch([], ctx), false);
+		assert.equal(execCalls.length, 0);
+	});
+
+	it("array with non-Pattern element is invalid (rule skips)", async () => {
+		const { ctx, execCalls } = makeCtx([], {
+			walkerState: { branch: "main" },
+		});
+		assert.equal(await branch([/^main$/, 123 as unknown as string], ctx), false);
+		assert.equal(execCalls.length, 0);
+	});
+
+	it("object form with Pattern[] + onUnknown: 'allow' applies the policy on unknown", async () => {
+		const { ctx } = makeCtx([], {
+			walkerState: { branch: "unknown" },
+		});
+		assert.equal(
+			await branch(
+				{ pattern: [/^main$/, /^master$/], onUnknown: "allow" },
+				ctx,
+			),
+			false,
+		);
+	});
+
+	it("object form with Pattern[] + default onUnknown blocks on unknown", async () => {
+		const { ctx } = makeCtx([], {
+			walkerState: { branch: "unknown" },
+		});
+		assert.equal(
+			await branch({ pattern: [/^main$/, /^master$/] }, ctx),
+			true,
+		);
+	});
+});
+
+describe("predicate: upstream (array form)", () => {
+	it("matches when upstream matches any pattern in the array", async () => {
+		const { ctx } = makeCtx(
+			[
+				{
+					match: (cmd, args) =>
+						cmd === "git" && args[0] === "rev-parse",
+					result: execOk("origin/develop\n"),
+				},
+			],
+			{ walkerState: { cwd: "/repo" } },
+		);
+		assert.equal(
+			await upstream([/^origin\/main$/, /^origin\/develop$/], ctx),
+			true,
+		);
+	});
+
+	it("skips when upstream matches none of the array patterns", async () => {
+		const { ctx } = makeCtx(
+			[
+				{
+					match: (cmd, args) =>
+						cmd === "git" && args[0] === "rev-parse",
+					result: execOk("origin/feature\n"),
+				},
+			],
+			{ walkerState: { cwd: "/repo" } },
+		);
+		assert.equal(
+			await upstream([/^origin\/main$/, /^origin\/develop$/], ctx),
+			false,
+		);
+	});
+
+	it("empty array is invalid (rule skips)", async () => {
+		const { ctx, execCalls } = makeCtx([], {
+			walkerState: { cwd: "/repo" },
+		});
+		assert.equal(await upstream([], ctx), false);
+		assert.equal(execCalls.length, 0);
+	});
+});
+
+describe("predicate: remote (array form)", () => {
+	it("matches when remote URL matches any pattern in the array", async () => {
+		const { ctx } = makeCtx(
+			[
+				{
+					match: (cmd, args) =>
+						cmd === "git" && args[0] === "config" && args[1] === "--get",
+					result: execOk("https://github.com/cad0p/repo.git\n"),
+				},
+			],
+			{ walkerState: { cwd: "/repo" } },
+		);
+		assert.equal(
+			await remote([/github\.com\//, /gitlab\.com\//], ctx),
+			true,
+		);
+	});
+
+	it("skips when remote URL matches none of the array patterns", async () => {
+		const { ctx } = makeCtx(
+			[
+				{
+					match: (cmd, args) =>
+						cmd === "git" && args[0] === "config" && args[1] === "--get",
+					result: execOk("git@gitfarm.amazon.com:Foo/Bar.git\n"),
+				},
+			],
+			{ walkerState: { cwd: "/repo" } },
+		);
+		assert.equal(
+			await remote([/github\.com\//, /gitlab\.com\//], ctx),
+			false,
+		);
+	});
+
+	it("object form with Pattern[] + onUnknown: 'allow' on no-origin skips", async () => {
+		// Remote URL fetch fails (no origin). With onUnknown: "allow",
+		// the predicate skips regardless of array shape.
+		const { ctx } = makeCtx(
+			[
+				{
+					match: (cmd) => cmd === "git",
+					result: execFail(1),
+				},
+			],
+			{ walkerState: { cwd: "/repo" } },
+		);
+		assert.equal(
+			await remote(
+				{ pattern: [/github\.com\//, /gitlab\.com\//], onUnknown: "allow" },
+				ctx,
+			),
+			false,
+		);
+	});
+
+	it("array with non-Pattern element (e.g. number) is invalid (rule skips)", async () => {
+		const { ctx, execCalls } = makeCtx([], {
+			walkerState: { cwd: "/repo" },
+		});
+		assert.equal(
+			await remote(
+				[/github\.com\//, 123 as unknown as string],
+				ctx,
+			),
+			false,
+		);
+		assert.equal(execCalls.length, 0);
+	});
+});

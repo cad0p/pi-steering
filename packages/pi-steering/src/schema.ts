@@ -204,9 +204,23 @@ export interface WhenClause<Writes extends string = string> {
 	 * command's cwd can't be statically resolved (e.g. `cd $VAR && ...`).
 	 * Default is `"block"` - fail-closed.
 	 *
+	 * Array form (`Pattern[]` or `{ pattern: Pattern[]; onUnknown? }`)
+	 * matches OR-of-patterns: the predicate fires when the resolved cwd
+	 * matches ANY of the listed patterns. Empty arrays are invalid (rule
+	 * skips); arrays containing non-Pattern values are invalid (rule
+	 * skips). Array form sugars vault-path or workspace-tree exemptions:
+	 *
+	 *   ```ts
+	 *   when: { cwd: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//] }
+	 *   when: { cwd: { pattern: [/\.test$/, /\.spec$/], onUnknown: "allow" } }
+	 *   ```
+	 *
 	 * See ADR "Design → Override default and `onUnknown`".
 	 */
-	cwd?: Pattern | { pattern: Pattern; onUnknown?: "allow" | "block" };
+	cwd?:
+		| Pattern
+		| Pattern[]
+		| { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };
 
 	/**
 	 * Rule fires when the given `event` has NOT happened in the given

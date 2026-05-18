@@ -27,6 +27,7 @@ import {
 import { buildEvaluator } from "../../evaluator.ts";
 import { resolvePlugins } from "../../plugin-merger.ts";
 import gitPlugin from "./index.ts";
+import { noMainCommit, noMainCommitGithub } from "./rules.ts";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -44,8 +45,16 @@ function bashEvent(command: string): BashToolCallEvent {
 /**
  * Build an evaluator that includes the git plugin with a stub `exec`
  * returning the given fake branch on `git branch --show-current`.
+ * Also stubs `git config --get remote.origin.url` to a non-github
+ * URL so the `noMainCommitGithub` specialization (which is more
+ * specific via `remote: /github\.com/`) cleanly falls through and
+ * tests in this scope exercise the generic `noMainCommit` rule.
  * Every other `git` call returns exit 1 so predicates fall back to
  * their `onUnknown` policy.
+ *
+ * Tests that need to exercise the github-flavored rule (or the
+ * non-github fall-through path) use {@link buildWithBranchAndRemote}
+ * below — it parameterizes the origin URL.
  */
 function buildWithBranch(branchName: string) {
 	const host = makeTrackedHost({
@@ -57,6 +66,19 @@ function buildWithBranch(branchName: string) {
 			) {
 				return {
 					stdout: `${branchName}\n`,
+					stderr: "",
+					code: 0,
+					killed: false,
+				};
+			}
+			if (
+				cmd === "git" &&
+				args[0] === "config" &&
+				args[1] === "--get" &&
+				args[2] === "remote.origin.url"
+			) {
+				return {
+					stdout: "git@gitfarm.amazon.com:Foo/Bar.git\n",
 					stderr: "",
 					code: 0,
 					killed: false,
@@ -265,6 +287,252 @@ describe("rules: no-main-commit dynamic reason", () => {
 			res.reason!,
 			/unknown/,
 			"reason must not leak the walker sentinel string",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Harness extension for `no-main-commit-github` — stubs both the branch and
+// the origin remote URL so non-github fall-through is exercised
+// deterministically.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an evaluator that includes the git plugin with a stub `exec`
+ * returning the given fake branch on `git branch --show-current` AND
+ * the given fake origin URL on `git config --get remote.origin.url`
+ * (when {@link remoteUrl} is non-null). Every other `git` call returns
+ * exit 1 so predicates fall back to their `onUnknown` policy.
+ *
+ * Pass `remoteUrl: null` to simulate a repo with no `origin` remote
+ * (the `git config --get remote.origin.url` call returns non-zero).
+ */
+function buildWithBranchAndRemote(
+	branchName: string,
+	remoteUrl: string | null,
+) {
+	const host = makeTrackedHost({
+		exec: async (cmd, args): Promise<PiExecResult> => {
+			if (
+				cmd === "git" &&
+				args[0] === "branch" &&
+				args[1] === "--show-current"
+			) {
+				return {
+					stdout: `${branchName}\n`,
+					stderr: "",
+					code: 0,
+					killed: false,
+				};
+			}
+			if (
+				cmd === "git" &&
+				args[0] === "config" &&
+				args[1] === "--get" &&
+				args[2] === "remote.origin.url" &&
+				remoteUrl !== null
+			) {
+				return {
+					stdout: `${remoteUrl}\n`,
+					stderr: "",
+					code: 0,
+					killed: false,
+				};
+			}
+			return { stdout: "", stderr: "", code: 1, killed: false };
+		},
+	});
+	const resolved = resolvePlugins([gitPlugin], {});
+	const evaluator = buildEvaluator({}, resolved, host);
+	return { evaluator, host };
+}
+
+// ---------------------------------------------------------------------------
+// no-main-commit-github
+//
+// Specialization of `no-main-commit` that emits PR-flow guidance on
+// github.com clones. The shared `GIT_COMMIT_PATTERN` constant +
+// first-match-wins ordering in the rule array are LOAD-BEARING — these
+// tests pin the routing so a future maintainer reordering for stylistic
+// reasons trips the suite rather than silently regressing the user-
+// facing message.
+// ---------------------------------------------------------------------------
+
+describe("rules: no-main-commit-github", () => {
+	it("github clone + on main → fires github rule with PR-flow guidance + safety reminder", async () => {
+		const { evaluator } = buildWithBranchAndRemote(
+			"main",
+			"https://github.com/cad0p/repo.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(res && res.block === true);
+		assert.match(
+			res.reason!,
+			/\[steering:no-main-commit-github@[^\]]+\]/,
+			"github-flavored rule must fire (with the steering tag)",
+		);
+		assert.match(
+			res.reason!,
+			/github clone's main branch/,
+			"reason must include the github-specific anchor",
+		);
+		assert.match(
+			res.reason!,
+			/Open a PR for review/,
+			"reason must include the PR-flow guidance",
+		);
+		assert.match(
+			res.reason!,
+			/NEVER merge a PR or mark it ready-for-review/,
+			"reason must include the safety reminder",
+		);
+	});
+
+	it("non-github remote + on main → falls through to generic no-main-commit", async () => {
+		const { evaluator } = buildWithBranchAndRemote(
+			"main",
+			"git@gitfarm.amazon.com:Foo/Bar.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(res && res.block === true);
+		assert.match(
+			res.reason!,
+			/\[steering:no-main-commit@[^\]]+\]/,
+			"generic no-main-commit must fire on non-github remotes",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/no-main-commit-github@/,
+			"github-flavored rule must NOT fire on non-github remotes",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/github clone's main branch/,
+			"reason must not claim github-specific context on non-github remotes",
+		);
+	});
+
+	it("github clone + on feature branch → does not fire", async () => {
+		const { evaluator } = buildWithBranchAndRemote(
+			"feat-x",
+			"https://github.com/cad0p/repo.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(res, undefined);
+	});
+
+	it("non-commit verb (`git push`) on main → does not fire (pattern doesn't match)", async () => {
+		const { evaluator } = buildWithBranchAndRemote(
+			"main",
+			"https://github.com/cad0p/repo.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git push origin main"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"shared GIT_COMMIT_PATTERN constant must only match `git commit` (not `git push`)",
+		);
+	});
+
+	it("`disabledRules: ['no-main-commit-github']` → does not fire", async () => {
+		// Mirrors the disable pattern documented in the gitPlugin
+		// README's Customization section. With the github rule disabled,
+		// the engine still has the generic `no-main-commit` available
+		// (which DOES fire on github clones because its `when:` is just
+		// branch-based) — to exercise the github-specific disable in
+		// isolation, also disable the generic one.
+		const host = makeTrackedHost({
+			exec: async (cmd, args): Promise<PiExecResult> => {
+				if (
+					cmd === "git" &&
+					args[0] === "branch" &&
+					args[1] === "--show-current"
+				) {
+					return {
+						stdout: "main\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				if (
+					cmd === "git" &&
+					args[0] === "config" &&
+					args[1] === "--get" &&
+					args[2] === "remote.origin.url"
+				) {
+					return {
+						stdout: "https://github.com/cad0p/repo.git\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				return { stdout: "", stderr: "", code: 1, killed: false };
+			},
+		});
+		const resolved = resolvePlugins([gitPlugin], {
+			disabledRules: ["no-main-commit-github", "no-main-commit"],
+		});
+		const evaluator = buildEvaluator({}, resolved, host);
+		const res = await evaluator.evaluate(
+			bashEvent("git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"both rules disabled: no commit-on-main rule should fire",
+		);
+	});
+
+	it("shares the GIT_COMMIT_PATTERN constant with no-main-commit (Object.is)", () => {
+		// Pattern-equality pin: the two rules MUST reference the same
+		// underlying string constant so a regex change to one is
+		// physically forced onto the other. Reverting the shared-constant
+		// factoring (e.g. inlining one rule's pattern as a copy of the
+		// other's) trips this assertion.
+		assert.ok(
+			Object.is(noMainCommit.pattern, noMainCommitGithub.pattern),
+			"noMainCommit.pattern and noMainCommitGithub.pattern must reference the same shared constant",
+		);
+	});
+
+	it("first-match-wins ordering: github rule appears BEFORE no-main-commit in the plugin's rule array", () => {
+		// Load-bearing ordering. On a github clone + on main, BOTH rules'
+		// `when:` clauses match — first-match-wins routes the github-
+		// flavored guidance to github users. Reordering for stylistic
+		// reasons (alphabetical, etc.) silently regresses user-facing
+		// behavior; this assertion makes that regression visible.
+		const rules = gitPlugin.rules ?? [];
+		const githubIdx = rules.findIndex(
+			(r) => r.name === "no-main-commit-github",
+		);
+		const genericIdx = rules.findIndex(
+			(r) => r.name === "no-main-commit",
+		);
+		assert.notEqual(githubIdx, -1, "no-main-commit-github must be registered");
+		assert.notEqual(genericIdx, -1, "no-main-commit must be registered");
+		assert.ok(
+			githubIdx < genericIdx,
+			`expected no-main-commit-github (idx ${githubIdx}) BEFORE no-main-commit (idx ${genericIdx})`,
 		);
 	});
 });

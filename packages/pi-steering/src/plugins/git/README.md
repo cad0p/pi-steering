@@ -16,7 +16,7 @@ the core steering engine.
 | Surface | Names | Purpose |
 |---|---|---|
 | Predicates | `branch`, `upstream`, `commitsAhead`, `hasStagedChanges`, `isClean`, `remote` | New `when.<key>` slots for rules |
-| Rules | `no-main-commit` | Block direct commits to protected branches |
+| Rules | `no-main-commit`, `no-main-commit-github` | Block direct commits to protected branches; the `-github` variant emits PR-flow guidance on github.com clones |
 | Trackers | `branch` | Walker-threaded branch state (`git checkout X` advances) |
 | Tracker extensions | `cwd.git` | `--git-dir=` / `--work-tree=` flag parsing on top of the built-in cwd tracker |
 
@@ -188,6 +188,119 @@ Overridable via `# steering-override: no-main-commit — <reason>` on
 the bash command. Catches `git -C /path commit`, `sh -c 'git
 commit'`, and — thanks to the branch tracker — `git checkout main
 && git commit`.
+
+The pattern is shared with `no-main-commit-github` via a module-
+private `GIT_COMMIT_PATTERN` constant in `rules.ts`, so a regex
+change to one rule is physically forced onto the other (a unit test
+pins `Object.is(noMainCommit.pattern, noMainCommitGithub.pattern)`).
+
+### `no-main-commit-github`
+
+Specialization of `no-main-commit` for github.com clones. Same
+pattern + protected-branch list, plus a `remote: /github\.com[/:]/`
+clause; the reason text emits PR-flow guidance (`gh pr merge`)
+instead of the generic feature-branch reminder, plus a safety
+reminder against unsolicited PR merges or ready-for-review flips.
+
+```ts
+{
+  name: "no-main-commit-github",
+  tool: "bash",
+  field: "command",
+  pattern: GIT_COMMIT_PATTERN, // shared with no-main-commit
+  when: {
+    branch: /^(main|master|mainline|trunk)$/,
+    remote: /github\.com[/:]/,
+  },
+  reason: (ctx) => /* multi-paragraph PR-flow + safety guidance */,
+  noOverride: false,
+}
+```
+
+**First-match-wins ordering is load-bearing.** `no-main-commit-
+github` is registered BEFORE `no-main-commit` in the plugin's rule
+array. On a github clone + on main, both rules' `when:` clauses
+match — first-match-wins routes the github-flavored guidance to
+github users. On non-github contexts (Brazil packages, vault paths,
+/tmp scratch repos with non-github remotes) the github rule's
+`remote:` predicate doesn't match → the engine falls through to the
+generic `no-main-commit`. A unit test pins this position so
+reordering for stylistic reasons trips the suite.
+
+Under walker-unknown cwd (`cd "$VAR" && git commit`), the rule
+still fires fail-closed — but the reason text switches to the
+standard `walkerUnknownCwdReason` message instead of claiming
+github-specific context the engine couldn't verify.
+
+## Customization
+
+Three escape valves of increasing scope, ordered most → least
+common:
+
+```ts
+// 1. Disable a single shipped rule:
+import { defineConfig } from "pi-steering";
+
+export default defineConfig({
+  disabledRules: ["no-main-commit-github"],
+});
+
+// 2. Disable + replace with a freshly-named user rule that adds
+//    your own customization (e.g. vault-path exemption for
+//    napkin-distill flows). The cwd array form (Pattern[]) lets you
+//    list multiple exempt directories; combine with `not:` to
+//    invert.
+import gitPlugin, { noMainCommitGithub } from "pi-steering/plugins/git";
+import type { Rule } from "pi-steering";
+
+const VAULT_DIRS = [/\/Goldmine\//, /\/\.cache\/napkin-distill\//];
+
+const noMainCommitGithubExceptVault = {
+  ...noMainCommitGithub,
+  // FRESH name — see warning below; reusing the original name has
+  // two failure modes, both bad.
+  name: "no-main-commit-github-except-vault",
+  when: {
+    ...noMainCommitGithub.when,
+    not: { cwd: VAULT_DIRS },
+  },
+} as const satisfies Rule;
+
+export default defineConfig({
+  disabledRules: ["no-main-commit-github"], // drop the default
+  rules: [noMainCommitGithubExceptVault],   // replacement on
+});
+
+// 3. Disable the entire git plugin (drops all gitPlugin
+//    predicates / rules / trackers / extensions):
+export default defineConfig({
+  disabledPlugins: ["git"],
+});
+```
+
+### ⚠️ Always use a fresh name when extending or replacing a plugin rule
+
+pi-steering composes user rules and plugin rules as
+`[...userRules, ...pluginRules]` with **no name dedup at the
+user/plugin layer.** Reusing the plugin rule's name in your config
+has two failure modes, **both bad**, depending on whether you also
+use `disabledRules`:
+
+1. **Same name + NO `disabledRules`** → BOTH rules are kept. The
+   plugin rule fires alongside your customized version, so paths
+   you intended to exempt still get the original message. The
+   customization silently fails to apply.
+
+2. **Same name + `disabledRules: ["original-name"]`** → the
+   `disabledRules` filter applies to ALL rules with that name
+   across both the user-config and plugin-rule sources. NEITHER
+   rule fires. Silent fail-OPEN — the worst outcome for a safety
+   rule, since the agent now has no guardrail at all.
+
+Use a fresh name (e.g., `no-main-commit-github-except-vault`).
+Pair it with `disabledRules: ["no-main-commit-github"]` so the
+original is dropped and your fresh-named replacement survives the
+disable filter.
 
 ## Authoring new plugins
 

@@ -84,7 +84,17 @@ function buildRuntime(
 	return { evaluator, host, resolved };
 }
 
-/** Stub exec that reports a given branch name for `git branch --show-current`. */
+/**
+ * Stub exec that reports a given branch name for `git branch
+ * --show-current`. Also stubs `git config --get remote.origin.url`
+ * to a non-github URL so the `noMainCommitGithub` specialization
+ * (more specific via `remote: /github\.com/`) cleanly falls through
+ * and tests in this scope exercise the generic `noMainCommit` rule.
+ *
+ * Tests that need to exercise the github-flavored rule (or its
+ * non-github fall-through) construct their own exec stub that
+ * additionally returns a github URL on the `git config` call.
+ */
 function branchExec(name: string) {
 	return async (cmd: string, args: string[]): Promise<PiExecResult> => {
 		if (
@@ -93,6 +103,19 @@ function branchExec(name: string) {
 			args[1] === "--show-current"
 		) {
 			return { stdout: `${name}\n`, stderr: "", code: 0, killed: false };
+		}
+		if (
+			cmd === "git" &&
+			args[0] === "config" &&
+			args[1] === "--get" &&
+			args[2] === "remote.origin.url"
+		) {
+			return {
+				stdout: "git@gitfarm.amazon.com:Foo/Bar.git\n",
+				stderr: "",
+				code: 0,
+				killed: false,
+			};
 		}
 		return { stdout: "", stderr: "", code: 1, killed: false };
 	};
@@ -384,6 +407,85 @@ describe("git plugin: walker-driven branch state (the KEY test)", () => {
 			).length,
 			0,
 			"walker-unknown short-circuits to onUnknown; predicate must not shell out",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 6. no-main-commit-github + walker-unknown cwd
+//
+// The github-flavored specialization's reason fn has a dedicated
+// walker-unknown branch — under `cd "$VAR" && git commit`, the engine
+// can't verify the user is actually in a github clone or on main, so
+// the reason switches to the standard `walkerUnknownCwdReason` text
+// instead of claiming github-specific context the engine couldn't
+// confirm. This test pins both sides: the rule still FIRES (fail-
+// closed via the `remote:` predicate's `requireKnownCwd` wrap) AND
+// the reason text doesn't claim verified github context.
+// ---------------------------------------------------------------------------
+
+describe("git plugin: no-main-commit-github walker-unknown cwd", () => {
+	it("`cd \"$VAR\" && git commit` on main + github remote → fires with walker-unknown reason", async () => {
+		// Explicit exec stubs are LOAD-BEARING here. Without them the
+		// `branch:` predicate (NOT `requireKnownCwd`-wrapped) execs at
+		// the test runner's actual cwd and the test outcome depends on
+		// whatever branch / remote that workspace happens to be on —
+		// flaky. Stub branch=main + remote=github so the firing path
+		// is deterministic regardless of the runner's git state.
+		const { evaluator } = buildRuntime(
+			{ plugins: [gitPlugin], rules: [] },
+			async (cmd: string, args: string[]): Promise<PiExecResult> => {
+				if (
+					cmd === "git" &&
+					args[0] === "branch" &&
+					args[1] === "--show-current"
+				) {
+					return {
+						stdout: "main\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				if (
+					cmd === "git" &&
+					args[0] === "config" &&
+					args[1] === "--get" &&
+					args[2] === "remote.origin.url"
+				) {
+					return {
+						stdout: "https://github.com/cad0p/repo.git\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				return { stdout: "", stderr: "", code: 1, killed: false };
+			},
+		);
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$VAR" && git commit -m \'x\''),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			res && res.block === true,
+			"walker-unknown cwd must fail-closed and fire no-main-commit-github",
+		);
+		assert.match(
+			res.reason!,
+			/\[steering:no-main-commit-github@[^\]]+\]/,
+			"github-flavored rule must fire (with the steering tag)",
+		);
+		assert.match(
+			res.reason!,
+			/current directory:/,
+			"reason must include the walkerUnknownCwdReason anchor",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/github clone's main branch/,
+			"reason must NOT claim github-specific context under walker-unknown",
 		);
 	});
 });

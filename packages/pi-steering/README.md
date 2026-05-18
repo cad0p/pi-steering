@@ -83,7 +83,7 @@ With this config:
 Two default bundles ship with the package and are layered onto every config automatically:
 
 - **`DEFAULT_RULES`** — `no-force-push`, `no-hard-reset`, `no-rm-rf-slash`, `no-long-running-commands`. Domain-agnostic safety rails. See [`src/defaults.ts`](./src/defaults.ts) for the exact patterns.
-- **`DEFAULT_PLUGINS`** — the [git plugin](./src/plugins/git/README.md). Contributes the `branch` / `upstream` / `commitsAhead` / `hasStagedChanges` / `isClean` / `remote` predicates, the `no-main-commit` rule (overridable per commit via `# steering-override: no-main-commit — <reason>`), the branch tracker (tool_call-scoped `git checkout` awareness), and the `cwd.git` tracker extension (`--git-dir=` / `--work-tree=` parsing).
+- **`DEFAULT_PLUGINS`** — the [git plugin](./src/plugins/git/README.md). Contributes the `branch` / `upstream` / `commitsAhead` / `hasStagedChanges` / `isClean` / `remote` predicates, the `no-main-commit` and `no-main-commit-github` rules (both overridable per commit via `# steering-override: <name> — <reason>`), the branch tracker (tool_call-scoped `git checkout` awareness), and the `cwd.git` tracker extension (`--git-dir=` / `--work-tree=` parsing). The github-flavored variant is a specialization that emits PR-flow guidance on github.com clones; non-github contexts fall through to the generic rule.
 
 Opt-out paths:
 
@@ -618,6 +618,8 @@ export default defineConfig({
 `as const satisfies Rule` preserves literal types so `defineConfig`'s cross-reference checks (on `happened.event`, `observer`, etc.) still run on the replacement. No need to restate `pattern` / `when` / `observer` / `onFire` — the spread carries them through.
 
 Changing more than the reason (tightening the pattern, scoping by cwd, swapping the observer) works the same way: spread the original, then override the fields you want to change.
+
+> **Always use a fresh `name` for the replacement.** Reusing the plugin rule's name has two failure modes — same name + no `disabledRules` keeps both rules (your customization silently fails to apply) and same name + `disabledRules` filters out both (silent fail-OPEN, the worst outcome for a safety rule). The git plugin's [Customization](./src/plugins/git/README.md#customization) section walks through a worked example with the vault-exemption pattern + the array-form `cwd:` predicate.
 
 ## Walker extensibility
 

@@ -31,6 +31,7 @@ import {
 	GIT_COMMIT_PATTERN,
 	noMainCommit,
 	noMainCommitGithub,
+	PROTECTED_BRANCH_PATTERN,
 } from "./rules.ts";
 
 // ---------------------------------------------------------------------------
@@ -950,6 +951,38 @@ describe("rules: no-main-commit-github", () => {
 			noMainCommitGithub.pattern,
 			GIT_COMMIT_PATTERN,
 			"noMainCommitGithub.pattern must equal the exported GIT_COMMIT_PATTERN constant",
+		);
+	});
+
+	it("both rules' branch fields share-reference the exported PROTECTED_BRANCH_PATTERN constant", () => {
+		// Shared-reference pin (`===` on the RegExp object), STRICTLY
+		// stronger than the byte-equality pin above for `pattern`. The
+		// protected-branch list is a `RegExp` (object) constant rather
+		// than a string source, so identity comparison is meaningful:
+		// any future maintainer who inlines `/^(main|master|mainline|trunk)$/`
+		// at a rule's definition site — even with byte-identical contents
+		// — trips this assertion because the inlined literal compiles to
+		// a fresh `RegExp` instance. That catches the failure mode the
+		// `GIT_COMMIT_PATTERN` value-equality pin cannot: silent
+		// re-inlining that re-introduces the duplication this constant
+		// was extracted to eliminate.
+		//
+		// Without the shared constant, the protected-branch list could
+		// drift between the two rules (one rule adds a vendor-specific
+		// default-branch alias, the other doesn't); pinning shared-
+		// reference forces both rules to pick up the alias from a single
+		// edit site.
+		assert.strictEqual(
+			noMainCommit.when.branch,
+			PROTECTED_BRANCH_PATTERN,
+			"noMainCommit.when.branch must reference the exported PROTECTED_BRANCH_PATTERN constant",
+		);
+		// `noMainCommitGithub.when` is the object form (with `remote:`);
+		// the `branch:` field still points directly at the regex.
+		assert.strictEqual(
+			noMainCommitGithub.when.branch,
+			PROTECTED_BRANCH_PATTERN,
+			"noMainCommitGithub.when.branch must reference the exported PROTECTED_BRANCH_PATTERN constant",
 		);
 	});
 

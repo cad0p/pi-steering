@@ -190,8 +190,8 @@ Blocks direct commits to protected branches (`main`, `master`,
   name: "no-main-commit",
   tool: "bash",
   field: "command",
-  pattern: "^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+commit\\b",
-  when: { branch: /^(main|master|mainline|trunk)$/ },
+  pattern: GIT_COMMIT_PATTERN,
+  when: { branch: PROTECTED_BRANCH_PATTERN },
   reason: "Don't commit directly to a protected branch...",
   noOverride: false,
 }
@@ -208,6 +208,16 @@ from `pi-steering/plugins/git`), so a regex change to one rule is
 physically forced onto the other (a unit test pins each rule's
 `pattern` field against the constant by value).
 
+The protected-branch list is likewise shared via the exported
+`PROTECTED_BRANCH_PATTERN` constant (also re-exported from
+`pi-steering/plugins/git`). Because it's a `RegExp` (object)
+constant rather than a string source, the pinning test uses
+shared-reference identity (`when.branch === PROTECTED_BRANCH_PATTERN`),
+which also catches future re-inlining of the same bytes — a stricter
+guarantee than the byte-equality pin on `pattern`. Adding a
+vendor-specific default-branch alias is a one-line edit at the
+constant; both rules pick it up.
+
 ### `no-main-commit-github`
 
 Specialization of `no-main-commit` for github.com clones. Same
@@ -223,7 +233,7 @@ reminder against unsolicited PR merges or ready-for-review flips.
   field: "command",
   pattern: GIT_COMMIT_PATTERN, // shared with no-main-commit
   when: {
-    branch: /^(main|master|mainline|trunk)$/,
+    branch: PROTECTED_BRANCH_PATTERN, // shared with no-main-commit
     remote: /github\.com[/:]/,
   },
   reason: (ctx) => /* multi-paragraph PR-flow + safety guidance */,

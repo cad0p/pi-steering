@@ -45,6 +45,10 @@
  *   - `GIT_COMMIT_PATTERN`              — shared `git commit` regex
  *                                          source used by both
  *                                          commit-on-main rules
+ *   - `PROTECTED_BRANCH_PATTERN`         — shared protected-branch
+ *                                          regex (main / master /
+ *                                          mainline / trunk) used by
+ *                                          both commit-on-main rules
  *
  * See `./git-ops.ts` for the helper contract (all collapse failure
  * modes to `null`; caller decides what to do with it).
@@ -137,4 +141,4 @@ export {
 	type CommitsAheadArgs,
 	type WalkerStringResult,
 } from "./predicates.ts";
-export { rules, noMainCommit, noMainCommitGithub, GIT_COMMIT_PATTERN } from "./rules.ts";
+export { rules, noMainCommit, noMainCommitGithub, GIT_COMMIT_PATTERN, PROTECTED_BRANCH_PATTERN } from "./rules.ts";

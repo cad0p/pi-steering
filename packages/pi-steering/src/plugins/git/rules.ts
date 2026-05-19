@@ -52,6 +52,23 @@ export const GIT_COMMIT_PATTERN =
 	"^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+commit\\b";
 
 /**
+ * Protected branch names that the gitPlugin's commit-on-main rules
+ * block by default (`main`, `master`, `mainline`, `trunk`). Shared by
+ * `no-main-commit` and `no-main-commit-github` so the protected-
+ * branch list stays uniform across the rule family — adding an alias
+ * here (e.g. a vendor-specific default-branch name) automatically
+ * propagates to both rules.
+ *
+ * `RegExp` (object) constant rather than a string source: that gives
+ * true shared-reference pinning at the test layer
+ * (`noMainCommit.when.branch === PROTECTED_BRANCH_PATTERN`), which
+ * also catches a future inline of the SAME bytes at a rule's
+ * definition site — something the string-source `GIT_COMMIT_PATTERN`
+ * pin can't do (see its JSDoc for the value-vs-reference tradeoff).
+ */
+export const PROTECTED_BRANCH_PATTERN = /^(main|master|mainline|trunk)$/;
+
+/**
  * `no-main-commit` - block direct commits to a protected branch
  * (main / master / mainline / trunk).
  *
@@ -106,7 +123,7 @@ export const noMainCommit = {
 	tool: "bash",
 	field: "command",
 	pattern: GIT_COMMIT_PATTERN,
-	when: { branch: /^(main|master|mainline|trunk)$/ },
+	when: { branch: PROTECTED_BRANCH_PATTERN },
 	reason: (ctx) => {
 		// Delegate the sentinel classification to `walkerString` — the
 		// same three-way discrimination (value / unknown / missing)
@@ -201,7 +218,7 @@ export const noMainCommitGithub = {
 	field: "command",
 	pattern: GIT_COMMIT_PATTERN,
 	when: {
-		branch: /^(main|master|mainline|trunk)$/,
+		branch: PROTECTED_BRANCH_PATTERN,
 		// `onUnknown: "allow"` posture: a github-specialized rule
 		// should only fire when github context is confirmed. Governs
 		// the known-cwd no-`origin` case (fresh-init repo, repo with

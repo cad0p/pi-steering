@@ -815,6 +815,148 @@ describe("buildEvaluator: when.cwd array form", () => {
 		assert.equal((arr as { block: boolean }).block, true);
 		assert.equal((single as { block: boolean }).block, true);
 	});
+
+	it("object form with mixed-type array under known cwd — rule skips (no silent throw)", async () => {
+		// Without the object-shape early-return, the trailing fallback
+		// would call `matchesPattern(obj, walkerCwd)` and throw on
+		// `String(obj)` regex coercion under known cwd. Pin uniformly
+		// with the array-shorthand fail-skip path so a typo in the
+		// object form behaves the same as a typo in the shorthand form.
+		const rule: Rule = {
+			name: "obj-mixed",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "obj mixed",
+			when: {
+				cwd: {
+					pattern: [/\/work\//, 123] as unknown as RegExp[],
+				},
+			},
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work/proj"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"object form with mixed-type array — rule skips (no silent throw)",
+		);
+	});
+
+	it("object form with malformed scalar pattern under known cwd — rule skips (no silent throw)", async () => {
+		// Same rationale as the mixed-array case: the trailing fallback
+		// would attempt `matchesPattern({pattern: 123}, walkerCwd)` and
+		// throw. The object-shape early-return fail-skips uniformly.
+		const rule: Rule = {
+			name: "obj-bad-scalar",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "obj bad scalar",
+			when: {
+				cwd: { pattern: 123 as unknown as RegExp },
+			},
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work/proj"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"object form with malformed scalar — rule skips (no silent throw)",
+		);
+	});
+
+	it("object form with mixed-type array under unknown cwd — rule skips (uniform with shorthand)", async () => {
+		// Without the object-shape early-return, the unknown-cwd branch
+		// at the bottom of evaluateCwd would fire fail-closed (return
+		// `true`) on this malformed object — asymmetric with the
+		// shorthand-array malformed path that fail-skips uniformly. Pin
+		// the symmetric uniform-fail-skip behavior.
+		const rule: Rule = {
+			name: "obj-mixed-unknown",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "obj mixed unknown",
+			when: {
+				cwd: {
+					pattern: [/\/work\//, 123] as unknown as RegExp[],
+				},
+			},
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$UNDEF" && rm foo'),
+			makeCtx("/start"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"object form with mixed-type array under unknown cwd — rule skips uniformly",
+		);
+	});
+
+	it("empty array under unknown cwd — rule skips (documented asymmetry with malformed scalar)", async () => {
+		// Documented asymmetry: empty array is invalid → skips even under
+		// unknown cwd (the `length === 0` early-return runs before the
+		// unknown-cwd check); malformed scalar (e.g. `cwd: 123`) is
+		// treated as fail-closed shorthand attempt → fires under unknown.
+		// Pin both fail-modes so a future refactor that collapses the
+		// two has to acknowledge it.
+		const rule: Rule = {
+			name: "empty-arr-unknown",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "empty arr unknown",
+			when: { cwd: [] as RegExp[] },
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$UNDEF" && rm foo'),
+			makeCtx("/start"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"empty array invalid — rule skips even under unknown cwd",
+		);
+	});
+
+	it("malformed scalar under unknown cwd — rule fires (asymmetry pin)", async () => {
+		// Counterfactual to the empty-array case above. Pinning the
+		// pre-extension fail-closed shorthand-attempt behavior so a
+		// refactor that wires a uniform fail-skip into the bottom
+		// fallback would trip this test.
+		const rule: Rule = {
+			name: "bad-scalar-unknown",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "bad scalar unknown",
+			when: { cwd: 123 as unknown as RegExp },
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$UNDEF" && rm foo'),
+			makeCtx("/start"),
+			0,
+		);
+		assert.ok(
+			res,
+			"malformed scalar under unknown cwd — rule fires (fail-closed shorthand attempt)",
+		);
+	});
 });
 
 describe("buildEvaluator: when.happened", () => {

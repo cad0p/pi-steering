@@ -188,6 +188,15 @@ function evaluateCwd(
 	// (fail-OPEN under known cwd) or firing under unknown cwd. Asymmetric
 	// with the gitPlugin sites' clean null-→-skip path; pin uniformly.
 	if (Array.isArray(value)) return false;
+	// Object that fell out of the object-form branch (e.g.
+	// `{ pattern: [/foo/, 123] }` or `{ pattern: 123 }`) — fail-skip
+	// uniformly with the array-shorthand and the gitPlugin sites'
+	// null-→-skip path. Without this guard, the trailing
+	// `matchesPattern(value as Pattern, walkerCwd)` throws on a
+	// regex/string call against an object value under known cwd, and
+	// the unknown-cwd branch fires fail-closed — asymmetric with the
+	// shorthand-array malformed path that fail-skips uniformly.
+	if (value !== null && typeof value === "object") return false;
 	// Malformed non-array input — treat as fail-closed shorthand attempt
 	// (preserves existing pre-extension behavior for non-array malformed
 	// values: under unknown cwd, fire; under known cwd, attempt a regex

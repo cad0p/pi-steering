@@ -103,7 +103,7 @@ export default gitPlugin;
 // Named re-exports for consumers that want to pick pieces (e.g. a
 // test harness constructing a minimal config that uses only the
 // `branch` predicate without the shipped rule).
-export { branchTracker } from "./branch-tracker.ts";
+export { branchTracker, NO_CHECKOUT_IN_CHAIN } from "./branch-tracker.ts";
 export { gitCwdExtensions } from "./cwd-extensions.ts";
 export {
 	getBranch,
@@ -121,6 +121,8 @@ export {
 	isClean,
 	remote,
 	predicates,
+	walkerString,
 	type CommitsAheadArgs,
+	type WalkerStringResult,
 } from "./predicates.ts";
 export { rules, noMainCommit, noMainCommitGithub } from "./rules.ts";

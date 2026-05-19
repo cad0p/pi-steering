@@ -207,7 +207,7 @@ async function tryExec(
  * predicate then behaves as it did pre-U1, shelling out on any
  * unknown).
  */
-type WalkerStringResult =
+export type WalkerStringResult =
 	| { kind: "value"; value: string }
 	| { kind: "unknown" }
 	| { kind: "missing" };

@@ -462,9 +462,16 @@ function effectiveNoOverride(rule: Rule, defaultNoOverride: boolean): boolean {
  * visually from the source-tag prefix. Single-paragraph bodies keep
  * the legacy single-space layout (`${tag} ${body}`) — backward-
  * compatible for every reason that was single-paragraph before the
- * paragraph-aware rendering shipped. Trigger is exactly `\n\n`; a
- * single `\n` inside an otherwise single-paragraph body keeps the
- * single-space layout. Mirror docs on {@link Rule.reason}.
+ * paragraph-aware rendering shipped. Trigger is `\n\n` or its CRLF
+ * equivalent `\r\n\r\n` (defensive against bodies imported from
+ * Windows line-ending sources — CRLF templating layers, hand-typed
+ * Windows-IDE strings); a single `\n` inside an otherwise single-
+ * paragraph body keeps the single-space layout. The emitted
+ * separator is always normalized to `\n\n` regardless of which form
+ * triggered it. The override hint (when present) mirrors the same
+ * paragraph-aware separator so a multi-paragraph body's safety
+ * paragraph stays visually standalone from the override-hint
+ * sentence rather than running on. Mirror docs on {@link Rule.reason}.
  */
 async function formatReason(
 	rule: Rule,
@@ -477,13 +484,15 @@ async function formatReason(
 	const body = await resolveReasonBody(rule, source, ctx);
 	// Paragraph-aware tag separator — see function-level JSDoc for the
 	// contract; this line implements the trigger detection.
-	const separator = body.includes("\n\n") ? "\n\n" : " ";
+	const multiPara =
+		body.includes("\n\n") || body.includes("\r\n\r\n");
+	const separator = multiPara ? "\n\n" : " ";
 	if (noOverride) return `${tag}${separator}${body}`;
 	const leader = tool === "bash" ? "#" : "//";
 	const hint =
-		` To override, include a comment: ` +
+		`To override, include a comment: ` +
 		`\`${leader} steering-override: ${rule.name} — <reason>\`.`;
-	return `${tag}${separator}${body}${hint}`;
+	return `${tag}${separator}${body}${separator}${hint}`;
 }
 
 /**

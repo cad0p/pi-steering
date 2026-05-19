@@ -403,7 +403,7 @@ describe("rules: no-main-commit-github", () => {
 	it("non-github remote + on main → falls through to generic no-main-commit", async () => {
 		const { evaluator } = buildWithBranchAndRemote(
 			"main",
-			"git@gitfarm.amazon.com:Foo/Bar.git",
+			"git@self-hosted.example.com:Foo/Bar.git",
 		);
 		const res = await evaluator.evaluate(
 			bashEvent("git commit -m 'x'"),

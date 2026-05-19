@@ -1087,7 +1087,7 @@ describe("predicate: remote (array form)", () => {
 				{
 					match: (cmd, args) =>
 						cmd === "git" && args[0] === "config" && args[1] === "--get",
-					result: execOk("git@gitfarm.amazon.com:Foo/Bar.git\n"),
+					result: execOk("git@self-hosted.example.com:Foo/Bar.git\n"),
 				},
 			],
 			{ walkerState: { cwd: "/repo" } },

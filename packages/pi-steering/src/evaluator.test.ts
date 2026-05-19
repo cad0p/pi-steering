@@ -3245,9 +3245,11 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
 		);
 	});
 
-	it("appends override hint after multi-paragraph body when rule is overridable", async () => {
-		// Override hint stays single-space-prefixed regardless of body's
-		// paragraph structure. Pin via overridable rule + multi-paragraph body.
+	it("appends override hint after multi-paragraph body as its own paragraph when rule is overridable", async () => {
+		// Override hint mirrors the body's paragraph structure: multi-
+		// paragraph bodies get the hint as a standalone paragraph (`\n\n`
+		// separator), so the safety paragraph stays visually standalone
+		// rather than running on with the override sentence.
 		const rule: Rule = {
 			name: "multi-para-overridable",
 			tool: "bash",
@@ -3272,7 +3274,38 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
 			reason,
 			/^\[steering:multi-para-overridable@user\]\n\nfirst\.\n\nsecond\./,
 		);
-		assert.match(reason, / To override, include a comment: /);
+		assert.match(reason, /\n\nTo override, include a comment: /);
+	});
+
+	it("renders CRLF multi-paragraph body (`\\r\\n\\r\\n`) with `\\n\\n` separator (defensive against Windows line endings)", async () => {
+		// Body imported from a CRLF source (Windows line endings, CRLF
+		// templating layer, hand-typed Windows-IDE string) should render
+		// the same way as `\n\n`-encoded multi-paragraph bodies. Cheap
+		// defensive trigger extension; emitted separator is normalized
+		// to `\n\n` regardless of which form triggered it.
+		const rule: Rule = {
+			name: "crlf-multi-para",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "first paragraph.\r\n\r\nsecond paragraph.",
+			noOverride: true,
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent("rm foo"),
+			makeCtx("/work"),
+			0,
+		);
+		assert.ok(res);
+		const reason = (res as { reason: string }).reason;
+		// Tag promoted to its own line (the `\n\n` separator) even though
+		// the body's paragraph break is CRLF-encoded. Body content stays
+		// CRLF-encoded; only the tag separator is normalized.
+		assert.match(
+			reason,
+			/^\[steering:crlf-multi-para@user\]\n\nfirst paragraph\.\r\n\r\nsecond paragraph\./,
+		);
 	});
 });
 

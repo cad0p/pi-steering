@@ -564,7 +564,7 @@ export const branch = definePredicate<BranchArgs>(async (args, ctx) => {
 
 Production plugins in this repo:
 
-- [`src/plugins/git`](./src/plugins/git) — the canonical plugin reference for trackers + tracker extensions. Ships `branch` / `upstream` / `commitsAhead` predicates, a `branchTracker`, a `--git-dir` / `--work-tree` cwd extension, and the `no-main-commit` rule.
+- [`src/plugins/git`](./src/plugins/git) — the canonical plugin reference for trackers + tracker extensions. Ships `branch` / `upstream` / `commitsAhead` predicates, a `branchTracker`, a `--git-dir` / `--work-tree` cwd extension, and the `no-main-commit` + `no-main-commit-github` rules.
 - [`pi-steering-flags`](../pi-steering-flags) — a sibling package in this monorepo; first official external plugin, establishing the precedent for community plugins. Ships `requiresFlag` / `allowlistedFlagsOnly` predicates and helper primitives.
 - [`pi-steering-commit-format`](../pi-steering-commit-format) — a sibling package in this monorepo. Ships the `commitFormat` predicate plus a `commitFormatFactory` for composing custom format checkers; bundled formats include Conventional Commits 1.0.0 (Angular preset type allowlist) and bracketed JIRA-style references.
 

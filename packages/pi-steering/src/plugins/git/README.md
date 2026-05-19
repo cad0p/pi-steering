@@ -46,6 +46,7 @@ Explicit import still works (e.g. in tests driving `loadHarness`
 with `includeDefaults: false`):
 
 ```ts
+import { defineConfig } from "pi-steering";
 import gitPlugin from "pi-steering/plugins/git";
 
 export default defineConfig({
@@ -59,6 +60,8 @@ export default defineConfig({
 Keep the predicates + tracker, drop the shipped rule:
 
 ```ts
+import { defineConfig } from "pi-steering";
+
 export default defineConfig({
   disabledRules: ["no-main-commit"],
 });
@@ -68,6 +71,8 @@ Drop the whole git plugin (no `branch` / `upstream` / ... predicates,
 no tracker, no cwd extensions, no rule):
 
 ```ts
+import { defineConfig } from "pi-steering";
+
 export default defineConfig({
   disabledPlugins: ["git"],
 });
@@ -77,6 +82,8 @@ Drop EVERYTHING shipped — both `DEFAULT_RULES` and
 `DEFAULT_PLUGINS`:
 
 ```ts
+import { defineConfig } from "pi-steering";
+
 export default defineConfig({
   disableDefaults: true,
 });
@@ -189,10 +196,11 @@ the bash command. Catches `git -C /path commit`, `sh -c 'git
 commit'`, and — thanks to the branch tracker — `git checkout main
 && git commit`.
 
-The pattern is shared with `no-main-commit-github` via a module-
-private `GIT_COMMIT_PATTERN` constant in `rules.ts`, so a regex
-change to one rule is physically forced onto the other (a unit test
-pins `Object.is(noMainCommit.pattern, noMainCommitGithub.pattern)`).
+The pattern is shared with `no-main-commit-github` via the
+exported `GIT_COMMIT_PATTERN` constant in `rules.ts` (re-exported
+from `pi-steering/plugins/git`), so a regex change to one rule is
+physically forced onto the other (a unit test pins each rule's
+`pattern` field against the constant by value).
 
 ### `no-main-commit-github`
 
@@ -262,7 +270,8 @@ export default defineConfig({
 //    `tool`, `field`, and `noOverride` — only override the field
 //    you actually want to change. No `when:` changes → no
 //    walker-unknown-cwd interactions to reason about.
-import gitPlugin, { noMainCommitGithub } from "pi-steering/plugins/git";
+import { defineConfig } from "pi-steering";
+import { noMainCommitGithub } from "pi-steering/plugins/git";
 import type { Rule } from "pi-steering";
 
 const myNoMainCommitGithub = {
@@ -288,6 +297,8 @@ export default defineConfig({
 ```ts
 // 3. Disable the entire git plugin (drops all gitPlugin
 //    predicates / rules / trackers / extensions):
+import { defineConfig } from "pi-steering";
+
 export default defineConfig({
   disabledPlugins: ["git"],
 });
@@ -346,7 +357,8 @@ branch by design). Cwd-based exemptions need care because:
 Worked example:
 
 ```ts
-import gitPlugin, { noMainCommit } from "pi-steering/plugins/git";
+import { defineConfig } from "pi-steering";
+import { noMainCommit } from "pi-steering/plugins/git";
 import type { Pattern, Rule } from "pi-steering";
 
 const VAULT_DIRS: Pattern[] = [
@@ -400,3 +412,36 @@ file layout separates concerns:
 Each file has its own test suite; `integration.test.ts` pins end-to-
 end wiring through `resolvePlugins` and `buildEvaluator`. Copy-adapt
 this layout for your own plugin.
+
+### Composable building blocks
+
+Several pieces are re-exported from `pi-steering/plugins/git` so
+downstream plugins can reuse the engine's walker conventions
+without reimplementing them:
+
+- `walkerString(value)` / `WalkerStringResult` — narrows an
+  `unknown` walker-tracker value into one of `{ kind: "value";
+  value }` | `{ kind: "unknown" }` | `{ kind: "absent" }`. The
+  three-way discrimination is what the `branch` / `upstream` /
+  `remote` predicates use to dispatch on tracker state without
+  string-comparison sentinel checks.
+- `NO_CHECKOUT_IN_CHAIN` — the branch tracker's fall-through
+  sentinel for chains where no in-chain `git checkout` /
+  `git switch` fired. Plugin authors who consume tracker state
+  directly can match this sentinel to know they need to fall back
+  to a shell-out (vs. `"unknown"`, where the tracker observed an
+  unresolvable checkout).
+- `GIT_COMMIT_PATTERN` — the bash-command regex source matching
+  `git commit` (with optional pre-subcommand flag slots). Reuse
+  in plugin rules that want to share applicability with the
+  shipped commit-on-main rules.
+
+Example import:
+
+```ts
+import {
+  walkerString,
+  NO_CHECKOUT_IN_CHAIN,
+  GIT_COMMIT_PATTERN,
+} from "pi-steering/plugins/git";
+```

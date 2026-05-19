@@ -416,13 +416,26 @@ export interface BaseRule<
 	 * the rule's guard or leak raw error text to the LLM.
 	 *
 	 * Tag→body separator is paragraph-aware: a body containing `\n\n`
-	 * renders with the `[steering:...]` tag on its own line followed by
-	 * a paragraph break (`\n\n`); otherwise the tag and body share a
-	 * single space-separated line. The trigger is double-newline
+	 * (or its CRLF equivalent `\r\n\r\n`, defensive against bodies
+	 * imported from Windows line-ending sources — CRLF templating
+	 * layers, hand-typed Windows-IDE strings) renders with the
+	 * `[steering:...]` tag on its own line followed by a paragraph
+	 * break (`\n\n`); otherwise the tag and body share a single
+	 * space-separated line. The trigger is double-newline
 	 * specifically — single `\n` characters inside an otherwise
-	 * single-paragraph body keep the single-space layout. Multi-paragraph
-	 * reasons get the prefix-on-its-own-line layout automatically without
-	 * the rule author managing leading whitespace.
+	 * single-paragraph body keep the single-space layout. The emitted
+	 * separator is always normalized to `\n\n` regardless of which
+	 * form (`\n\n` or `\r\n\r\n`) triggered it. Multi-paragraph
+	 * reasons get the prefix-on-its-own-line layout automatically
+	 * without the rule author managing leading whitespace.
+	 *
+	 * Body→override-hint separator mirrors the same paragraph-aware
+	 * rule. Single-paragraph bodies keep a single-space prefix on the
+	 * override hint (byte-identical to the pre-paragraph-aware
+	 * rendering); multi-paragraph bodies promote the override hint
+	 * to its own paragraph (`${body}\n\n${hint}`) so a safety
+	 * paragraph stays visually standalone rather than running on
+	 * into an inline "To override" sentence.
 	 */
 	reason: string | ReasonFn;
 

@@ -12,9 +12,13 @@
  *                             `hasStagedChanges`, `isClean`, `remote`.
  *                             See `./predicates.ts` for the arg
  *                             shapes each handler accepts.
- *   - `rules`              - `no-main-commit` (overridable). Users
- *                             disable via `disabledRules: ["no-main-commit"]`
- *                             or opt out of the whole plugin with
+ *   - `rules`              - `no-main-commit-github` (github-flavored,
+ *                             first-match-wins) + `no-main-commit`
+ *                             (generic fallback). Both overridable.
+ *                             Users disable via
+ *                             `disabledRules: ["no-main-commit"]` /
+ *                             `["no-main-commit-github"]` or opt out
+ *                             of the whole plugin with
  *                             `disabledPlugins: ["git"]`.
  *   - `trackers.branch`    - sequential `git checkout` / `git switch`
  *                             branch tracker. See `./branch-tracker.ts`.
@@ -33,6 +37,14 @@
  *   - `getStagedChanges(ctx, cwd?)`     — boolean or `null`
  *   - `getWorkingTreeClean(ctx, cwd?)`  — boolean or `null`
  *   - `getRemoteUrl(ctx, cwd?)`         — origin URL or `null`
+ *   - `walkerString(value)`             — walker-sentinel narrowing
+ *                                          helper for plugin-author
+ *                                          predicates
+ *   - `NO_CHECKOUT_IN_CHAIN`            — branch-tracker fall-through
+ *                                          sentinel
+ *   - `GIT_COMMIT_PATTERN`              — shared `git commit` regex
+ *                                          source used by both
+ *                                          commit-on-main rules
  *
  * See `./git-ops.ts` for the helper contract (all collapse failure
  * modes to `null`; caller decides what to do with it).
@@ -125,4 +137,4 @@ export {
 	type CommitsAheadArgs,
 	type WalkerStringResult,
 } from "./predicates.ts";
-export { rules, noMainCommit, noMainCommitGithub } from "./rules.ts";
+export { rules, noMainCommit, noMainCommitGithub, GIT_COMMIT_PATTERN } from "./rules.ts";

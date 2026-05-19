@@ -188,7 +188,7 @@ export const noMainCommit = {
  * asserting a specific protected branch the engine hasn't
  * confirmed.
  *
- * Pattern is shared with `noMainCommit` via the module-private
+ * Pattern is shared with `noMainCommit` via the exported
  * {@link GIT_COMMIT_PATTERN} constant so the two rules' bash-
  * command applicability stays byte-equal as the family evolves.
  *

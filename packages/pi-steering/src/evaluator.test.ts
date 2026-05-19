@@ -619,6 +619,64 @@ describe("buildEvaluator: when.cwd array form", () => {
 		assert.equal(res, undefined, "no array pattern matches — rule skips");
 	});
 
+	it("shorthand Pattern[] under walker-unknown cwd fires fail-closed (default onUnknown: 'block')", async () => {
+		// Bare-array shorthand (no `onUnknown` specified) inherits the
+		// same default `onUnknown: "block"` posture as the bare single-
+		// pattern shorthand. Without this contract, a refactor that wired
+		// the array-shorthand path to fall-through fail-skip would let
+		// `cd "$VAR" && rm foo` slip past a vault-scoped rule — silent
+		// fail-OPEN, which is exactly the safety regression `onUnknown:
+		// "block"` is the default for.
+		const rule: Rule = {
+			name: "vault-only-shorthand",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "vault paths",
+			when: { cwd: [/^\/work\//, /^\/Goldmine\//] },
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$UNDEF" && rm foo'),
+			makeCtx("/start"),
+			0,
+		);
+		assert.ok(
+			res,
+			"bare-array shorthand under walker-unknown cwd — fires fail-closed by default",
+		);
+	});
+
+	it("shorthand mixed-type array under walker-unknown cwd — rule skips uniformly", async () => {
+		// Cross-branch parity with the known-cwd mixed-type-array test:
+		// the explicit `Array.isArray return false` early-return runs
+		// BEFORE the unknown-cwd branch, so a malformed-array shorthand
+		// fail-skips uniformly across known and unknown cwd. Without this
+		// uniformity, a typo like `[/foo/, 123]` would behave one way
+		// under known cwd (skip) and another way under unknown cwd (fire
+		// fail-closed at the trailing fallback), masking config errors
+		// asymmetrically.
+		const rule: Rule = {
+			name: "mixed-arr-unknown",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "mixed arr unknown",
+			when: { cwd: [/\/foo\//, 123] as unknown as RegExp[] },
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$UNDEF" && rm foo'),
+			makeCtx("/start"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"shorthand mixed-type array under walker-unknown cwd — rule skips uniformly",
+		);
+	});
+
 	it("single-element array equivalent to single-pattern shorthand", async () => {
 		const rule: Rule = {
 			name: "single-elem",

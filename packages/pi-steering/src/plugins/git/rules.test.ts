@@ -432,6 +432,40 @@ describe("rules: no-main-commit-github", () => {
 		);
 	});
 
+	it("no origin configured + on main → falls through to generic no-main-commit", async () => {
+		// Pins the `onUnknown: "allow"` posture on the github rule's
+		// `remote:` predicate. With the default `onUnknown: "block"`, the
+		// github rule would fire fail-closed on a repo with no origin
+		// configured — emitting github-flavored PR-flow guidance and
+		// claiming a github clone the engine couldn't actually verify.
+		// `onUnknown: "allow"` makes the github rule cleanly skip on
+		// no-origin so the generic `noMainCommit` (which has no
+		// `remote:` clause) fires instead, with branch-only context the
+		// engine can confirm.
+		const { evaluator } = buildWithBranchAndRemote("main", null);
+		const res = await evaluator.evaluate(
+			bashEvent("git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(res && res.block === true);
+		assert.match(
+			res.reason!,
+			/\[steering:no-main-commit@[^\]]+\]/,
+			"generic no-main-commit must fire on no-origin repos",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/no-main-commit-github@/,
+			"github-flavored rule must NOT fire on no-origin repos",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/github clone's protected branch/,
+			"reason must not claim github-specific context on no-origin repos",
+		);
+	});
+
 	it("github clone + on feature branch → does not fire", async () => {
 		const { evaluator } = buildWithBranchAndRemote(
 			"feat-x",

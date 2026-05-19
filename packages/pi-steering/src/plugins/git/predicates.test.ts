@@ -1226,4 +1226,61 @@ describe("predicate: remote (array form)", () => {
 		);
 		assert.equal(execCalls.length, 0);
 	});
+
+	it("accepts mixed string + RegExp Pattern[]", async () => {
+		// Cross-predicate parity with branch + upstream's mixed-Pattern[]
+		// pins: the same `unwrapPatternArg` narrowing path runs at all
+		// three predicates' call sites. Mirroring the test on remote
+		// catches a regression that inlines a stricter (RegExp-only)
+		// narrow at one predicate without updating the others.
+		const { ctx } = makeCtx(
+			[
+				{
+					match: (cmd, args) =>
+						cmd === "git" && args[0] === "config" && args[1] === "--get",
+					result: execOk("https://github.com/cad0p/repo.git\n"),
+				},
+			],
+			{ walkerState: { cwd: "/repo" } },
+		);
+		assert.equal(
+			await remote(["github.com/", /gitlab\.com\//], ctx),
+			true,
+		);
+	});
+
+	it("empty array is invalid (rule skips)", async () => {
+		// Cross-predicate parity with branch + upstream: empty arrays are
+		// invalid uniformly across the three pattern-valued predicates,
+		// short-circuiting before the predicate shells out.
+		const { ctx, execCalls } = makeCtx([], {
+			walkerState: { cwd: "/repo" },
+		});
+		assert.equal(await remote([], ctx), false);
+		assert.equal(execCalls.length, 0);
+	});
+
+	it("object form with Pattern[] + default onUnknown blocks on no-origin", async () => {
+		// Cross-predicate parity with branch's object-form default-blocks
+		// pin and upstream's default-blocks-on-no-upstream pin: the
+		// default `onUnknown: "block"` posture must fire fail-closed when
+		// the predicate can't determine the remote value (no origin
+		// configured), regardless of pattern shape (single or array).
+		const { ctx } = makeCtx(
+			[
+				{
+					match: (cmd) => cmd === "git",
+					result: execFail(1),
+				},
+			],
+			{ walkerState: { cwd: "/repo" } },
+		);
+		assert.equal(
+			await remote(
+				{ pattern: [/github\.com\//, /gitlab\.com\//] },
+				ctx,
+			),
+			true,
+		);
+	});
 });

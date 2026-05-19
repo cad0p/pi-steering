@@ -1054,12 +1054,106 @@ describe("predicate: upstream (array form)", () => {
 		);
 	});
 
+	it("accepts mixed string + RegExp Pattern[]", async () => {
+		// Cross-predicate parity: branch's mixed-Pattern[] test pins
+		// the same `unwrapPatternArg` narrowing path; mirroring it on
+		// upstream catches a regression that inlines a stricter
+		// (RegExp-only) narrow at one predicate's call site without
+		// updating the others.
+		const { ctx } = makeCtx(
+			[
+				{
+					match: (cmd, args) =>
+						cmd === "git" && args[0] === "rev-parse",
+					result: execOk("origin/main\n"),
+				},
+			],
+			{ walkerState: { cwd: "/repo" } },
+		);
+		assert.equal(
+			await upstream(["^origin/main$", /^origin\/develop$/], ctx),
+			true,
+		);
+	});
+
 	it("empty array is invalid (rule skips)", async () => {
 		const { ctx, execCalls } = makeCtx([], {
 			walkerState: { cwd: "/repo" },
 		});
 		assert.equal(await upstream([], ctx), false);
 		assert.equal(execCalls.length, 0);
+	});
+
+	it("array with non-Pattern element is invalid (rule skips)", async () => {
+		// Cross-predicate parity with branch + remote: malformed array
+		// elements (non-string, non-RegExp) fail-skip uniformly via the
+		// shared `unwrapPatternArg` helper. Pinning at the upstream
+		// call site catches a regression that inlines the helper at one
+		// predicate and lets a typed-array malformed input fall through
+		// to a silent regex-coercion path.
+		const { ctx, execCalls } = makeCtx([], {
+			walkerState: { cwd: "/repo" },
+		});
+		assert.equal(
+			await upstream(
+				[/^origin\/main$/, 123 as unknown as string],
+				ctx,
+			),
+			false,
+		);
+		assert.equal(execCalls.length, 0);
+	});
+
+	it("object form with Pattern[] + onUnknown: 'allow' on no-upstream skips", async () => {
+		// No upstream configured (exec exits non-zero). With
+		// `onUnknown: "allow"`, the predicate skips regardless of the
+		// array shape — mirror of remote's no-origin pin and the
+		// branch object-form pin.
+		const { ctx } = makeCtx(
+			[
+				{
+					match: (cmd, args) =>
+						cmd === "git" && args[0] === "rev-parse",
+					result: execFail(128, "no upstream configured"),
+				},
+			],
+			{ walkerState: { cwd: "/repo" } },
+		);
+		assert.equal(
+			await upstream(
+				{
+					pattern: [/^origin\/main$/, /^origin\/develop$/],
+					onUnknown: "allow",
+				},
+				ctx,
+			),
+			false,
+		);
+	});
+
+	it("object form with Pattern[] + default onUnknown blocks on no-upstream", async () => {
+		// Cross-predicate parity with branch's object-form default-
+		// blocks pin: the default `onUnknown: "block"` posture must
+		// fire fail-closed when the predicate can't determine the
+		// upstream value (regardless of pattern shape — single or
+		// array).
+		const { ctx } = makeCtx(
+			[
+				{
+					match: (cmd, args) =>
+						cmd === "git" && args[0] === "rev-parse",
+					result: execFail(128, "no upstream configured"),
+				},
+			],
+			{ walkerState: { cwd: "/repo" } },
+		);
+		assert.equal(
+			await upstream(
+				{ pattern: [/^origin\/main$/, /^origin\/develop$/] },
+				ctx,
+			),
+			true,
+		);
 	});
 });
 

@@ -37,8 +37,15 @@ import { walkerString } from "./predicates.ts";
  * and `no-main-commit-github` so the family stays byte-equal as the
  * regex evolves; reorderings that touch one rule's pattern can't
  * silently drift from the other.
+ *
+ * Exported so tests can pin the rules' pattern fields against the
+ * exported reference (`noMainCommit.pattern === GIT_COMMIT_PATTERN`),
+ * which catches a future inlining of the literal at one rule's
+ * definition site that `Object.is` between the two rules' pattern
+ * fields would not (string primitives compare by value, so two byte-
+ * equal copy-pasted literals satisfy `Object.is`).
  */
-const GIT_COMMIT_PATTERN =
+export const GIT_COMMIT_PATTERN =
 	"^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+commit\\b";
 
 /**

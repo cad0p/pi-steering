@@ -27,7 +27,11 @@ import {
 import { buildEvaluator } from "../../evaluator.ts";
 import { resolvePlugins } from "../../plugin-merger.ts";
 import gitPlugin from "./index.ts";
-import { noMainCommit, noMainCommitGithub } from "./rules.ts";
+import {
+	GIT_COMMIT_PATTERN,
+	noMainCommit,
+	noMainCommitGithub,
+} from "./rules.ts";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -552,6 +556,161 @@ describe("rules: no-main-commit-github", () => {
 		);
 	});
 
+	it("`git checkout $VAR && git commit` on github clone → walker-unknown branch routes to the bespoke 'could not verify' message", async () => {
+		// Pins the walker-unknown-branch sibling early-return in the
+		// reason fn (parallel to the walker-unknown-cwd early-return).
+		// Setup: github remote stubbed + dynamic checkout target in the
+		// chain so the branch tracker collapses to its `"unknown"`
+		// sentinel under known cwd. The branch predicate's default
+		// `onUnknown: "block"` fires fail-closed; the reason fn detects
+		// `branchRes.kind === "unknown"` and emits the bespoke "could
+		// not verify the current branch" message rather than falling
+		// through to a positive claim about the protected branch.
+		//
+		// Counterfactual rationale: without the walker-unknown-branch
+		// sibling early-return, the reason fn would emit
+		// "You're on a github clone's protected branch" (the
+		// known-branch body) with the dynamic clause
+		// ` You are on '${branch}'.` either silently leaking the
+		// `"unknown"` sentinel or omitting itself — either way an
+		// unverified positive claim about a branch the engine hasn't
+		// confirmed. The agent then sees github-specific PR-flow
+		// guidance for a context the rule didn't actually verify.
+		const { evaluator } = buildWithBranchAndRemote(
+			"feature",
+			"https://github.com/cad0p/repo.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git checkout $VAR && git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(res && res.block === true);
+		assert.match(
+			res.reason!,
+			/\[steering:no-main-commit-github@[^\]]+\]/,
+			"github-flavored rule must fire on dynamic-checkout chain",
+		);
+		assert.match(
+			res.reason!,
+			/Could not verify the current branch/,
+			"reason must use the bespoke walker-unknown-branch message",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/You're on a github clone's protected branch/,
+			"reason must NOT make an unverified positive claim about the protected branch",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/You are on '/,
+			"reason must not include the dynamic branch-name clause when walker state is 'unknown'",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/'unknown'/,
+			"reason must not leak the walker `unknown` sentinel into the agent-facing message",
+		);
+		// Cross-phase: paragraph-aware separator preserves the safety
+		// reminder as its own paragraph on the walker-unknown-branch
+		// body too.
+		assert.match(
+			res.reason!,
+			/\n\nSafety: NEVER merge a PR/,
+			"safety reminder must remain a separate paragraph on the walker-unknown-branch body",
+		);
+	});
+
+	it("`git checkout main && git commit` on github clone → reason injects 'You are on main'", async () => {
+		// Mirror of `noMainCommit`'s dynamic-clause pin for the github
+		// specialization: when the branch tracker has resolved a
+		// concrete protected-branch name from an in-chain checkout, the
+		// reason fn injects the name into the body. Pins the
+		// `walkerString`-driven interpolation against a regression that
+		// hardcodes "main".
+		const { evaluator } = buildWithBranchAndRemote(
+			"feature",
+			"https://github.com/cad0p/repo.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git checkout main && git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(res && res.block === true);
+		assert.match(res.reason!, /\[steering:no-main-commit-github@[^\]]+\]/);
+		assert.match(
+			res.reason!,
+			/You are on 'main'/,
+			"reason must include the walker-resolved branch name",
+		);
+	});
+
+	it("`git checkout master && git commit` on github clone → injects the concrete protected branch name", async () => {
+		// Sibling pin to the `main` test: master / mainline / trunk all
+		// flow through the same tracker-driven interpolation. Catches a
+		// regression that hardcodes a single protected-branch literal
+		// instead of reading from `walkerString`.
+		const { evaluator } = buildWithBranchAndRemote(
+			"feature",
+			"https://github.com/cad0p/repo.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git checkout master && git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(res && res.block === true);
+		assert.match(res.reason!, /You are on 'master'/);
+	});
+
+	it("`git checkout trunk && git commit` on github clone → injects 'trunk' (interpolation is tracker-driven)", async () => {
+		// Pin the third protected-branch alias to seal the
+		// tracker-driven contract: the injected name comes from
+		// `walkerString`, not a hardcoded set of `main` / `master`.
+		const { evaluator } = buildWithBranchAndRemote(
+			"feature",
+			"https://github.com/cad0p/repo.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git checkout trunk && git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(res && res.block === true);
+		assert.match(res.reason!, /You are on 'trunk'/);
+	});
+
+	it("no in-chain checkout on github clone → reason omits the dynamic branch clause", async () => {
+		// Exec reports `main` via `git branch --show-current`, so the
+		// rule fires — but the BRANCH TRACKER didn't see an in-chain
+		// checkout, so `walkerString` returns the
+		// `NO_CHECKOUT_IN_CHAIN` sentinel (not a real branch name).
+		// The reason fn must NOT leak the sentinel into the body and
+		// must omit the dynamic clause; the static github-flavored
+		// guidance still fires.
+		const { evaluator } = buildWithBranchAndRemote(
+			"main",
+			"https://github.com/cad0p/repo.git",
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("git commit -m 'x'"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(res && res.block === true);
+		assert.match(res.reason!, /\[steering:no-main-commit-github@[^\]]+\]/);
+		assert.match(
+			res.reason!,
+			/You're on a github clone's protected branch/,
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/You are on '/,
+			"reason must not include the dynamic clause when no in-chain checkout was tracked",
+		);
+	});
+
 	it("rule-shape pin: `noOverride: false` + `when:` includes both branch + remote", () => {
 		const rule = gitPlugin.rules?.find(
 			(r) => r.name === "no-main-commit-github",
@@ -732,15 +891,51 @@ describe("rules: no-main-commit-github", () => {
 		);
 	});
 
-	it("shares the GIT_COMMIT_PATTERN constant with no-main-commit (Object.is)", () => {
-		// Pattern-equality pin: the two rules MUST reference the same
-		// underlying string constant so a regex change to one is
-		// physically forced onto the other. Reverting the shared-constant
-		// factoring (e.g. inlining one rule's pattern as a copy of the
-		// other's) trips this assertion.
+	it("both rules' pattern fields reference the exported GIT_COMMIT_PATTERN constant", () => {
+		// Strict-equality pin against the EXPORTED constant rather than
+		// `Object.is(noMainCommit.pattern, noMainCommitGithub.pattern)`.
+		// JS string primitives compare by value, so
+		// `Object.is("abc", "abc")` returns true regardless of whether
+		// the two literals came from the same constant or two byte-equal
+		// copy-pasted occurrences. The counter-example test below
+		// demonstrates this — a future maintainer who reverts the
+		// shared-constant factoring by inlining the literal at one rule's
+		// definition site would NOT trip a between-rule `Object.is`
+		// assertion. Comparing each rule's pattern against the named
+		// constant catches the inlining-back-to-literal regression at the
+		// language level: only a value that came from the exported
+		// constant satisfies both equalities simultaneously when read at
+		// the test site.
+		assert.equal(
+			noMainCommit.pattern,
+			GIT_COMMIT_PATTERN,
+			"noMainCommit.pattern must reference the exported GIT_COMMIT_PATTERN constant",
+		);
+		assert.equal(
+			noMainCommitGithub.pattern,
+			GIT_COMMIT_PATTERN,
+			"noMainCommitGithub.pattern must reference the exported GIT_COMMIT_PATTERN constant",
+		);
+	});
+
+	it("counter-example: `Object.is` between byte-equal pattern strings is insufficient as a shared-reference pin", () => {
+		// Counter-example pin documenting why the test above compares
+		// against the exported constant rather than between the two
+		// rules' pattern fields. Two byte-equal string LITERALS satisfy
+		// `Object.is` even though they share no source-level constant —
+		// JS string primitives compare by value. So a `Object.is(
+		// noMainCommit.pattern, noMainCommitGithub.pattern)` assertion
+		// passes whether the two rules read from the shared constant OR
+		// each inlines an identical copy-paste literal at its definition
+		// site. This sanity-check makes the language-level reasoning
+		// reviewable: if `Object.is` ever stops returning true here, the
+		// shared-reference reasoning above breaks and the pin needs to
+		// be re-engineered.
+		const inlineCopy =
+			"^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+commit\\b";
 		assert.ok(
-			Object.is(noMainCommit.pattern, noMainCommitGithub.pattern),
-			"noMainCommit.pattern and noMainCommitGithub.pattern must reference the same shared constant",
+			Object.is(GIT_COMMIT_PATTERN, inlineCopy),
+			"byte-equal string literals satisfy Object.is regardless of source — confirms why the test above pins against the exported constant",
 		);
 	});
 

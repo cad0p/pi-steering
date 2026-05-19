@@ -85,14 +85,16 @@ Two default bundles ship with the package and are layered onto every config auto
 - **`DEFAULT_RULES`** — `no-force-push`, `no-hard-reset`, `no-rm-rf-slash`, `no-long-running-commands`. Domain-agnostic safety rails. See [`src/defaults.ts`](./src/defaults.ts) for the exact patterns.
 - **`DEFAULT_PLUGINS`** — the [git plugin](./src/plugins/git/README.md). Contributes the `branch` / `upstream` / `commitsAhead` / `hasStagedChanges` / `isClean` / `remote` predicates, the `no-main-commit` and `no-main-commit-github` rules (both overridable per commit via `# steering-override: <name> — <reason>`), the branch tracker (tool_call-scoped `git checkout` awareness), and the `cwd.git` tracker extension (`--git-dir=` / `--work-tree=` parsing). The github-flavored variant is a specialization that emits PR-flow guidance on github.com clones; non-github contexts fall through to the generic rule.
 
-Opt-out paths:
+Opt-out paths (the explicit `plugins: [gitPlugin]` is what gives `defineConfig`'s generics the rule / plugin name unions for typo-checking — DEFAULT_PLUGINS provides runtime registration but doesn't extend the inference):
 
 ```ts
+import gitPlugin from "pi-steering/plugins/git";
+
 // Drop the shipped rule but keep the git predicates + tracker:
-defineConfig({ disabledRules: ["no-main-commit"] });
+defineConfig({ plugins: [gitPlugin], disabledRules: ["no-main-commit"] });
 
 // Drop the whole git plugin (predicates, tracker, rule):
-defineConfig({ disabledPlugins: ["git"] });
+defineConfig({ plugins: [gitPlugin], disabledPlugins: ["git"] });
 
 // Drop EVERYTHING shipped — DEFAULT_RULES and DEFAULT_PLUGINS:
 defineConfig({ disableDefaults: true });

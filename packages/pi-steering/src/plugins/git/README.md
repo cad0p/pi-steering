@@ -57,12 +57,16 @@ export default defineConfig({
 
 ### Disabling
 
+Disabling snippets need an explicit `plugins: [gitPlugin]` for `defineConfig`'s generics to type-check the rule / plugin names against the git plugin's registry. DEFAULT_PLUGINS gives runtime registration but doesn't extend the inference — without the explicit import, `disabledRules` / `disabledPlugins` types as `never[]` and the snippet fails `tsc --noEmit`.
+
 Keep the predicates + tracker, drop the shipped rule:
 
 ```ts
 import { defineConfig } from "pi-steering";
+import gitPlugin from "pi-steering/plugins/git";
 
 export default defineConfig({
+  plugins: [gitPlugin],
   disabledRules: ["no-main-commit"],
 });
 ```
@@ -72,8 +76,10 @@ no tracker, no cwd extensions, no rule):
 
 ```ts
 import { defineConfig } from "pi-steering";
+import gitPlugin from "pi-steering/plugins/git";
 
 export default defineConfig({
+  plugins: [gitPlugin],
   disabledPlugins: ["git"],
 });
 ```
@@ -257,8 +263,10 @@ walker-unknown-cwd interactions you need to handle explicitly).
 //    + main; disabling the github specialization makes the engine
 //    emit the generic message instead.
 import { defineConfig } from "pi-steering";
+import gitPlugin from "pi-steering/plugins/git";
 
 export default defineConfig({
+  plugins: [gitPlugin],
   disabledRules: ["no-main-commit-github"],
 });
 ```
@@ -271,7 +279,7 @@ export default defineConfig({
 //    you actually want to change. No `when:` changes → no
 //    walker-unknown-cwd interactions to reason about.
 import { defineConfig } from "pi-steering";
-import { noMainCommitGithub } from "pi-steering/plugins/git";
+import gitPlugin, { noMainCommitGithub } from "pi-steering/plugins/git";
 import type { Rule } from "pi-steering";
 
 const myNoMainCommitGithub = {
@@ -289,6 +297,7 @@ const myNoMainCommitGithub = {
 } as const satisfies Rule;
 
 export default defineConfig({
+  plugins: [gitPlugin],                     // typo-checks the disable below
   disabledRules: ["no-main-commit-github"], // drop the default
   rules: [myNoMainCommitGithub],            // replacement on
 });
@@ -298,8 +307,10 @@ export default defineConfig({
 // 3. Disable the entire git plugin (drops all gitPlugin
 //    predicates / rules / trackers / extensions):
 import { defineConfig } from "pi-steering";
+import gitPlugin from "pi-steering/plugins/git";
 
 export default defineConfig({
+  plugins: [gitPlugin],
   disabledPlugins: ["git"],
 });
 ```
@@ -358,7 +369,7 @@ Worked example:
 
 ```ts
 import { defineConfig } from "pi-steering";
-import { noMainCommit } from "pi-steering/plugins/git";
+import gitPlugin, { noMainCommit } from "pi-steering/plugins/git";
 import type { Pattern, Rule } from "pi-steering";
 
 const VAULT_DIRS: Pattern[] = [
@@ -384,6 +395,7 @@ const noMainCommitExceptVault = {
 } as const satisfies Rule;
 
 export default defineConfig({
+  plugins: [gitPlugin],                     // typo-checks the disables below
   // BOTH shipped rules disabled; otherwise the generic
   // `no-main-commit` fires on vault paths and the carve-out
   // doesn't deliver on its name.

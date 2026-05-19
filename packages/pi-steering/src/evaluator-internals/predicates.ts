@@ -135,6 +135,11 @@ export class UnknownPredicateError extends Error {
  * `length === 0` early-return below fires before the unknown-cwd
  * check); arrays containing non-Pattern values are invalid (rule
  * skips uniformly — see explicit `Array.isArray` early-return below).
+ * Asymmetry: a malformed non-array scalar (e.g. `cwd: 123`) keeps the
+ * pre-extension fail-CLOSED behavior — under unknown cwd the rule
+ * fires; under known cwd the trailing `matchesPattern` regex-coercion
+ * almost always falls through to `false`. See inline comments at the
+ * trailing fallback for the empirical regex-character-class rationale.
  *
  * Fast path: the common shorthand form `when.cwd: /regex/` (or a
  * string pattern) is read directly — no normalization object

@@ -602,13 +602,15 @@ describe("rules: no-main-commit-github", () => {
 		// through to a positive claim about the protected branch.
 		//
 		// Counterfactual rationale: without the walker-unknown-branch
-		// sibling early-return, the reason fn would emit
-		// "You're on a github clone's protected branch" (the
-		// known-branch body) with the dynamic clause
-		// ` You are on '${branch}'.` either silently leaking the
-		// `"unknown"` sentinel or omitting itself — either way an
-		// unverified positive claim about a branch the engine hasn't
-		// confirmed. The agent then sees github-specific PR-flow
+		// sibling early-return, the reason fn falls through to the
+		// known-branch body ("You're on a github clone's protected
+		// branch"). The walkerString-driven dynamic clause
+		// ` You are on '${branch}'.` correctly omits itself when
+		// `branchRes.kind === "unknown"` (the ternary at
+		// `rules.ts` returns undefined → `onClause = ""`), so the
+		// `"unknown"` sentinel cannot leak — but the static body still
+		// claims github-flavored protected-branch context the engine
+		// hasn't verified. The agent then sees github-specific PR-flow
 		// guidance for a context the rule didn't actually verify.
 		const { evaluator } = buildWithBranchAndRemote(
 			"feature",

@@ -663,10 +663,14 @@ describe("buildEvaluator: when.cwd array form", () => {
 
 	it("array with non-Pattern element is invalid (rule skips, NOT a fail-open coercion)", async () => {
 		// Without the explicit `Array.isArray(value) && return false` guard
-		// in evaluateCwd, this would fall through to the malformed-shorthand
-		// path and silently regex-match `String([/foo/, 123])` (fail-open
-		// under known cwd) or fire under unknown cwd. Pinned uniformly to
-		// fail-skip mode — same as gitPlugin's null-→-skip path.
+		// in evaluateCwd, this falls through to the malformed-shorthand
+		// path. Empirically, `new RegExp([/foo/, 123])` produces source
+		// `\/foo\/,123` (regex escapes the slashes from `Array.toString()`),
+		// which only matches paths containing the literal substring
+		// `/foo/,123` — effectively skip under known cwd, but the unknown-
+		// cwd branch would still fire fail-closed at the bottom of
+		// evaluateCwd. The explicit guard pins uniform fail-skip across
+		// known and unknown cwd — same as gitPlugin's null-→-skip path.
 		const rule: Rule = {
 			name: "mixed-arr",
 			tool: "bash",
@@ -816,12 +820,17 @@ describe("buildEvaluator: when.cwd array form", () => {
 		assert.equal((single as { block: boolean }).block, true);
 	});
 
-	it("object form with mixed-type array under known cwd — rule skips (no silent throw)", async () => {
+	it("object form with mixed-type array under known cwd — rule skips (no silent fail-open)", async () => {
 		// Without the object-shape early-return, the trailing fallback
-		// would call `matchesPattern(obj, walkerCwd)` and throw on
-		// `String(obj)` regex coercion under known cwd. Pin uniformly
-		// with the array-shorthand fail-skip path so a typo in the
-		// object form behaves the same as a typo in the shorthand form.
+		// calls `matchesPattern(obj, walkerCwd)` which compiles
+		// `String({pattern: [/work/, 123]})` = `"[object Object]"` into
+		// `/[object Object]/`. JS parses that as a single character class
+		// matching any of {b, c, e, j, o, t, space, O} — so under known
+		// cwd it silently fail-OPENs (matches almost every real path,
+		// since most contain a `t` or `o`) and FIRES the rule. Pin
+		// uniformly with the array-shorthand fail-skip path so a typo in
+		// the object form behaves the same as a typo in the shorthand
+		// form.
 		const rule: Rule = {
 			name: "obj-mixed",
 			tool: "bash",
@@ -847,10 +856,14 @@ describe("buildEvaluator: when.cwd array form", () => {
 		);
 	});
 
-	it("object form with malformed scalar pattern under known cwd — rule skips (no silent throw)", async () => {
-		// Same rationale as the mixed-array case: the trailing fallback
-		// would attempt `matchesPattern({pattern: 123}, walkerCwd)` and
-		// throw. The object-shape early-return fail-skips uniformly.
+	it("object form with malformed scalar pattern under known cwd — rule skips (no silent fail-open)", async () => {
+		// Same rationale as the mixed-array case: without the object-
+		// shape early-return, the trailing fallback compiles
+		// `String({pattern: 123})` = `"[object Object]"` into
+		// `/[object Object]/` (a character class matching any of
+		// {b, c, e, j, o, t, space, O}) and fail-OPENs against almost
+		// every real cwd. The object-shape early-return fail-skips
+		// uniformly.
 		const rule: Rule = {
 			name: "obj-bad-scalar",
 			tool: "bash",
@@ -870,7 +883,7 @@ describe("buildEvaluator: when.cwd array form", () => {
 		assert.equal(
 			res,
 			undefined,
-			"object form with malformed scalar — rule skips (no silent throw)",
+			"object form with malformed scalar — rule skips (no silent fail-open)",
 		);
 	});
 

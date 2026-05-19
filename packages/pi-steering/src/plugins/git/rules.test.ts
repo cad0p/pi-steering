@@ -891,51 +891,29 @@ describe("rules: no-main-commit-github", () => {
 		);
 	});
 
-	it("both rules' pattern fields reference the exported GIT_COMMIT_PATTERN constant", () => {
-		// Strict-equality pin against the EXPORTED constant rather than
-		// `Object.is(noMainCommit.pattern, noMainCommitGithub.pattern)`.
-		// JS string primitives compare by value, so
-		// `Object.is("abc", "abc")` returns true regardless of whether
-		// the two literals came from the same constant or two byte-equal
-		// copy-pasted occurrences. The counter-example test below
-		// demonstrates this — a future maintainer who reverts the
-		// shared-constant factoring by inlining the literal at one rule's
-		// definition site would NOT trip a between-rule `Object.is`
-		// assertion. Comparing each rule's pattern against the named
-		// constant catches the inlining-back-to-literal regression at the
-		// language level: only a value that came from the exported
-		// constant satisfies both equalities simultaneously when read at
-		// the test site.
+	it("both rules' pattern fields equal the exported GIT_COMMIT_PATTERN constant", () => {
+		// Value-equality pin against the exported constant. The pattern
+		// is a string primitive, so this is byte-equality, NOT shared-
+		// reference identity — a future maintainer who inlines the
+		// literal at one rule's definition site with the SAME bytes
+		// would not trip this assertion. What it DOES catch:
+		//   - Either rule's pattern accidentally diverging from the
+		//     exported constant (e.g. one drops `\b`, one anchors
+		//     differently).
+		//   - The constant itself getting renamed away or removed.
+		// True shared-reference factoring would need a `RegExp` (object)
+		// constant; today's design uses a string source so the regex-
+		// compile cache in the engine can dedupe across both rules
+		// without per-rule allocation.
 		assert.equal(
 			noMainCommit.pattern,
 			GIT_COMMIT_PATTERN,
-			"noMainCommit.pattern must reference the exported GIT_COMMIT_PATTERN constant",
+			"noMainCommit.pattern must equal the exported GIT_COMMIT_PATTERN constant",
 		);
 		assert.equal(
 			noMainCommitGithub.pattern,
 			GIT_COMMIT_PATTERN,
-			"noMainCommitGithub.pattern must reference the exported GIT_COMMIT_PATTERN constant",
-		);
-	});
-
-	it("counter-example: `Object.is` between byte-equal pattern strings is insufficient as a shared-reference pin", () => {
-		// Counter-example pin documenting why the test above compares
-		// against the exported constant rather than between the two
-		// rules' pattern fields. Two byte-equal string LITERALS satisfy
-		// `Object.is` even though they share no source-level constant —
-		// JS string primitives compare by value. So a `Object.is(
-		// noMainCommit.pattern, noMainCommitGithub.pattern)` assertion
-		// passes whether the two rules read from the shared constant OR
-		// each inlines an identical copy-paste literal at its definition
-		// site. This sanity-check makes the language-level reasoning
-		// reviewable: if `Object.is` ever stops returning true here, the
-		// shared-reference reasoning above breaks and the pin needs to
-		// be re-engineered.
-		const inlineCopy =
-			"^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+commit\\b";
-		assert.ok(
-			Object.is(GIT_COMMIT_PATTERN, inlineCopy),
-			"byte-equal string literals satisfy Object.is regardless of source — confirms why the test above pins against the exported constant",
+			"noMainCommitGithub.pattern must equal the exported GIT_COMMIT_PATTERN constant",
 		);
 	});
 

@@ -184,8 +184,10 @@ function evaluateCwd(
 	}
 	// Explicit fail-skip for array-shaped input that isn't all-Pattern.
 	// Without this, `cwd: [/foo/, 123]` falls through to the malformed
-	// shorthand path below — silently regex-matching `String([/foo/, 123])`
-	// (fail-OPEN under known cwd) or firing under unknown cwd. Asymmetric
+	// shorthand path below — `new RegExp(String([/foo/, 123]))` compiles
+	// to `/\/foo\/,123/`, which only matches paths containing the
+	// literal substring `/foo/,123` (effectively skip under known cwd),
+	// but the unknown-cwd branch still fires fail-closed. Asymmetric
 	// with the gitPlugin sites' clean null-→-skip path; pin uniformly.
 	if (Array.isArray(value)) return false;
 	// Object that fell out of the object-form branch (e.g.
@@ -194,14 +196,13 @@ function evaluateCwd(
 	// null-→-skip path. Without this guard, the trailing
 	// `matchesPattern(value as Pattern, walkerCwd)` would silently
 	// regex-coerce the malformed object via `String(obj)` →
-	// `"[object Object]"` and `new RegExp("[object Object]")` (parsed
-	// as the character class `[object O]` followed by literal
-	// `bject]`); under known cwd that regex matches almost every real
-	// path (any path containing `o`, `b`, `j`, `e`, `c`, `t`, ` `, or
-	// `O`) — silent fail-OPEN-fire, masking the config error. The
-	// unknown-cwd branch firing fail-closed is also asymmetric with
-	// the shorthand-array malformed path that fail-skips uniformly.
-	// This guard makes object-form malformed input skip uniformly.
+	// `"[object Object]"`, which JS parses as a single character class
+	// `/[object Object]/` matching any of {b, c, e, j, o, t, space, O}.
+	// Under known cwd that regex matches almost every real path —
+	// silent fail-OPEN-fire, masking the config error. The unknown-cwd
+	// branch firing fail-closed is also asymmetric with the shorthand-
+	// array malformed path that fail-skips uniformly. This guard makes
+	// object-form malformed input skip uniformly.
 	if (value !== null && typeof value === "object") return false;
 	// Malformed non-array input — treat as fail-closed shorthand attempt
 	// (preserves existing pre-extension behavior for non-array malformed

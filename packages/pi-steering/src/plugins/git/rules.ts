@@ -38,12 +38,15 @@ import { walkerString } from "./predicates.ts";
  * regex evolves; reorderings that touch one rule's pattern can't
  * silently drift from the other.
  *
- * Exported so tests can pin the rules' pattern fields against the
- * exported reference (`noMainCommit.pattern === GIT_COMMIT_PATTERN`),
- * which catches a future inlining of the literal at one rule's
- * definition site that `Object.is` between the two rules' pattern
- * fields would not (string primitives compare by value, so two byte-
- * equal copy-pasted literals satisfy `Object.is`).
+ * Exported so tests can pin each rule's `pattern` field against this
+ * constant by value (`noMainCommit.pattern === GIT_COMMIT_PATTERN`).
+ * That catches accidental divergence between the two rules' patterns
+ * (e.g. one drops a `\b`, the other doesn't) and removal/rename of
+ * the constant itself. It does NOT catch a future inlining of the
+ * literal at a rule's definition site with the SAME bytes — string
+ * primitives compare by value, so byte-equal copy-pasted literals
+ * pass `===`. Plugin authors who need true shared-reference pinning
+ * should use a `RegExp` (object) constant instead of a string source.
  */
 export const GIT_COMMIT_PATTERN =
 	"^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+commit\\b";

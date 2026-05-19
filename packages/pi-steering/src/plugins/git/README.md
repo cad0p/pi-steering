@@ -217,15 +217,16 @@ reminder against unsolicited PR merges or ready-for-review flips.
 }
 ```
 
-**First-match-wins ordering is load-bearing.** `no-main-commit-
-github` is registered BEFORE `no-main-commit` in the plugin's rule
-array. On a github clone + on main, both rules' `when:` clauses
-match — first-match-wins routes the github-flavored guidance to
-github users. On non-github contexts (Brazil packages, vault paths,
-/tmp scratch repos with non-github remotes) the github rule's
-`remote:` predicate doesn't match → the engine falls through to the
-generic `no-main-commit`. A unit test pins this position so
-reordering for stylistic reasons trips the suite.
+**First-match-wins ordering is load-bearing.**
+`no-main-commit-github` is registered BEFORE `no-main-commit` in
+the plugin's rule array. On a github clone + on main, both rules'
+`when:` clauses match — first-match-wins routes the
+github-flavored guidance to github users. On non-github contexts
+(Brazil packages, vault paths, /tmp scratch repos with non-github
+remotes) the github rule's `remote:` predicate doesn't match → the
+engine falls through to the generic `no-main-commit`. A unit test
+pins this position so reordering for stylistic reasons trips the
+suite.
 
 Under walker-unknown cwd (`cd "$VAR" && git commit`), the rule
 still fires fail-closed — but the reason text switches to the
@@ -235,42 +236,56 @@ github-specific context the engine couldn't verify.
 ## Customization
 
 Three escape valves of increasing scope, ordered most → least
-common:
+common. None of these are exemption-by-cwd patterns — see the
+[Cwd-based exemption](#cwd-based-exemption-advanced) advanced
+section below for that case (it has subtle
+walker-unknown-cwd interactions you need to handle explicitly).
 
 ```ts
-// 1. Disable a single shipped rule:
+// 1. Swap the github rule's PR-flow guidance for the generic
+//    feature-branch reminder (keep blocking direct commits to
+//    main, just drop the github-specific message). The generic
+//    `no-main-commit` is still active and fires on a github clone
+//    + main; disabling the github specialization makes the engine
+//    emit the generic message instead.
 import { defineConfig } from "pi-steering";
 
 export default defineConfig({
   disabledRules: ["no-main-commit-github"],
 });
+```
 
-// 2. Disable + replace with a freshly-named user rule that adds
-//    your own customization (e.g. vault-path exemption for
-//    napkin-distill flows). The cwd array form (Pattern[]) lets you
-//    list multiple exempt directories; combine with `not:` to
-//    invert.
+```ts
+// 2. Disable + replace with a freshly-named user rule whose
+//    `reason` text points your agents at an internal skill /
+//    runbook. Spread the original to inherit `pattern`, `when:`,
+//    `tool`, `field`, and `noOverride` — only override the field
+//    you actually want to change. No `when:` changes → no
+//    walker-unknown-cwd interactions to reason about.
 import gitPlugin, { noMainCommitGithub } from "pi-steering/plugins/git";
 import type { Rule } from "pi-steering";
 
-const VAULT_DIRS = [/\/Goldmine\//, /\/\.cache\/napkin-distill\//];
-
-const noMainCommitGithubExceptVault = {
+const myNoMainCommitGithub = {
   ...noMainCommitGithub,
   // FRESH name — see warning below; reusing the original name has
   // two failure modes, both bad.
-  name: "no-main-commit-github-except-vault",
-  when: {
-    ...noMainCommitGithub.when,
-    not: { cwd: VAULT_DIRS },
-  },
+  name: "myorg-no-main-commit-github",
+  reason:
+    "You're on a github clone's protected branch. " +
+    "Open a PR for review (`gh pr create`); land via `gh pr merge` " +
+    "after approval. See skill `git-discipline@myorg` for our team's " +
+    "PR conventions.\n\n" +
+    "Safety: NEVER merge a PR or mark it ready-for-review unless " +
+    "the user explicitly asks. Wait for explicit user instruction.",
 } as const satisfies Rule;
 
 export default defineConfig({
   disabledRules: ["no-main-commit-github"], // drop the default
-  rules: [noMainCommitGithubExceptVault],   // replacement on
+  rules: [myNoMainCommitGithub],            // replacement on
 });
+```
 
+```ts
 // 3. Disable the entire git plugin (drops all gitPlugin
 //    predicates / rules / trackers / extensions):
 export default defineConfig({
@@ -297,10 +312,78 @@ use `disabledRules`:
    rule fires. Silent fail-OPEN — the worst outcome for a safety
    rule, since the agent now has no guardrail at all.
 
-Use a fresh name (e.g., `no-main-commit-github-except-vault`).
-Pair it with `disabledRules: ["no-main-commit-github"]` so the
-original is dropped and your fresh-named replacement survives the
-disable filter.
+Use a fresh name (e.g., `myorg-no-main-commit-github`). Pair it
+with `disabledRules: ["no-main-commit-github"]` so the original is
+dropped and your fresh-named replacement survives the disable
+filter.
+
+### Cwd-based exemption (advanced)
+
+A common request: "don't block commits to main inside my vault
+directory" (vault flows like napkin-distill commit to a `main`
+branch by design). Cwd-based exemptions need care because:
+
+1. **The generic `no-main-commit` still fires on vault paths.**
+   Disabling only the github specialization isn't enough — the
+   generic rule's `when:` is just `{ branch: ... }` (no `remote:`
+   gate), so it fires on any github clone or any other repo whose
+   branch is one of the protected names. To actually exempt a path
+   you need to disable BOTH shipped rules and register a
+   user-authored rule.
+
+2. **`not: { cwd: ... }` flips fail-closed to fail-OPEN under
+   walker-unknown cwd.** When the walker can't statically resolve
+   cwd (`cd "$VAR" && git commit`), the inner predicate's
+   fail-closed-on-unknown default fires `cwd: ...` → the `not:`
+   wrapper inverts → the carve-out predicate FAILS → the rule
+   skips. A user committing inside `cd "$VAULT_PATH" && git
+   commit` slips past the rule even when not in a vault path. The
+   fix is to use the predicate's object form with explicit
+   `onUnknown: "allow"` so the inner predicate allows on unknown,
+   the `not:` inverts to fire, and the outer rule fires fail-closed
+   under walker-unknown cwd.
+
+Worked example:
+
+```ts
+import gitPlugin, { noMainCommit } from "pi-steering/plugins/git";
+import type { Pattern, Rule } from "pi-steering";
+
+const VAULT_DIRS: Pattern[] = [
+  /\/Goldmine\//,
+  /\/\.cache\/napkin-distill\//,
+];
+
+const noMainCommitExceptVault = {
+  ...noMainCommit,
+  name: "myorg-no-main-commit-except-vault",
+  when: {
+    ...noMainCommit.when,
+    // Object form with `onUnknown: "allow"` is LOAD-BEARING here.
+    // Bare `not: { cwd: VAULT_DIRS }` would be fail-OPEN under
+    // walker-unknown cwd — the inner cwd: predicate fires fail-
+    // closed on unknown, the `not:` inverts, the outer rule
+    // skips, and a `cd "$VAR" && git commit` slips past. Setting
+    // `onUnknown: "allow"` on the inner predicate makes it
+    // ALLOW under unknown — the `not:` then inverts to FIRE —
+    // and the outer rule stays fail-closed.
+    not: { cwd: { pattern: VAULT_DIRS, onUnknown: "allow" } },
+  },
+} as const satisfies Rule;
+
+export default defineConfig({
+  // BOTH shipped rules disabled; otherwise the generic
+  // `no-main-commit` fires on vault paths and the carve-out
+  // doesn't deliver on its name.
+  disabledRules: ["no-main-commit-github", "no-main-commit"],
+  rules: [noMainCommitExceptVault],
+});
+```
+
+The `Pattern[]` annotation on `VAULT_DIRS` lets you mix string
+patterns and RegExp without TS narrowing the array's element type
+to `RegExp[]`. Pinned via the vault-path independence test in
+`rules.test.ts`.
 
 ## Authoring new plugins
 

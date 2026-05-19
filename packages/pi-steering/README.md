@@ -619,7 +619,7 @@ export default defineConfig({
 
 Changing more than the reason (tightening the pattern, scoping by cwd, swapping the observer) works the same way: spread the original, then override the fields you want to change.
 
-> **Always use a fresh `name` for the replacement.** Reusing the plugin rule's name has two failure modes — same name + no `disabledRules` keeps both rules (your customization silently fails to apply) and same name + `disabledRules` filters out both (silent fail-OPEN, the worst outcome for a safety rule). The git plugin's [Customization](./src/plugins/git/README.md#customization) section walks through a worked example with the vault-exemption pattern + the array-form `cwd:` predicate.
+> **Always use a fresh `name` for the replacement.** Reusing the plugin rule's name has two failure modes — same name + no `disabledRules` keeps both rules (your customization silently fails to apply) and same name + `disabledRules` filters out both (silent fail-OPEN, the worst outcome for a safety rule). The git plugin's [Customization](./src/plugins/git/README.md#customization) section walks through worked examples (soften the reason text; cwd-based exemption with the array-form `cwd:` predicate's `onUnknown: "allow"` pin to keep `not:` carve-outs fail-closed under walker-unknown cwd).
 
 ## Walker extensibility
 

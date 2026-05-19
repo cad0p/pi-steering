@@ -36,8 +36,7 @@ import { walkerString } from "./predicates.ts";
  * flag slots like `git -C /path commit ...`). Shared by `no-main-commit`
  * and `no-main-commit-github` so the family stays byte-equal as the
  * regex evolves; reorderings that touch one rule's pattern can't
- * silently drift from the other. See the package README's
- * "Pre-subcommand flag slots" note for the regex's intent.
+ * silently drift from the other.
  */
 const GIT_COMMIT_PATTERN =
 	"^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+commit\\b";

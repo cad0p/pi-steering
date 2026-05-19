@@ -324,9 +324,11 @@ export interface WhenClause<Writes extends string = string> {
 	 */
 	[customKey: string]:
 		| Pattern
+		| Pattern[]
 		| PredicateFn
 		| WhenClause
 		| { pattern: Pattern; onUnknown?: "allow" | "block" }
+		| { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" }
 		| unknown;
 }
 

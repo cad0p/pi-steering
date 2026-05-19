@@ -455,6 +455,16 @@ function effectiveNoOverride(rule: Rule, defaultNoOverride: boolean): boolean {
  * with a fail-safe fallback string — the block verdict still fires.
  * The exact fallback text is a stable contract rule authors can
  * detect in tests.
+ *
+ * Tag→body separator is paragraph-aware: when the resolved body
+ * contains a `\n\n` paragraph break, the tag is rendered on its own
+ * line (`${tag}\n\n${body}`) so subsequent paragraphs don't orphan
+ * visually from the source-tag prefix. Single-paragraph bodies keep
+ * the legacy single-space layout (`${tag} ${body}`) — backward-
+ * compatible for every reason that was single-paragraph before the
+ * paragraph-aware rendering shipped. Trigger is exactly `\n\n`; a
+ * single `\n` inside an otherwise single-paragraph body keeps the
+ * single-space layout. Mirror docs on {@link Rule.reason}.
  */
 async function formatReason(
 	rule: Rule,
@@ -465,17 +475,8 @@ async function formatReason(
 ): Promise<string> {
 	const tag = `[steering:${rule.name}@${source}]`;
 	const body = await resolveReasonBody(rule, source, ctx);
-	// Paragraph-aware tag separator: when the body contains a paragraph break
-	// (`\n\n`), render the tag on its own line so subsequent paragraphs don't
-	// orphan visually from the prefix. Single-paragraph bodies keep the
-	// existing single-space layout — backward-compatible for every existing
-	// rule (all current rule reasons are single-paragraph).
-	//
-	// Single-line:    `[steering:rule@src] body`
-	// Multi-paragraph: `[steering:rule@src]\n\npara1\n\npara2`
-	//
-	// Trigger is double-newline specifically; a single `\n` inside an
-	// otherwise single-paragraph body keeps the single-space layout.
+	// Paragraph-aware tag separator — see function-level JSDoc for the
+	// contract; this line implements the trigger detection.
 	const separator = body.includes("\n\n") ? "\n\n" : " ";
 	if (noOverride) return `${tag}${separator}${body}`;
 	const leader = tool === "bash" ? "#" : "//";

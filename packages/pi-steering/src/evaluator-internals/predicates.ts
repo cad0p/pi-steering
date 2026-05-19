@@ -131,9 +131,10 @@ export class UnknownPredicateError extends Error {
  *
  * Array semantics: OR-of-matches (predicate matches when the resolved
  * cwd matches ANY of the listed patterns). Empty arrays are invalid
- * (rule skips, fail-closed under unknown handled before this branch);
- * arrays containing non-Pattern values are invalid (rule skips uniformly
- * — see explicit early-return below).
+ * (rule skips uniformly, including under unknown cwd — the
+ * `length === 0` early-return below fires before the unknown-cwd
+ * check); arrays containing non-Pattern values are invalid (rule
+ * skips uniformly — see explicit `Array.isArray` early-return below).
  *
  * Fast path: the common shorthand form `when.cwd: /regex/` (or a
  * string pattern) is read directly — no normalization object

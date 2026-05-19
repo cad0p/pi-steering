@@ -382,8 +382,9 @@ export default defineConfig({
 
 The `Pattern[]` annotation on `VAULT_DIRS` lets you mix string
 patterns and RegExp without TS narrowing the array's element type
-to `RegExp[]`. Pinned via the vault-path independence test in
-`rules.test.ts`.
+to `RegExp[]`. Annotation is optional for all-RegExp arrays (TS
+infers `RegExp[]`, a subtype of `Pattern[]`); explicit `Pattern[]`
+becomes load-bearing only when mixing strings and RegExp.
 
 ## Authoring new plugins
 

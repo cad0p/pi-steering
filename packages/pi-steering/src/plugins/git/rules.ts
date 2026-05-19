@@ -153,29 +153,37 @@ export const noMainCommit = {
  *          character class accepts both the HTTPS path separator
  *          and the SSH user-host separator).
  *
- * @remarks `remote:` is wrapped as `{ pattern, onUnknown: "allow" }`.
- *          A github-specialized rule should only fire when github
- *          context is **confirmed** — under walker-unknown cwd or a
- *          repo with no `origin` remote configured, the predicate
- *          allows so the engine falls through to the generic
- *          `noMainCommit` (correct generic message). The branch
- *          predicate stays at default `onUnknown: "block"`
- *          (fail-closed) so protected-branch detection isn't
- *          weakened.
+ * @remarks `remote:` is configured as `{ pattern, onUnknown: "allow" }`.
+ *          The `onUnknown: "allow"` argument governs the case where
+ *          the walker resolved cwd but the inner exec couldn't
+ *          determine the remote URL — i.e. a known-cwd repo with no
+ *          `origin` remote configured (fresh-init, repo with
+ *          `upstream` but no `origin`, or other exec failure). In that
+ *          case the predicate skips and the engine falls through to
+ *          the generic `noMainCommit` (correct generic message).
+ *          The branch predicate stays at default `onUnknown: "block"`
+ *          (fail-closed) so protected-branch detection isn't weakened.
  *
- * Walker-unknown cwd: the reason fn falls back to the standard
- * {@link walkerUnknownCwdReason} text. The `remote:` predicate
- * also allows under walker-unknown (per the `onUnknown: "allow"`
- * above), so on walker-unknown cwd this rule typically does NOT
- * fire — the generic `noMainCommit` handles the block. The
- * walker-unknown branch in the reason fn is defense-in-depth in
- * case `remote:` resolves under known cwd but the engine reaches
- * the reason fn with `cwd === "unknown"` for unrelated reasons.
+ * Walker-unknown cwd: separate from the `onUnknown: "allow"` path
+ * above. The `remote:` predicate handler is `requireKnownCwd`-wrapped
+ * at registration; the wrap fires fail-closed (returns `true`) BEFORE
+ * the inner handler runs whenever `walkerState.cwd === "unknown"`,
+ * overriding the inner `onUnknown: "allow"`. Combined with the branch
+ * predicate (no wrap) firing fail-closed via its own default
+ * `onUnknown: "block"`, both `when:` clauses match and the rule
+ * fires. The reason fn detects `walkerState.cwd === "unknown"` and
+ * routes to {@link walkerUnknownCwdReason} with a neutral topic so
+ * the agent doesn't see an unverified positive claim about github
+ * context. The walker-unknown branch in the reason fn is the
+ * load-bearing primary path under walker-unknown cwd, not a
+ * defense-in-depth fallback.
  *
- * Walker-unknown branch: when `walkerState.branch === "unknown"`
- * (dynamic checkout the walker couldn't resolve), the reason fn
- * also routes to a "could not verify branch" message rather than
- * asserting a specific branch the engine hasn't confirmed.
+ * Walker-unknown branch state: when `walkerState.cwd` is known but
+ * the branch tracker collapses to its `"unknown"` sentinel (dynamic
+ * checkout the walker couldn't resolve), the reason fn routes to a
+ * "could not verify the current branch" message rather than
+ * asserting a specific protected branch the engine hasn't
+ * confirmed.
  *
  * Pattern is shared with `noMainCommit` via the module-private
  * {@link GIT_COMMIT_PATTERN} constant so the two rules' bash-
@@ -192,12 +200,16 @@ export const noMainCommitGithub = {
 	when: {
 		branch: /^(main|master|mainline|trunk)$/,
 		// `onUnknown: "allow"` posture: a github-specialized rule
-		// should only fire when github context is confirmed. Under no
-		// `origin` remote (fresh-init repo, repo with `upstream` but
-		// no `origin`) or walker-unknown cwd, the predicate allows so
-		// the engine falls through to the generic `noMainCommit` and
-		// the user gets the correct generic message rather than
-		// PR-flow guidance for a repo where there's no PR to open.
+		// should only fire when github context is confirmed. Governs
+		// the known-cwd no-`origin` case (fresh-init repo, repo with
+		// `upstream` but no `origin`, or other exec failure): the
+		// predicate allows so the engine falls through to the generic
+		// `noMainCommit` and the user gets the correct generic message
+		// rather than PR-flow guidance for a repo where there's no PR
+		// to open. Walker-unknown cwd is governed separately by the
+		// `requireKnownCwd` wrap on the predicate handler (which fires
+		// fail-closed BEFORE consulting `onUnknown`); see the JSDoc
+		// `Walker-unknown cwd:` paragraph for the full interaction.
 		remote: { pattern: /github\.com[/:]/, onUnknown: "allow" },
 	},
 	reason: (ctx) => {

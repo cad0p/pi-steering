@@ -468,10 +468,15 @@ function effectiveNoOverride(rule: Rule, defaultNoOverride: boolean): boolean {
  * Windows-IDE strings); a single `\n` inside an otherwise single-
  * paragraph body keeps the single-space layout. The emitted
  * separator is always normalized to `\n\n` regardless of which form
- * triggered it. The override hint (when present) mirrors the same
- * paragraph-aware separator so a multi-paragraph body's safety
- * paragraph stays visually standalone from the override-hint
- * sentence rather than running on. Mirror docs on {@link Rule.reason}.
+ * triggered it.
+ *
+ * Body→override-hint separator mirrors the same paragraph-aware
+ * separator. Single-paragraph bodies keep the single-space prefix
+ * on the override hint (byte-identical to the pre-paragraph-aware
+ * rendering); multi-paragraph bodies promote the override hint to
+ * its own paragraph (`${body}\n\n${hint}`) so the safety paragraph
+ * stays visually standalone rather than running on into an inline
+ * "To override" sentence. Mirror docs on {@link Rule.reason}.
  */
 async function formatReason(
 	rule: Rule,

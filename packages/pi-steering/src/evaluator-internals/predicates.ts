@@ -192,10 +192,16 @@ function evaluateCwd(
 	// `{ pattern: [/foo/, 123] }` or `{ pattern: 123 }`) — fail-skip
 	// uniformly with the array-shorthand and the gitPlugin sites'
 	// null-→-skip path. Without this guard, the trailing
-	// `matchesPattern(value as Pattern, walkerCwd)` throws on a
-	// regex/string call against an object value under known cwd, and
-	// the unknown-cwd branch fires fail-closed — asymmetric with the
-	// shorthand-array malformed path that fail-skips uniformly.
+	// `matchesPattern(value as Pattern, walkerCwd)` would silently
+	// regex-coerce the malformed object via `String(obj)` →
+	// `"[object Object]"` and `new RegExp("[object Object]")` (parsed
+	// as the character class `[object O]` followed by literal
+	// `bject]`); under known cwd that regex matches almost every real
+	// path (any path containing `o`, `b`, `j`, `e`, `c`, `t`, ` `, or
+	// `O`) — silent fail-OPEN-fire, masking the config error. The
+	// unknown-cwd branch firing fail-closed is also asymmetric with
+	// the shorthand-array malformed path that fail-skips uniformly.
+	// This guard makes object-form malformed input skip uniformly.
 	if (value !== null && typeof value === "object") return false;
 	// Malformed non-array input — treat as fail-closed shorthand attempt
 	// (preserves existing pre-extension behavior for non-array malformed

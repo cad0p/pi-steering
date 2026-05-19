@@ -176,7 +176,18 @@ function evaluateCwd(
 			pattern: unknown;
 			onUnknown?: "allow" | "block";
 		};
-		const block = (obj.onUnknown ?? "block") === "block";
+		// Strict equality to match the gitPlugin's `unwrapPatternArg`
+		// site: only the literal lowercase `"allow"` allows; any other
+		// value (`"Allow"` capitalization typo, `"BLOCK"`, `undefined`,
+		// numeric, etc.) falls back to fail-CLOSED block. This makes
+		// the engine's onUnknown handling SYMMETRIC with the plugin's;
+		// pre-fix, the engine treated `"Allow"` as fail-OPEN allow
+		// (because `("Allow" ?? "block") === "block"` is `false`),
+		// while the plugin treated it as fail-CLOSED block. The
+		// JSDoc on `onUnknown` documents `"allow" | "block"` lowercase;
+		// typo-defense uses the same fail-CLOSED default the explicit
+		// `onUnknown: "block"` framing implies.
+		const block = obj.onUnknown !== "allow";
 		if (isPattern(obj.pattern)) {
 			if (walkerCwd === "unknown") return block;
 			return matchesPattern(obj.pattern, walkerCwd);

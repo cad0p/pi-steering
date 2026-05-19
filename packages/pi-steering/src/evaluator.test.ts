@@ -445,6 +445,54 @@ describe("buildEvaluator: when.cwd", () => {
 		);
 	});
 
+	it("object-form with onUnknown:'Allow' (capitalization typo) falls back to fail-closed block", async () => {
+		// Pin the symmetry between this engine site (`evaluateCwd`)
+		// and the gitPlugin's `unwrapPatternArg` site
+		// (`packages/pi-steering/src/plugins/git/predicates.ts`): both
+		// treat any non-lowercase-`"allow"` value as the fail-CLOSED
+		// default. The JSDoc on `onUnknown` documents `"allow" | "block"`
+		// in lowercase only; this test guards the typo-defense behavior
+		// that protects safety-rail rules with `cwd:` carve-outs from
+		// silently failing OPEN under a capitalization mistake.
+		//
+		// Counterfactual: a refactor that re-introduced the
+		// `(obj.onUnknown ?? "block") === "block"` form (which only
+		// triggers the `??` fallback on `undefined`) would route
+		// `"Allow"` through the explicit-equality check, find it !==
+		// `"block"`, and silently allow — the engine and plugin would
+		// disagree on the same input, and a vault-scoped rule like
+		// `not: { cwd: { pattern: ..., onUnknown: "Allow" } }` would
+		// behave inconsistently between cwd and branch / upstream /
+		// remote predicates.
+		const rule: Rule = {
+			name: "capitalization-typo-fail-closed",
+			tool: "bash",
+			field: "command",
+			pattern: "^rm\\b",
+			reason: "typo defense",
+			when: {
+				cwd: {
+					pattern: "/never-matches/",
+					// Deliberate capitalization typo. Cast through `unknown`
+					// because the schema's `onUnknown` field is typed against
+					// the lowercase literal union; the runtime guard is what
+					// we're pinning here, not the type.
+					onUnknown: "Allow" as unknown as "allow" | "block",
+				},
+			},
+		};
+		const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
+		const res = await evaluator.evaluate(
+			bashEvent("cd $(pwd) && rm foo"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			res,
+			"capitalization-typo `onUnknown: 'Allow'` must fall back to fail-CLOSED block, matching the gitPlugin site",
+		);
+	});
+
 	it("plugin predicate with onUnknown:'block' fires when handler sees unknown", async () => {
 		// Stand in for the future `when.branch` predicate: the plugin
 		// handler honors the object form's `onUnknown` policy itself.

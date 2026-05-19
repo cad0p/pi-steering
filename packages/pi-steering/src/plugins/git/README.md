@@ -419,11 +419,11 @@ Several pieces are re-exported from `pi-steering/plugins/git` so
 downstream plugins can reuse the engine's walker conventions
 without reimplementing them:
 
-- `walkerString(value)` / `WalkerStringResult` — narrows an
-  `unknown` walker-tracker value into one of `{ kind: "value";
-  value }` | `{ kind: "unknown" }` | `{ kind: "absent" }`. The
-  three-way discrimination is what the `branch` / `upstream` /
-  `remote` predicates use to dispatch on tracker state without
+- `walkerString(ctx, key, initialSentinel)` / `WalkerStringResult` —
+  narrows the walker-tracker value read off `ctx.walkerState[key]`
+  into one of `{ kind: "value"; value }` | `{ kind: "unknown" }` |
+  `{ kind: "missing" }`. The three-way discrimination is what the
+  `branch` predicate uses to dispatch on tracker state without
   string-comparison sentinel checks.
 - `NO_CHECKOUT_IN_CHAIN` — the branch tracker's fall-through
   sentinel for chains where no in-chain `git checkout` /

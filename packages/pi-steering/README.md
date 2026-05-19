@@ -598,14 +598,19 @@ Plugin-shipped rules are individually exported from their plugins (see `pi-steer
 ```ts
 import { defineConfig } from "pi-steering";
 import gitPlugin, { noMainCommit } from "pi-steering/plugins/git";
+import type { Rule } from "pi-steering";
 
 // Reuse everything about the original, just swap the reason.
 const myNoMainCommit = {
   ...noMainCommit,
   name: "myorg-no-main-commit",
-  reason:
-    noMainCommit.reason +
-    "\n\nFor our workflow, see skill `git-discipline@myorg` or run `pi-help git-flow`.",
+  reason: async (ctx) => {
+    const original =
+      typeof noMainCommit.reason === "function"
+        ? await noMainCommit.reason(ctx)
+        : noMainCommit.reason;
+    return `${original}\n\nFor our workflow, see skill \`git-discipline@myorg\` or run \`pi-help git-flow\`.`;
+  },
 } as const satisfies Rule;
 
 export default defineConfig({

@@ -240,6 +240,31 @@ declare global {
 	 * to this interface — it would widen `keyof PiSteeringPredicates` to
 	 * `string`, defeating the reserved-key filter (`Exclude<string,
 	 * "not" | "onUnknown">` is just `string` again).
+	 *
+	 * @example Plugin author registering a typed predicate
+	 * ```ts
+	 * import type { Plugin, PredicateShape } from "pi-steering";
+	 * import { workItemFormat } from "./predicates/work-item-format.ts";
+	 * import type { WorkItemFormatArgs } from "./predicates/work-item-format.ts";
+	 *
+	 * declare global {
+	 *   interface PiSteeringPredicates {
+	 *     workItemFormat: PredicateShape<WorkItemFormatArgs>;
+	 *   }
+	 * }
+	 *
+	 * const myPlugin = {
+	 *   name: "work-item",
+	 *   predicates: { workItemFormat },
+	 * } as const satisfies Plugin;
+	 * ```
+	 *
+	 * @see {@link PredicateShape} for the bare / spreadBase shape contract.
+	 * @see {@link DefaultSpreadBase} for how spreadBase auto-detects from `bare`.
+	 * @see {@link PredicateModifiers} for available leaf-level modifier fields.
+	 * @see The `gitPlugin` declaration in `plugins/git/index.ts` for a
+	 *      multi-predicate registry block (cwd, branch, upstream, remote,
+	 *      isClean, hasStagedChanges, commitsAhead).
 	 */
 	interface PiSteeringPredicates {
 		// Empty by default. Plugins augment via `declare global`.

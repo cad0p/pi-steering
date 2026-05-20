@@ -2,7 +2,7 @@
 	"name": "@examples/dynamic-reason-runtime-cwd",
 	"version": "0.0.0-example",
 	"private": true,
-	"description": "Worked example: dynamic-reason + walker-unknown-cwd pattern (requireKnownCwd + walkerUnknownCwdReason).",
+	"description": "Worked example: dynamic-reason + walker-unknown-cwd pattern (runtime-cwd predicate trinary surfacing + walkerUnknownCwdReason).",
 	"type": "module",
 	"peerDependencies": {
 		"pi-steering": "workspace:*"

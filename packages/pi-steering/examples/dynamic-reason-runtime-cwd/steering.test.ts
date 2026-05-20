@@ -59,13 +59,13 @@ async function callReason(ctx: PredicateContext): Promise<string> {
 }
 
 describe("example: dynamic-reason-runtime-cwd", () => {
-	it("rule.when uses canonical fail-closed shape (not the `not:` anti-pattern)", () => {
-		// Pins the rule's `when:` to `{ isClean: false }`. The
-		// alternative `{ not: { isClean: true } }` looks equivalent but
-		// silently fails OPEN on the walker-unknown-cwd branch (the
-		// `requireKnownCwd` wrap returns `true` unconditionally so the
-		// engine fires fail-closed; `not:` inverts that to `false`).
-		// See README "Why isClean: false, not not: { isClean: true }".
+	it("rule.when uses the canonical positive form (`isClean: false`)", () => {
+		// Pins the rule's `when:` to `{ isClean: false }`. Both this form
+		// and the equivalent `{ not: { isClean: true } }` produce the same
+		// fail-CLOSED behavior on the walker-unknown branch under the
+		// trinary engine's default block-level `onUnknown: "block"`; the
+		// positive form is preferred for readability and per-leaf modifier
+		// composition. See README "Why isClean: false over not: { isClean: true }".
 		const rule = getDeployRule();
 		assert.deepEqual(rule.when, { isClean: false });
 	});

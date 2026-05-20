@@ -30,11 +30,142 @@ import type {
 	PredicateContext,
 	PredicateFn,
 	PredicateHandler,
+	PredicateVerdict,
+	ReservedPredicateKey,
 	WhenClause,
 } from "../schema.ts";
 import { isPattern } from "../internal/pattern-utils.ts";
 import { AGENT_LOOP_INDEX_KEY } from "./context.ts";
 import type { SyntheticEntry } from "./speculative-synthesis.ts";
+
+// ---------------------------------------------------------------------------
+// Reserved predicate keys (runtime mirror of `ReservedPredicateKey`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Runtime list of predicate keys that plugins are NOT allowed to
+ * register. Mirrors the type-level {@link ReservedPredicateKey} from
+ * `schema.ts`. Adding a new modifier to {@link PredicateModifiers} OR a
+ * new operator field requires updating both this list and the matching
+ * type union; the {@link reservedPredicateKeysCoverReservedTypes}
+ * sync-pinning test in `evaluator.test.ts` fails when the two drift.
+ *
+ * The engine (in the plugin merger) throws at plugin-registration time
+ * if a plugin attempts a reserved key, with a concrete error message
+ * pointing the plugin author at the collision and suggesting an
+ * alternative name.
+ */
+export const RESERVED_PREDICATE_KEYS = [
+	// Operator fields (must mirror schema.ts's `OperatorField` union).
+	"not",
+	// Modifier keys (must mirror `keyof PredicateModifiers`).
+	"onUnknown",
+] as const satisfies readonly ReservedPredicateKey[];
+
+/**
+ * Type-level assertion that {@link RESERVED_PREDICATE_KEYS} covers
+ * every member of {@link ReservedPredicateKey}. If a future modifier or
+ * operator is added without updating the runtime list, the
+ * `_RESERVED_PREDICATE_KEYS_COVERS_TYPE` constant fails to typecheck
+ * (assignability is in the wrong direction). The constant is
+ * `_`-prefixed and never read at runtime; its sole job is to fail
+ * compilation when the two surfaces drift.
+ */
+type _ReservedKeyCoverage =
+	ReservedPredicateKey extends (typeof RESERVED_PREDICATE_KEYS)[number]
+		? true
+		: false;
+const _RESERVED_PREDICATE_KEYS_COVERS_TYPE: _ReservedKeyCoverage = true;
+void _RESERVED_PREDICATE_KEYS_COVERS_TYPE;
+
+/**
+ * Whether a string key is reserved (cannot be used as a plugin
+ * predicate name). Used by the plugin merger and by
+ * {@link validateWhenClauseShape} when computing the leaf-key set of
+ * a `not:` block.
+ */
+export function isReservedPredicateKey(
+	key: string,
+): key is ReservedPredicateKey {
+	return (RESERVED_PREDICATE_KEYS as readonly string[]).includes(key);
+}
+
+// ---------------------------------------------------------------------------
+// When-clause shape validation (config-resolve time)
+// ---------------------------------------------------------------------------
+
+/**
+ * Throws if a `when:` or `not:` block contains no predicate-leaf keys
+ * after stripping modifier keys.
+ *
+ * Catches two foot-guns at config-resolve time so the engine never has
+ * to silently skip a malformed clause:
+ *   - `when: {}` — zero keys.
+ *   - `not: { onUnknown: "block" }` — one key, but it's a modifier; no
+ *     leaves means the block has nothing to evaluate.
+ *
+ * The `not:` operator field itself counts as a leaf at the outer
+ * `when:` level (it produces a verdict via Kleene composition of the
+ * inner not-block); only modifier keys are stripped. Built-in
+ * non-registry keys (`condition`, `happened`, `cwd`) count as leaves;
+ * plugin-registered predicates count as leaves regardless of whether
+ * the plugin is currently loaded — the unknown-predicate check fires
+ * later via {@link UnknownPredicateError}.
+ *
+ * Recurses into the `not:` block to enforce the same shape there
+ * (type-level banning of `not: not:` recursion is a separate guard).
+ *
+ * `path` describes the call site for error messages, e.g.
+ * `'rule "no-main-commit".when'` or `'rule "no-git-worktree".when.not'`.
+ */
+export function validateWhenClauseShape(
+	block: WhenClause | undefined,
+	path: string,
+): void {
+	if (block === undefined) return;
+	let leafKeys = 0;
+	for (const key of Object.keys(block)) {
+		const v = (block as Record<string, unknown>)[key];
+		if (v === undefined) continue;
+		// Strip modifier keys only — the operator field `not:` produces a
+		// verdict via Kleene composition of the inner not-block, so it
+		// counts as a leaf for the outer level's leaf-count.
+		if (isModifierKey(key)) continue;
+		leafKeys += 1;
+	}
+	if (leafKeys === 0) {
+		throw new Error(
+			`[pi-steering] ${path} contains no predicate leaves; ` +
+				`a clause must contain at least one predicate (cwd:, branch:, ` +
+				`commitsAhead:, condition:, happened:, not:, etc.). Modifier keys ` +
+				`(${MODIFIER_KEYS.join(", ")}) alone are not enough — add a leaf ` +
+				`or remove the empty clause.`,
+		);
+	}
+	// Recurse into the `not:` block. `condition:` is a function leaf,
+	// no recursion. Other plugin keys can carry nested objects (e.g.
+	// the built-in `happened` shape) but those aren't when-clauses, so
+	// recursion is scoped to the `not:` operator only.
+	const notBlock = (block as { not?: unknown }).not;
+	if (notBlock !== undefined && typeof notBlock === "object" && notBlock !== null) {
+		validateWhenClauseShape(
+			notBlock as WhenClause,
+			`${path}.not`,
+		);
+	}
+}
+
+/**
+ * Modifier-only subset of {@link RESERVED_PREDICATE_KEYS} — used by
+ * {@link validateWhenClauseShape} to strip modifiers when counting
+ * leaves. Operator fields (currently `"not"`) are NOT modifiers; they
+ * produce verdicts and count as leaves.
+ */
+const MODIFIER_KEYS: readonly string[] = ["onUnknown"];
+
+function isModifierKey(key: string): boolean {
+	return MODIFIER_KEYS.includes(key);
+}
 
 // ---------------------------------------------------------------------------
 // Pattern / PredicateFn resolution
@@ -120,81 +251,63 @@ export class UnknownPredicateError extends Error {
 /**
  * Built-in `when.cwd` predicate. Accepts shorthand `Pattern`,
  * shorthand `Pattern[]` (OR-of-matches), or the object form
- * `{ pattern: Pattern | Pattern[]; onUnknown? }`. Applies the
- * `onUnknown` policy when the walker-supplied `walkerCwd` equals the
- * cwd tracker's `"unknown"` sentinel.
+ * `{ pattern: Pattern | Pattern[]; onUnknown? }`. Returns a trinary
+ * {@link PredicateVerdict}: `true` / `false` for definite matches
+ * against the walker-resolved cwd, or `"unknown"` when the walker's
+ * `cwdTracker` couldn't resolve the effective cwd statically (the
+ * cwd-tracker `"unknown"` sentinel).
  *
- *   - `onUnknown: "block"` (default, fail-closed) → predicate PASSES on
- *     unknown so the rule fires (block the command).
- *   - `onUnknown: "allow"`                        → predicate FAILS on
- *     unknown so the rule skips (allow the command).
+ * The `onUnknown:` modifier on the object form is NOT consumed here.
+ * Trinary unknown is surfaced to the caller; the leaf-trinary adapter
+ * (outer level) or the not-block evaluator (inner level) applies the
+ * `onUnknown:` policy uniformly across leaves.
  *
  * Array semantics: OR-of-matches (predicate matches when the resolved
  * cwd matches ANY of the listed patterns). Empty arrays are invalid
- * (rule skips uniformly, including under unknown cwd — the
- * `length === 0` early-return below fires before the unknown-cwd
- * check); arrays containing non-Pattern values are invalid (rule
- * skips uniformly — see explicit `Array.isArray` early-return below).
- * Asymmetry: a malformed non-array scalar (e.g. `cwd: 123`) keeps the
- * pre-extension fail-CLOSED behavior — under unknown cwd the rule
- * fires; under known cwd the trailing `matchesPattern` regex-coercion
- * almost always falls through to `false`. See inline comments at the
- * trailing fallback for the empirical regex-character-class rationale.
+ * (returns `false`); arrays containing non-Pattern values are invalid
+ * (returns `false`). Asymmetry: a malformed non-array scalar (e.g.
+ * `cwd: 123`) keeps the pre-extension fail-CLOSED behavior — under
+ * unknown cwd the predicate surfaces `"unknown"`; under known cwd the
+ * trailing `matchesPattern` regex-coercion almost always falls through
+ * to `false`. See inline comments for the empirical regex-character-
+ * class rationale.
  *
  * Fast path: the common shorthand form `when.cwd: /regex/` (or a
  * string pattern) is read directly — no normalization object
- * allocated. Only the object form `{ pattern, onUnknown }` takes
- * the slightly-slower path of reading two fields. Matters because
- * `when.cwd` runs once per rule per extracted ref per tool_call,
- * so cutting the per-call allocation saves micro-seconds on hot
- * configs with many cwd-scoped rules. The array shorthand keeps the
- * fast-path: no normalization object allocated, just an `every`
- * iteration to validate element types before `.some`-matching.
+ * allocated. Only the object form `{ pattern, onUnknown }` takes the
+ * slightly-slower path of reading the pattern field.
  */
 function evaluateCwd(
 	value: unknown,
 	walkerCwd: string,
-): boolean {
+): PredicateVerdict {
 	// Shorthand Pattern form (string or RegExp).
 	if (typeof value === "string" || value instanceof RegExp) {
-		if (walkerCwd === "unknown") return true; // onUnknown default: block
+		if (walkerCwd === "unknown") return "unknown";
 		return matchesPattern(value, walkerCwd);
 	}
 	// Shorthand Pattern[] form (non-empty, all-Pattern).
 	if (Array.isArray(value) && value.every(isPattern)) {
 		if (value.length === 0) return false; // empty array invalid → rule skips
-		if (walkerCwd === "unknown") return true; // onUnknown default: block
+		if (walkerCwd === "unknown") return "unknown";
 		return value.some((p) => matchesPattern(p, walkerCwd));
 	}
-	// Object form: { pattern: Pattern | Pattern[]; onUnknown? }.
+	// Object form: { pattern: Pattern | Pattern[]; onUnknown? } — the
+	// `onUnknown:` modifier is consumed by the caller-side leaf adapter,
+	// not here. We surface trinary unknown uniformly.
 	if (
 		value !== null &&
 		typeof value === "object" &&
 		"pattern" in (value as Record<string, unknown>)
 	) {
-		const obj = value as {
-			pattern: unknown;
-			onUnknown?: "allow" | "block";
-		};
-		// Strict equality to match the gitPlugin's `unwrapPatternArg`
-		// site: only the literal lowercase `"allow"` allows; any other
-		// value (`"Allow"` capitalization typo, `"BLOCK"`, `undefined`,
-		// numeric, etc.) falls back to fail-CLOSED block. This makes
-		// the engine's onUnknown handling SYMMETRIC with the plugin's;
-		// pre-fix, the engine treated `"Allow"` as fail-OPEN allow
-		// (because `("Allow" ?? "block") === "block"` is `false`),
-		// while the plugin treated it as fail-CLOSED block. The
-		// JSDoc on `onUnknown` documents `"allow" | "block"` lowercase;
-		// typo-defense uses the same fail-CLOSED default the explicit
-		// `onUnknown: "block"` framing implies.
-		const block = obj.onUnknown !== "allow";
+		const obj = value as { pattern: unknown };
 		if (isPattern(obj.pattern)) {
-			if (walkerCwd === "unknown") return block;
+			if (walkerCwd === "unknown") return "unknown";
 			return matchesPattern(obj.pattern, walkerCwd);
 		}
 		if (Array.isArray(obj.pattern) && obj.pattern.every(isPattern)) {
 			if (obj.pattern.length === 0) return false;
-			if (walkerCwd === "unknown") return block;
+			if (walkerCwd === "unknown") return "unknown";
 			return obj.pattern.some((p) => matchesPattern(p, walkerCwd));
 		}
 	}
@@ -203,8 +316,8 @@ function evaluateCwd(
 	// shorthand path below — `new RegExp(String([/foo/, 123]))` compiles
 	// to `/\/foo\/,123/`, which only matches paths containing the
 	// literal substring `/foo/,123` (effectively skip under known cwd),
-	// but the unknown-cwd branch still fires fail-closed. Asymmetric
-	// with the gitPlugin sites' clean null-→-skip path; pin uniformly.
+	// but the unknown-cwd branch still surfaces unknown. Asymmetric with
+	// the gitPlugin sites' clean null-→-skip path; pin uniformly.
 	if (Array.isArray(value)) return false;
 	// Object that fell out of the object-form branch (e.g.
 	// `{ pattern: [/foo/, 123] }` or `{ pattern: 123 }`) — fail-skip
@@ -214,17 +327,17 @@ function evaluateCwd(
 	// regex-coerce the malformed object via `String(obj)` →
 	// `"[object Object]"`, which JS parses as a single character class
 	// `/[object Object]/` matching any of {b, c, e, j, o, t, space, O}.
-	// Under known cwd that regex matches almost every real path —
-	// silent fail-OPEN-fire, masking the config error. The unknown-cwd
-	// branch firing fail-closed is also asymmetric with the shorthand-
-	// array malformed path that fail-skips uniformly. This guard makes
+	// Under known cwd that regex matches almost every real path — silent
+	// fail-OPEN-fire, masking the config error. The unknown-cwd branch
+	// surfacing unknown is also asymmetric with the shorthand-array
+	// malformed path that fail-skips uniformly. This guard makes
 	// object-form malformed input skip uniformly.
 	if (value !== null && typeof value === "object") return false;
 	// Malformed non-array input — treat as fail-closed shorthand attempt
 	// (preserves existing pre-extension behavior for non-array malformed
-	// values: under unknown cwd, fire; under known cwd, attempt a regex
-	// coercion which almost certainly produces `false`).
-	if (walkerCwd === "unknown") return true;
+	// values: under unknown cwd, surface unknown; under known cwd,
+	// attempt a regex coercion which almost certainly produces `false`).
+	if (walkerCwd === "unknown") return "unknown";
 	return matchesPattern(value as Pattern, walkerCwd);
 }
 
@@ -500,20 +613,260 @@ interface WhenWalkerState {
 	readonly cwd: string;
 }
 
+// ---------------------------------------------------------------------------
+// Trinary leaf adapter + Kleene composition
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the leaf-level `onUnknown:` modifier from a leaf value. Bare
+ * forms (string, RegExp, array, boolean, number, etc.) carry no
+ * modifiers; only the spread object form's `onUnknown:` field is
+ * consulted. Falls back to `"block"` (fail-CLOSED) when absent.
+ *
+ * Strict equality on `"allow"` mirrors the engine's typo-defense: any
+ * other value (`"Allow"` capitalization typo, `"BLOCK"`, `undefined`,
+ * numeric, etc.) collapses to `"block"`.
+ */
+function readLeafOnUnknown(value: unknown): "allow" | "block" {
+	if (
+		value !== null &&
+		typeof value === "object" &&
+		!Array.isArray(value) &&
+		!(value instanceof RegExp) &&
+		"onUnknown" in (value as Record<string, unknown>)
+	) {
+		const v = (value as { onUnknown?: unknown }).onUnknown;
+		return v === "allow" ? "allow" : "block";
+	}
+	return "block";
+}
+
+/**
+ * Project a {@link PredicateVerdict} to a definite boolean using the
+ * supplied `onUnknown:` policy:
+ *   - `"block"` (default, fail-CLOSED): `"unknown"` → `true` (the
+ *     leaf reports "match" so the rule fires).
+ *   - `"allow"` (fail-OPEN): `"unknown"` → `false` (the leaf reports
+ *     "no match" so the rule skips).
+ *
+ * `true` / `false` pass through unchanged.
+ */
+function projectVerdict(
+	verdict: PredicateVerdict,
+	onUnknown: "allow" | "block",
+): boolean {
+	if (verdict === "unknown") return onUnknown === "block";
+	return verdict;
+}
+
+/**
+ * Invoke a plugin-registered handler against the leaf value, awaiting
+ * any returned promise and narrowing the result to a trinary
+ * {@link PredicateVerdict}. A handler that throws synchronously OR
+ * returns a rejected promise is caught and treated as `"unknown"`,
+ * matching the spec's contract: "Throwing is equivalent to returning
+ * `"unknown"`; prefer explicit returns."
+ *
+ * The throw-as-unknown semantics preserve fail-CLOSED-by-default — a
+ * buggy plugin handler whose `"unknown"` then routes through the
+ * default `onUnknown: "block"` policy keeps the rule firing instead
+ * of silently fail-OPEN-skipping. Handler errors are logged via
+ * `console.warn` so plugin authors can debug; the rule + key are
+ * included so the source of the throw is unambiguous.
+ */
+async function evaluateLeafTrinary(
+	handler: PredicateHandler,
+	value: unknown,
+	ctx: PredicateContext,
+	ruleName: string,
+	key: string,
+): Promise<PredicateVerdict> {
+	try {
+		const result = await handler(value, ctx);
+		if (result === true) return true;
+		if (result === false) return false;
+		if (result === "unknown") return "unknown";
+		// Defensive: a handler returning anything else is buggy. Treat as
+		// unknown for fail-CLOSED-by-default; log so the plugin author can
+		// trace it.
+		console.warn(
+			`[pi-steering] Rule "${ruleName}": when.${key} handler returned ` +
+				`${JSON.stringify(result)}; expected boolean | "unknown". ` +
+				`Treating as "unknown" (fail-CLOSED via onUnknown policy).`,
+		);
+		return "unknown";
+	} catch (err) {
+		const msg =
+			err instanceof Error
+				? `${err.message}\n${err.stack ?? ""}`
+				: String(err);
+		console.warn(
+			`[pi-steering] Rule "${ruleName}": when.${key} handler threw: ${msg}`,
+		);
+		return "unknown";
+	}
+}
+
+/**
+ * Kleene 3-valued AND across an array of trinary verdicts. Used to
+ * compose multi-leaf `not:` blocks before the not-flip applies.
+ *
+ * Truth table (`x AND y`):
+ *   true & true       = true
+ *   false & anything  = false   (false absorbs)
+ *   anything & false  = false
+ *   true & unknown    = unknown
+ *   unknown & true    = unknown
+ *   unknown & unknown = unknown
+ *
+ * Empty input is `true` (vacuous truth) — but not-block evaluation
+ * rejects the empty case at config-resolve time via
+ * {@link validateWhenClauseShape}, so this code path only runs on
+ * non-empty leaf sets.
+ */
+function kleeneAnd(verdicts: readonly PredicateVerdict[]): PredicateVerdict {
+	let anyUnknown = false;
+	for (const v of verdicts) {
+		if (v === false) return false; // false absorbs
+		if (v === "unknown") anyUnknown = true;
+	}
+	return anyUnknown ? "unknown" : true;
+}
+
+/**
+ * Evaluate a `not:` block per the corrected pseudocode.
+ *
+ * Inside `not:`, leaves are composed with Kleene 3-valued AND; the
+ * block-level `onUnknown:` modifier (default `"block"`) projects the
+ * unknown-leaf case to a definite verdict BEFORE the not-flip applies.
+ * This is a deliberate deviation from pure Kleene: the flip is skipped
+ * when leaves resolve via `onUnknown:` policy so that
+ * `not: { cwd: P, onUnknown: "block" }` directly means "rule fires"
+ * without requiring the user to invert.
+ *
+ * Returns a definite boolean (the not-clause's contribution to the
+ * outer when-clause's AND): `true` means the not-clause matched (rule
+ * fires); `false` means it didn't.
+ *
+ * Truth-table coverage:
+ *   - all-true leaves   → not(true) = false (rule skips on this
+ *     not-clause).
+ *   - any-false leaf    → false absorbs in Kleene AND → not(false) =
+ *     true (rule fires).
+ *   - some-unknown, no-false → Kleene AND = "unknown" → block-level
+ *     `onUnknown:` policy projects directly without the flip:
+ *       "block" → not-clause = true  (fail-CLOSED — rule fires)
+ *       "allow" → not-clause = false (fail-OPEN — rule skips)
+ */
+async function evaluateNotBlock(
+	block: WhenClause,
+	state: WhenWalkerState,
+	ctx: PredicateContext,
+	predicates: Record<string, PredicateHandler>,
+	ruleName: string,
+): Promise<boolean> {
+	// Read block-level `onUnknown:` modifier. Default fail-CLOSED.
+	const blockOnUnknown =
+		(block as { onUnknown?: unknown }).onUnknown === "allow"
+			? "allow"
+			: "block";
+
+	// Evaluate each leaf to a trinary verdict. Reserved keys
+	// (modifiers + the operator field, even though `not:` recursion is
+	// type-banned) are skipped; the unknown-predicate check still fires
+	// for unregistered keys.
+	const verdicts: PredicateVerdict[] = [];
+	for (const [key, value] of Object.entries(block)) {
+		if (value === undefined) continue;
+		if (isReservedPredicateKey(key)) continue;
+
+		// Built-in: cwd — trinary on walker-unknown sentinel.
+		if (key === "cwd") {
+			verdicts.push(evaluateCwd(value, state.cwd));
+			continue;
+		}
+
+		// Built-in: happened — boolean leaf, no walker-unknown semantics
+		// (it consults session entries / speculative entries).
+		if (key === "happened") {
+			verdicts.push(evaluateHappened(value, ctx, ruleName));
+			continue;
+		}
+
+		// Built-in: condition — escape-hatch boolean callback. Treat
+		// throws as `"unknown"` for parity with plugin handlers.
+		if (key === "condition") {
+			const fn = value as PredicateFn;
+			try {
+				const result = await fn(ctx);
+				verdicts.push(Boolean(result));
+			} catch (err) {
+				const msg =
+					err instanceof Error
+						? `${err.message}\n${err.stack ?? ""}`
+						: String(err);
+				console.warn(
+					`[pi-steering] Rule "${ruleName}": when.condition (inside not:) ` +
+						`threw: ${msg}`,
+				);
+				verdicts.push("unknown");
+			}
+			continue;
+		}
+
+		// Plugin-registered predicate. Unknown predicate → named error.
+		const handler = predicates[key];
+		if (handler === undefined) throw new UnknownPredicateError(key);
+		verdicts.push(
+			await evaluateLeafTrinary(handler, value, ctx, ruleName, key),
+		);
+	}
+
+	const combined = kleeneAnd(verdicts);
+
+	if (combined === false) {
+		// false absorbs → not(false) = true (rule fires on this not-clause).
+		return true;
+	}
+	if (combined === "unknown") {
+		// Skip the not-flip: the block-level `onUnknown:` policy directly
+		// produces the rule-level outcome. "block" → fire; "allow" → skip.
+		return blockOnUnknown === "block";
+	}
+	// All-true → not(true) = false (rule skips on this not-clause).
+	return false;
+}
+
 /**
  * Evaluate a {@link WhenClause}: returns true if every predicate in the
  * clause "matches" for the given context. An empty / undefined clause
  * trivially matches (rule fires regardless of `when`).
  *
  * Dispatch table:
- *   - `cwd`        — built-in (walker-tied), consumes `state.cwd`.
+ *   - `cwd`        — built-in (walker-tied), consumes `state.cwd`. Returns
+ *                    trinary; outer leaf-level `onUnknown:` modifier on
+ *                    the spread form projects to a definite boolean via
+ *                    {@link projectVerdict} (default `"block"` =
+ *                    fail-CLOSED).
  *   - `happened`   — built-in (session-entry-scoped), consumes
- *                    `ctx.findEntries` + `ctx.agentLoopIndex`.
- *   - `not`        — nested WhenClause; inversion: NONE of the nested
- *                    predicates match.
- *   - `condition`  — {@link PredicateFn}; call with ctx.
- *   - anything else — `predicates[key]`; throws
- *                    {@link UnknownPredicateError} when absent.
+ *                    `ctx.findEntries` + `ctx.agentLoopIndex`. Boolean.
+ *   - `not`        — nested `not:` block; dispatched to
+ *                    {@link evaluateNotBlock} which composes leaves with
+ *                    Kleene 3-valued AND and applies the block-level
+ *                    `onUnknown:` policy without the not-flip on unknown
+ *                    leaves.
+ *   - `condition`  — {@link PredicateFn}; call with ctx. Throws caught
+ *                    and treated as fail-skip (boolean false).
+ *   - anything else — `predicates[key]`; trinary handler with
+ *                    leaf-level `onUnknown:` modifier projection. Throws
+ *                    treated as `"unknown"` per spec.
+ *
+ * Reserved keys (`onUnknown`, future modifiers) are skipped here too —
+ * they're meaningful as siblings to leaves at the outer level (per
+ * spread form `{ pattern, onUnknown }` placement) but the engine
+ * doesn't iterate them as standalone keys; the leaf adapter consumes
+ * them inline. A bare `onUnknown:` at the outer level (without a
+ * containing leaf) is type-banned but skipped here defensively.
  */
 export async function evaluateWhen(
 	when: WhenClause | undefined,
@@ -527,33 +880,44 @@ export async function evaluateWhen(
 	for (const [key, value] of Object.entries(when)) {
 		if (value === undefined) continue;
 
-		// Built-in: cwd
+		// Skip modifier-key siblings at the outer level (defensive — the
+		// type system bans rule-level `onUnknown:`, but a JSON config
+		// could slip one through). The `not:` operator field is NOT
+		// skipped here — it's a leaf that produces a verdict via Kleene
+		// composition of the inner not-block, dispatched below.
+		if (isModifierKey(key)) continue;
+
+		// Built-in: cwd. Trinary leaf with leaf-level `onUnknown:` policy.
 		if (key === "cwd") {
-			if (!evaluateCwd(value, state.cwd)) return false;
+			const verdict = evaluateCwd(value, state.cwd);
+			const onUnknown = readLeafOnUnknown(value);
+			if (!projectVerdict(verdict, onUnknown)) return false;
 			continue;
 		}
 
-		// Built-in: happened (session-entry presence check)
+		// Built-in: happened (session-entry presence check). Boolean.
 		if (key === "happened") {
 			if (!evaluateHappened(value, ctx, ruleName)) return false;
 			continue;
 		}
 
-		// Built-in: not (recursive inversion)
+		// Built-in: not (recursive inversion via the corrected
+		// not-block evaluator).
 		if (key === "not") {
 			const nested = value as WhenClause;
-			const nestedMatches = await evaluateWhen(
+			const notFires = await evaluateNotBlock(
 				nested,
 				state,
 				ctx,
 				predicates,
 				ruleName,
 			);
-			if (nestedMatches) return false;
+			if (!notFires) return false;
 			continue;
 		}
 
-		// Built-in: condition (escape-hatch function)
+		// Built-in: condition (escape-hatch function). Boolean-only per
+		// spec — the callback owns its own walker-unknown handling.
 		if (key === "condition") {
 			const fn = value as PredicateFn;
 			const result = await fn(ctx);
@@ -561,15 +925,19 @@ export async function evaluateWhen(
 			continue;
 		}
 
-		// Plugin-registered predicate. Must have been declared via
-		// `resolved.predicates[key]` (populated by plugin-merger from
-		// Plugin.predicates).
+		// Plugin-registered predicate. Trinary leaf adapter awaits, narrows,
+		// catches throws, then leaf-level `onUnknown:` projects to boolean.
 		const handler = predicates[key];
-		if (handler === undefined) {
-			throw new UnknownPredicateError(key);
-		}
-		const result = await handler(value, ctx);
-		if (!result) return false;
+		if (handler === undefined) throw new UnknownPredicateError(key);
+		const verdict = await evaluateLeafTrinary(
+			handler,
+			value,
+			ctx,
+			ruleName,
+			key,
+		);
+		const onUnknown = readLeafOnUnknown(value);
+		if (!projectVerdict(verdict, onUnknown)) return false;
 	}
 	return true;
 }

@@ -106,22 +106,15 @@ export type { DefineConfigInput } from "./define-config.ts";
 // Predicate helper.
 export { definePredicate } from "./define-predicate.ts";
 
-// Guard helpers AND reason-text helpers for custom predicates that
-// read runtime `ctx.cwd` (shell-exec or filesystem queries) rather
-// than walker-tracked state.
+// Reason-text helper for custom predicates that read runtime
+// `ctx.cwd` (shell-exec or filesystem queries) rather than
+// walker-tracked state.
 //
-// - `requireKnownCwd` / `requireKnownState`: wrap predicate handlers
-//   to inherit the engine's `onUnknown: "block"` fail-closed
-//   semantics when the walker surfaces its `"unknown"` sentinel for
-//   a dynamic `cd $VAR` target.
-// - `walkerUnknownCwdReason`: composable agent-facing reason text
-//   for ReasonFns to call on the walker-unknown branch of those
-//   wraps.
-export {
-	requireKnownCwd,
-	requireKnownState,
-} from "./helpers/require-known-state.ts";
-export type { BuiltInTrackerDimension } from "./helpers/require-known-state.ts";
+// `walkerUnknownCwdReason`: composable agent-facing reason text
+// for ReasonFns to call on the walker-unknown branch of those
+// runtime-cwd predicates (typical handler shape:
+// `if (ctx.walkerState?.cwd === "unknown") return "unknown";`,
+// then the engine projects via `onUnknown:` policy).
 export { walkerUnknownCwdReason } from "./helpers/walker-unknown-cwd-reason.ts";
 
 // Loader — walk-up config discovery + merge.
@@ -138,24 +131,35 @@ export { AGENT_LOOP_INDEX_KEY } from "./evaluator-internals/context.ts";
 // Schema types — the public authoring surface.
 export type {
 	AnyPredicateHandler,
+	DefaultSpreadBase,
 	ExecOpts,
 	ExecResult,
 	BaseRule,
 	BashRule,
 	EditRule,
+	InnerValue,
 	Observer,
 	ObserverContext,
 	ObserverWatch,
+	OperatorField,
+	OuterValue,
 	Pattern,
 	Plugin,
+	PluginPredicateKey,
 	PredicateContext,
 	PredicateFn,
 	PredicateHandler,
+	PredicateModifiers,
+	PredicateShape,
 	PredicateToolInput,
+	PredicateVerdict,
 	ReasonFn,
+	ReservedPredicateKey,
 	Rule,
 	SteeringConfig,
 	ToolResultEvent,
+	TopLevelWhenClause,
+	TopLevelWhenClauseNoRecurse,
 	WhenClause,
 	WhenWalkerState,
 	WriteRule,

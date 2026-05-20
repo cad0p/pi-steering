@@ -76,6 +76,7 @@ import {
 	evaluateWhen,
 	matchesPatternOrFn,
 	matchesPattern,
+	validateWhenClauseShape,
 } from "./evaluator-internals/predicates.ts";
 import {
 	synthesizeSpeculativeEntries,
@@ -154,6 +155,21 @@ export function buildEvaluator(
 	// user-config side (config.rules).
 	for (const rule of config.rules ?? []) {
 		validateName("rule", rule.name, "user config");
+	}
+
+	// Validate every rule's `when:` clause shape at config-resolve time.
+	// Catches the empty-clause foot-gun — `when: {}` and
+	// `not: { onUnknown: "block" }` (zero leaves after stripping
+	// reserved keys) — before the engine ever evaluates a tool_call.
+	// Plugin-shipped rules and user rules go through the same check;
+	// errors thrown here surface at extension load time (or at the test
+	// harness's `loadHarness` call) so authors can correct the config
+	// instead of getting a silently-inert rule at runtime.
+	for (const rule of config.rules ?? []) {
+		validateWhenClauseShape(rule.when, `rule "${rule.name}".when`);
+	}
+	for (const rule of resolved.rules) {
+		validateWhenClauseShape(rule.when, `rule "${rule.name}".when`);
 	}
 
 	// Default the fail-closed override policy per ADR "Override default".

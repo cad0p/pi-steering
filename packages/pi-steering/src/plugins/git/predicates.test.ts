@@ -657,30 +657,38 @@ describe("walkerString: rejects initialSentinel === \"unknown\"", () => {
 });
 
 // ---------------------------------------------------------------------------
-// requireKnownCwd wrap (Item 4 of PR #5 scope expansion)
+// ---------------------------------------------------------------------------
+// Walker-unknown cwd inline guard (replaces the deleted requireKnownCwd wrap)
 //
-// `isClean`, `hasStagedChanges`, `remote` all call `ctx.exec("git", [...],
-// { cwd: ctx.cwd })` at runtime. When the walker's cwd tracker couldn't
-// statically resolve the effective cwd (e.g. `cd "$VAR/pkg" && git commit`)
-// `ctx.cwd` falls back to the pre-cd ambient cwd — the pi session cwd,
-// NOT the intended subpackage. Without a guard the predicate silently
-// queries the wrong repo and a gate like `isClean: true` would miss the
-// state that matters.
+// `isClean`, `hasStagedChanges`, `remote`, `upstream`, `commitsAhead` all
+// call `ctx.exec("git", [...], { cwd: ctx.cwd })` at runtime. When the
+// walker's cwd tracker couldn't statically resolve the effective cwd
+// (e.g. `cd "$VAR/pkg" && git commit`) `ctx.cwd` falls back to the pre-cd
+// ambient cwd — the pi session cwd, NOT the intended subpackage. Without
+// a guard the predicate silently queries the wrong repo and a gate like
+// `isClean: true` would miss the state that matters.
 //
-// The runtime-cwd predicates are wrapped with `requireKnownCwd` from
-// `helpers/require-known-state.ts` so the walker's `"unknown"` sentinel
-// short-circuits to "fire" (fail-closed) without running the handler.
+// The runtime-cwd predicates inline a `cwdIsWalkerUnknown(ctx)` check at
+// the top of each handler (replacing the deleted `requireKnownCwd` wrap)
+// and surface trinary `"unknown"` instead of fail-CLOSED `true`. The
+// engine projects `"unknown"` to a definite verdict via the leaf-level
+// (or, inside `not:`, the block-level) `onUnknown:` policy — default
+// `"block"` keeps the fail-CLOSED behavior the wrap provided, while
+// `onUnknown: "allow"` opts into fail-OPEN handling.
+//
 // These tests pin that contract: when `ctx.walkerState.cwd === "unknown"`,
-// each wrapped predicate fires regardless of what the stubbed exec would
-// have returned — in fact exec must not be called at all.
+// each handler returns the literal string `"unknown"` regardless of what
+// the stubbed exec would have returned — in fact exec must not be called
+// at all.
 // ---------------------------------------------------------------------------
 
-describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
-	it("isClean fires without calling exec when walker reports cwd unknown", async () => {
+describe("predicates: inline walker-unknown cwd guard surfaces trinary unknown", () => {
+	it("isClean returns 'unknown' without calling exec when walker reports cwd unknown", async () => {
 		// Even though the stubbed `git status --porcelain` would return
 		// empty stdout (i.e. clean → `isClean: true` would MATCH and
-		// `isClean: false` would NOT), the wrapper must short-circuit
-		// BEFORE dispatch and fire regardless of the args value.
+		// `isClean: false` would NOT), the inline guard must short-circuit
+		// BEFORE dispatch and surface trinary unknown regardless of the
+		// args value.
 		const { ctx, execCalls } = makeCtx(
 			[
 				{
@@ -693,8 +701,8 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 			],
 			{ walkerState: { cwd: "unknown" } },
 		);
-		assert.equal(await isClean(true, ctx), true);
-		assert.equal(await isClean(false, ctx), true);
+		assert.equal(await isClean(true, ctx), "unknown");
+		assert.equal(await isClean(false, ctx), "unknown");
 		assert.equal(
 			execCalls.length,
 			0,
@@ -702,11 +710,11 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 		);
 	});
 
-	it("hasStagedChanges fires without calling exec when walker reports cwd unknown", async () => {
+	it("hasStagedChanges returns 'unknown' without calling exec when walker reports cwd unknown", async () => {
 		// Stubbed exit 0 would classify as "no staged changes", so
 		// `hasStagedChanges: true` would NOT match under the normal
-		// code path. The wrap must override that and fire for both
-		// boolean args.
+		// code path. The inline guard must override that and surface
+		// unknown for both boolean args.
 		const { ctx, execCalls } = makeCtx(
 			[
 				{
@@ -720,17 +728,18 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 			],
 			{ walkerState: { cwd: "unknown" } },
 		);
-		assert.equal(await hasStagedChanges(true, ctx), true);
-		assert.equal(await hasStagedChanges(false, ctx), true);
+		assert.equal(await hasStagedChanges(true, ctx), "unknown");
+		assert.equal(await hasStagedChanges(false, ctx), "unknown");
 		assert.equal(execCalls.length, 0);
 	});
 
-	it("remote fires without calling exec when walker reports cwd unknown", async () => {
+	it("remote returns 'unknown' without calling exec when walker reports cwd unknown", async () => {
 		// Stubbed stdout matches the test pattern under normal
-		// dispatch (→ match = true → fire). Without the wrap the rule
-		// would also fire, so the test is sharpened by asserting that
-		// exec is NOT called even once: the fire verdict must come
-		// from the walker short-circuit, not from the stub.
+		// dispatch (→ match = true → fire). Without the inline guard
+		// the rule would also fire, so the test is sharpened by
+		// asserting that exec is NOT called even once: the unknown
+		// verdict must come from the walker short-circuit, not from
+		// the stub.
 		const { ctx, execCalls } = makeCtx(
 			[
 				{
@@ -744,11 +753,11 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 			],
 			{ walkerState: { cwd: "unknown" } },
 		);
-		assert.equal(await remote(/github\.com:org\//, ctx), true);
-		// Also pin the wrap fires even when the pattern would NOT have
-		// matched the stubbed stdout — the verdict is walker-driven,
-		// not pattern-driven.
-		assert.equal(await remote(/never-matches/, ctx), true);
+		assert.equal(await remote(/github\.com:org\//, ctx), "unknown");
+		// Also pin the inline guard fires even when the pattern would
+		// NOT have matched the stubbed stdout — the verdict is
+		// walker-driven, not pattern-driven.
+		assert.equal(await remote(/never-matches/, ctx), "unknown");
 		assert.equal(
 			execCalls.length,
 			0,
@@ -756,9 +765,9 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 		);
 	});
 
-	it("isClean with known cwd still dispatches to the handler (wrap is transparent)", async () => {
-		// Counter-pin: with walker cwd resolved, the wrap must NOT
-		// interfere — the handler runs and the verdict reflects the
+	it("isClean with known cwd still dispatches to the handler (guard is transparent)", async () => {
+		// Counter-pin: with walker cwd resolved, the inline guard must
+		// NOT interfere — the handler runs and the verdict reflects the
 		// git state. Guards against a refactor that over-fires on a
 		// walker-known cwd.
 		const { ctx, execCalls } = makeCtx(
@@ -777,13 +786,13 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 		assert.equal(execCalls.length, 1);
 	});
 
-	it("upstream fires without calling exec when walker reports cwd unknown", async () => {
+	it("upstream returns 'unknown' without calling exec when walker reports cwd unknown", async () => {
 		// Same contract as isClean / hasStagedChanges / remote: the
 		// underlying `git rev-parse --abbrev-ref @{upstream}` call runs
 		// at `ctx.cwd`. When the walker bails, exec would target the pi
 		// session cwd — wrong repo — and a rule with
 		// `onUnknown: "allow"` would silently fail-OPEN. Pin that the
-		// wrap fires before dispatch.
+		// inline guard surfaces unknown before dispatch.
 		const { ctx, execCalls } = makeCtx(
 			[
 				{
@@ -797,13 +806,17 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 			],
 			{ walkerState: { cwd: "unknown" } },
 		);
-		// Default onUnknown=block: wrap fires regardless of pattern.
-		assert.equal(await upstream(/^origin\/main$/, ctx), true);
-		// onUnknown="allow" is also overridden by the wrap — the
-		// walker-cwd-unknown case is fail-closed at the wrap layer.
+		// Walker-unknown short-circuit: the handler surfaces trinary
+		// `"unknown"` regardless of the leaf-level `onUnknown:` field;
+		// the engine's leaf adapter then projects (default `"block"` =
+		// fail-CLOSED) at the call site.
+		assert.equal(await upstream(/^origin\/main$/, ctx), "unknown");
 		assert.equal(
-			await upstream({ pattern: /^origin\/main$/, onUnknown: "allow" }, ctx),
-			true,
+			await upstream(
+				{ pattern: /^origin\/main$/, onUnknown: "allow" },
+				ctx,
+			),
+			"unknown",
 		);
 		assert.equal(
 			execCalls.length,
@@ -812,7 +825,7 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 		);
 	});
 
-	it("upstream with known cwd still dispatches to the handler (wrap is transparent)", async () => {
+	it("upstream with known cwd still dispatches to the handler (guard is transparent)", async () => {
 		// Counter-pin: walker cwd resolved → handler runs.
 		const { ctx, execCalls } = makeCtx(
 			[
@@ -831,12 +844,12 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 		assert.equal(execCalls.length, 1);
 	});
 
-	it("commitsAhead fires without calling exec when walker reports cwd unknown", async () => {
+	it("commitsAhead returns 'unknown' without calling exec when walker reports cwd unknown", async () => {
 		// commitsAhead has no `onUnknown` knob at all; its exec-
 		// failure path returns `false` (rule silently skips). That's
-		// exactly the silent fail-OPEN class `requireKnownCwd` exists
-		// to close. Pin that the wrap fires ahead of dispatch for
-		// every comparator flavor.
+		// exactly the silent fail-OPEN class the inline walker-unknown
+		// guard exists to close. Pin that the guard surfaces unknown
+		// ahead of dispatch for every comparator flavor.
 		const { ctx, execCalls } = makeCtx(
 			[
 				{
@@ -848,11 +861,11 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 			{ walkerState: { cwd: "unknown" } },
 		);
 		// Under normal dispatch, `3 === 1` would be false; under the
-		// wrap it fires true.
-		assert.equal(await commitsAhead({ eq: 1 }, ctx), true);
-		// Normal dispatch would fire for `gt: 0`; wrap still returns
-		// true without running exec.
-		assert.equal(await commitsAhead({ gt: 0 }, ctx), true);
+		// guard it returns trinary unknown.
+		assert.equal(await commitsAhead({ eq: 1 }, ctx), "unknown");
+		// Normal dispatch would fire true for `gt: 0`; guard still
+		// returns trinary unknown without running exec.
+		assert.equal(await commitsAhead({ gt: 0 }, ctx), "unknown");
 		assert.equal(
 			execCalls.length,
 			0,
@@ -860,7 +873,7 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 		);
 	});
 
-	it("commitsAhead with known cwd still dispatches to the handler (wrap is transparent)", async () => {
+	it("commitsAhead with known cwd still dispatches to the handler (guard is transparent)", async () => {
 		const { ctx, execCalls } = makeCtx(
 			[
 				{
@@ -877,15 +890,19 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 		assert.equal(execCalls.length, 1);
 	});
 
-	it("remote fires even with onUnknown:allow when walker reports cwd unknown", async () => {
-		// Pins the wrap's fail-closed precedence: user-supplied
-		// `onUnknown: "allow"` asks the rule to skip when uncertain.
-		// The wrap's walker-unknown short-circuit fires anyway —
-		// runtime-cwd predicates are fail-closed at the wrap layer, and
-		// the user's `onUnknown` knob only applies to SHELL-level
-		// uncertainty (no origin configured, exec failure). A refactor
-		// that plumbed the user's `onUnknown` into the wrap's verdict
-		// would silently flip behavior here.
+	it("remote surfaces 'unknown' on walker-unknown cwd regardless of leaf-level onUnknown:allow", async () => {
+		// Pins the trinary handler contract: the inline
+		// walker-unknown-cwd guard surfaces trinary `"unknown"` BEFORE
+		// the inner exec or no-origin path runs, and BEFORE the leaf-
+		// level `onUnknown:` projection. The handler itself doesn't
+		// consume the leaf-level `onUnknown:` modifier on the
+		// walker-unknown branch — the engine's leaf adapter applies
+		// the leaf-level `onUnknown:` to project unknown → boolean at
+		// the call site (or the not-block evaluator applies the block-
+		// level `onUnknown:` inside `not:`). A refactor that consumed
+		// the leaf's `onUnknown:` inside the handler would double-
+		// project and break the inner-vs-outer split that closes the
+		// `not: { cwd: P }` silent fail-OPEN class.
 		const { ctx, execCalls } = makeCtx(
 			[
 				{
@@ -897,8 +914,8 @@ describe("predicates: requireKnownCwd wrap fires on walker-unknown cwd", () => {
 		);
 		assert.equal(
 			await remote({ pattern: /./, onUnknown: "allow" }, ctx),
-			true,
-			"wrap must fire on walker-unknown cwd even when user asked to allow",
+			"unknown",
+			"handler surfaces trinary unknown on walker-unknown cwd; leaf-level `onUnknown:` projection happens at the engine, not the handler",
 		);
 		assert.equal(execCalls.length, 0);
 	});

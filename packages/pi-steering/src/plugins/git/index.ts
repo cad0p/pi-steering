@@ -69,12 +69,110 @@
  * them. Copy-adapt liberally.
  */
 
-import type { Plugin } from "../../schema.ts";
+import type { Pattern, Plugin, PredicateShape } from "../../schema.ts";
 import type { Tracker } from "unbash-walker";
 import { branchTracker } from "./branch-tracker.ts";
 import { gitCwdExtensions } from "./cwd-extensions.ts";
 import { predicates } from "./predicates.ts";
 import { rules } from "./rules.ts";
+
+/**
+ * Local alias for the pattern-leaf shape: a single Pattern or an
+ * OR-of-patterns array. Mirrors the `Patterns` alias used in the
+ * V4 architecture doc — kept private to the gitPlugin's registry
+ * augmentation since plugin authors typically pull `Pattern` from
+ * pi-steering directly and don't need a shared `Patterns` alias.
+ */
+type Patterns = Pattern | Pattern[];
+
+declare global {
+	/**
+	 * gitPlugin's typed-predicate registry. Each entry declares the
+	 * predicate's `bare` value type and (optionally) an explicit
+	 * `spreadBase` (the spread's object form WITHOUT modifiers).
+	 * Modifiers (currently `onUnknown:`) are added at use site via
+	 * `& PredicateModifiers` (outer leaf) or at the not-block top
+	 * level (inside `not:`).
+	 *
+	 * @see PredicateShape, DefaultSpreadBase, PredicateModifiers in
+	 *      `schema.ts` for the full registry contract.
+	 */
+	interface PiSteeringPredicates {
+		/**
+		 * `when.cwd` — match the command's effective cwd against a
+		 * Pattern (string or RegExp) or an OR-of-Patterns array. Bare
+		 * shorthand for the common `{ pattern: ... }` spread form;
+		 * spread form intersects with `PredicateModifiers` (outer
+		 * leaf) or contributes to a not-block's leaf set (inner).
+		 */
+		cwd: PredicateShape<Patterns>;
+
+		/**
+		 * `when.branch` — match the current git branch. Pattern leaf,
+		 * tracker-aware (in-chain `git checkout X` resolves statically;
+		 * dynamic `git checkout $VAR` surfaces the walker's
+		 * `"unknown"` sentinel — the engine's `onUnknown:` policy
+		 * then projects to a definite verdict).
+		 */
+		branch: PredicateShape<Patterns>;
+
+		/**
+		 * `when.upstream` — match the current branch's configured
+		 * upstream (`git rev-parse --abbrev-ref @{upstream}`). Pattern
+		 * leaf. Inlines a walker-unknown-cwd guard at the handler
+		 * top — surfaces trinary `"unknown"` instead of querying the
+		 * wrong repo when the walker can't statically resolve cwd.
+		 */
+		upstream: PredicateShape<Patterns>;
+
+		/**
+		 * `when.remote` — match the repo's `origin` remote URL
+		 * (`git config --get remote.origin.url`). Pattern leaf. Same
+		 * walker-unknown-cwd guard as `upstream:`.
+		 */
+		remote: PredicateShape<Patterns>;
+
+		/**
+		 * `when.isClean` — `true` when the working tree has no
+		 * unstaged / untracked / staged changes (`git status
+		 * --porcelain` is empty); `false` otherwise. Boolean leaf;
+		 * spreadBase auto-detects to `{ value: boolean }`. Inlines
+		 * the walker-unknown-cwd guard.
+		 */
+		isClean: PredicateShape<boolean>;
+
+		/**
+		 * `when.hasStagedChanges` — `true` when there are staged
+		 * changes (`git diff --cached --quiet` exits non-zero);
+		 * `false` otherwise. Boolean leaf. Inlines the walker-
+		 * unknown-cwd guard.
+		 */
+		hasStagedChanges: PredicateShape<boolean>;
+
+		/**
+		 * `when.commitsAhead` — match when the count of commits ahead
+		 * of `wrt:` (default `@{upstream}`) satisfies every supplied
+		 * comparator. Bare shorthand `commitsAhead: N` is equivalent
+		 * to `{ eq: N }`. Spread form supports:
+		 *   - `eq?: number` — exact equality (`count === eq`).
+		 *   - `gt?: number` — strict greater-than (`count > gt`).
+		 *   - `lt?: number` — strict less-than (`count < lt`).
+		 *   - `wrt?: string` — git revision to count against (default
+		 *     `"@{upstream}"`).
+		 * At least one of `eq` / `gt` / `lt` MUST be specified;
+		 * combined with AND.
+		 *
+		 * Mixed-bare predicate: explicit `SpreadBase` since auto-
+		 * detection from `number` would give `{ value: number }`,
+		 * which doesn't match the desired comparator-bag shape.
+		 * Inlines the walker-unknown-cwd guard.
+		 */
+		commitsAhead: PredicateShape<
+			number,
+			{ eq?: number; gt?: number; lt?: number; wrt?: string }
+		>;
+	}
+}
 
 /**
  * The git plugin. Default export so `import gitPlugin from

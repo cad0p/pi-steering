@@ -5,14 +5,16 @@ import type { PredicateContext } from "../schema.ts";
 
 /**
  * Generate the agent-facing reason text for the walker-unknown-cwd
- * fail-closed branch on `requireKnownCwd`-wrapped predicates.
+ * fail-closed branch on runtime-cwd predicates.
  *
  * The pattern: a rule consumes a runtime-cwd predicate (gitPlugin's
  * `isClean` / `hasStagedChanges` / `remote` / `upstream` /
- * `commitsAhead`, or any external plugin's `requireKnownCwd`-wrapped
- * predicate). When the walker can't statically resolve cwd (e.g.,
- * `cd "$VAR" && cmd`), the wrap fires the rule. The rule's ReasonFn
- * typically wants to:
+ * `commitsAhead`, or any external plugin's runtime-cwd predicate).
+ * When the walker can't statically resolve cwd (e.g.,
+ * `cd "$VAR" && cmd`), the predicate's inline guard surfaces trinary
+ * `"unknown"`, the engine projects via the leaf-level (or block-level
+ * inside `not:`) `onUnknown:` policy — default `"block"` fires the
+ * rule. The rule's ReasonFn typically wants to:
  *
  *   1. Detect the walker-unknown case via
  *      `ctx.walkerState?.cwd === "unknown"`.
@@ -25,17 +27,15 @@ import type { PredicateContext } from "../schema.ts";
  * call site by string concatenation.
  *
  * Signature shape: `ctx` first matches the `walkerString` convention.
- * Reading `ctx.cwd` (not
- * `process.cwd()`) keeps the helper pure, testable via
- * {@link mockContext}, and accurate when pi runs predicates in
- * sandboxed/forked contexts where `process.cwd()` may diverge from
- * the engine-resolved cwd.
+ * Reading `ctx.cwd` (not `process.cwd()`) keeps the helper pure,
+ * testable via {@link mockContext}, and accurate when pi runs
+ * predicates in sandboxed/forked contexts where `process.cwd()` may
+ * diverge from the engine-resolved cwd.
  *
  * Naming convention: `walkerUnknown<Dimension>Reason`. Each plugin
  * owns its dimension's reason text. Cwd helper lives in pi-steering
- * core (where `requireKnownCwd` already lives). Future
- * `walkerUnknownBranchReason` would live in gitPlugin alongside the
- * branch tracker.
+ * core. Future `walkerUnknownBranchReason` would live in gitPlugin
+ * alongside the branch tracker.
  *
  * @param ctx - the predicate context (passed through from the rule's
  *              ReasonFn).
@@ -62,15 +62,18 @@ import type { PredicateContext } from "../schema.ts";
  * };
  * ```
  *
- * @warning Avoid `when: { not: { someRequireKnownCwdWrappedPredicate:
- *          true } }` over a {@link requireKnownCwd}-wrapped predicate.
- *          The wrap returns `true` unconditionally on the
- *          walker-unknown branch (so the engine fires fail-closed);
- *          inverting that with `not:` flips fail-closed to
- *          fail-OPEN silently. Use the predicate's documented
- *          inverted form instead — for `isClean`, that is
- *          `{ isClean: false }` (gitPlugin's `predicates.ts` JSDoc
- *          documents both polarities for exactly this reason).
+ * @warning Avoid `when: { not: { someRuntimeCwdPredicate: true } }`
+ *          over a runtime-cwd predicate at the leaf level without an
+ *          explicit block-level `onUnknown:` modifier on the not-block.
+ *          The runtime-cwd predicate surfaces `"unknown"` on the
+ *          walker-unknown branch; inside a `not:` block, the
+ *          block-level `onUnknown:` (default `"block"` = fail-CLOSED)
+ *          decides the not-clause's contribution — the not-flip is
+ *          skipped on the unknown-leaf case so authors who write
+ *          `onUnknown: "block"` directly mean "rule fires" without
+ *          double inversion. For `isClean`, the simpler form is
+ *          usually `{ isClean: false }` (gitPlugin's `predicates.ts`
+ *          JSDoc documents both polarities).
  */
 export function walkerUnknownCwdReason(
 	ctx: PredicateContext,

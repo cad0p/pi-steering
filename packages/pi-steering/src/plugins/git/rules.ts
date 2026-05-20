@@ -185,15 +185,17 @@ export const noMainCommit = {
  *          (fail-closed) so protected-branch detection isn't weakened.
  *
  * Walker-unknown cwd: separate from the `onUnknown: "allow"` path
- * above. The `remote:` predicate handler is `requireKnownCwd`-wrapped
- * at registration; the wrap fires fail-closed (returns `true`) BEFORE
- * the inner handler runs whenever `walkerState.cwd === "unknown"`,
- * overriding the inner `onUnknown: "allow"`. Combined with the branch
- * predicate (no wrap) firing fail-closed via its own default
- * `onUnknown: "block"`, both `when:` clauses match and the rule
- * fires. The reason fn detects `walkerState.cwd === "unknown"` and
- * routes to {@link walkerUnknownCwdReason} with a neutral topic so
- * the agent doesn't see an unverified positive claim about github
+ * above. The `remote:` predicate handler inlines a walker-unknown-cwd
+ * guard at the top of its body and surfaces trinary `"unknown"`
+ * BEFORE the inner exec runs whenever `walkerState.cwd === "unknown"`.
+ * The engine's leaf-level `onUnknown:` policy then projects — the
+ * default `"block"` (rather than the leaf's inner `"allow"`) is what
+ * matters here because the leaf surfaces unknown unconditionally for
+ * the walker-unknown branch; combined with the branch predicate (also
+ * surfacing trinary unknown via its `onUnknown: "block"` default), the
+ * rule fires. The reason fn detects `walkerState.cwd === "unknown"`
+ * and routes to {@link walkerUnknownCwdReason} with a neutral topic
+ * so the agent doesn't see an unverified positive claim about github
  * context. The walker-unknown branch in the reason fn is the
  * load-bearing primary path under walker-unknown cwd, not a
  * defense-in-depth fallback.
@@ -227,9 +229,10 @@ export const noMainCommitGithub = {
 		// `noMainCommit` and the user gets the correct generic message
 		// rather than PR-flow guidance for a repo where there's no PR
 		// to open. Walker-unknown cwd is governed separately by the
-		// `requireKnownCwd` wrap on the predicate handler (which fires
-		// fail-closed BEFORE consulting `onUnknown`); see the JSDoc
-		// `Walker-unknown cwd:` paragraph for the full interaction.
+		// inline walker-unknown-cwd guard at the top of the predicate
+		// handler body, which surfaces trinary `"unknown"` BEFORE
+		// consulting `onUnknown`; see the JSDoc `Walker-unknown cwd:`
+		// paragraph for the full interaction.
 		remote: { pattern: /github\.com[/:]/, onUnknown: "allow" },
 	},
 	reason: (ctx) => {

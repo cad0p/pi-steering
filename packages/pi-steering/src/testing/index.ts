@@ -50,6 +50,7 @@ import type {
 	PredicateContext,
 	PredicateHandler,
 	PredicateToolInput,
+	PredicateVerdict,
 	SteeringConfig,
 	ToolResultEvent as SchemaToolResultEvent,
 	WhenWalkerState,
@@ -1074,7 +1075,7 @@ export async function testPredicate<A = unknown>(
 	predicate: PredicateHandler<A>,
 	args: A,
 	options: MockContextOptions = {},
-): Promise<boolean | "unknown"> {
+): Promise<PredicateVerdict> {
 	const ctx = mockContext(options);
 	return predicate(args, ctx);
 }

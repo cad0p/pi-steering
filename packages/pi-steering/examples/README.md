@@ -31,6 +31,16 @@ every wrapper form) lives in the engine's own test suite.
 3. **Verify** the rule is active by running `pi` in the target
    directory; the rules load on `session_start`.
 
+**Hover-rich authoring:** factor each rule out into an
+`as const satisfies Rule` (or `: Rule`) binding before passing it to
+`defineConfig`, as `dynamic-reason-runtime-cwd/steering.ts` does.
+Inline rule literals inside `defineConfig({ rules: [{ ... }] })` get
+their contextual type narrowed to the `const`-inferred shape and
+bypass the homomorphic mapped-type linkage that surfaces source-
+declared JSDoc on hover for plugin predicates (`when.isClean`, etc.).
+The factor-out form keeps both compile-time `defineConfig` checks AND
+IDE hover ergonomics.
+
 ### JSON
 
 The loader does **not** load `.pi/steering.json` files directly — only

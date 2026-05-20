@@ -599,7 +599,7 @@ export type BuiltInWhenLeaves<Writes extends string = string> =
  * mapped-type linkage — the `const R extends readonly Rule[]`
  * signature narrows the literal to its `const`-inferred shape.
  * Factor rules out (`const myRule = { ... } as const satisfies Rule`)
- * when hover-rich authoring matters; see the `defineConfig` JSDoc.
+ * when hover-rich authoring matters; see the {@link defineConfig} JSDoc.
  *
  * @see TopLevelWhenClauseNoRecurse for the body of `not:`.
  * @see PredicateModifiers for available leaf-level modifier fields.

@@ -396,12 +396,27 @@ export function resolvePlugins(
 				// `"isNot", "negate"` was misleading for `onUnknown`
 				// collisions where neither alternative is semantically
 				// related to a walker-unknown policy.
+				//
+				// Convention for future {@link PredicateModifiers} /
+				// {@link OperatorField} additions:
+				//   - For OPERATOR collisions (a new logical operator like
+				//     `"or"` / `"and"`): prefer alternative verb forms that
+				//     avoid logical-operator vocabulary (`"either"`,
+				//     `"matchAny"` for `or`; `"all"`, `"matchAll"` for `and`).
+				//   - For MODIFIER collisions (a new modifier like a v0.2
+				//     `priority?:`): prefer names that include the modifier's
+				//     domain (`"rulePriority"`, `"orderingPriority"`) so the
+				//     suggestion clarifies which surface the registration
+				//     collided with.
+				// `Record<ReservedPredicateKey, string>` is type-exhaustive
+				// — every reserved key has a suggestion, so a future modifier
+				// addition forces an entry rather than silently flowing
+				// through a generic fallback.
 				const suggestions: Record<ReservedPredicateKey, string> = {
 					not: '"isNot", "negate"',
 					onUnknown: '"unknownPolicy", "walkerUnknownPolicy"',
 				};
-				const suggestion = suggestions[key as ReservedPredicateKey] ??
-					'"a different name"';
+				const suggestion = suggestions[key as ReservedPredicateKey];
 				throw new Error(
 					`[pi-steering] Plugin "${plugin.name}" attempted to register ` +
 						`reserved predicate key "${key}". This name conflicts with ` +

@@ -277,8 +277,11 @@ declare global {
 	 * @see {@link DefaultSpreadBase} for how spreadBase auto-detects from `bare`.
 	 * @see {@link PredicateModifiers} for available leaf-level modifier fields.
 	 * @see The `gitPlugin` declaration in `plugins/git/index.ts` for a
-	 *      multi-predicate registry block (cwd, branch, upstream, remote,
+	 *      multi-predicate registry block (branch, upstream, remote,
 	 *      isClean, hasStagedChanges, commitsAhead).
+	 * @see `examples/work-item-plugin/` for an end-to-end external-plugin
+	 *      reference: handler module, predicate-bare-shape registration,
+	 *      and a worked rule + tests.
 	 */
 	interface PiSteeringPredicates {
 		// Empty by default. Plugins augment via `declare global`.

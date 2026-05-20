@@ -29,13 +29,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+	MODIFIER_KEYS,
 	RESERVED_PREDICATE_KEYS,
 	isReservedPredicateKey,
 	validateWhenClauseShape,
 } from "./evaluator-internals/predicates.ts";
 import { resolvePlugins } from "./plugin-merger.ts";
 import { buildEvaluator } from "./evaluator.ts";
-import { makeCtx, makeTrackedHost } from "./__test-helpers__.ts";
+import { makeTrackedHost } from "./__test-helpers__.ts";
 import type {
 	BuiltInWhenLeaves,
 	Plugin,
@@ -78,6 +79,25 @@ describe("plugin-merger: reserved predicate key registration check", () => {
 		assert.throws(
 			() => resolvePlugins([plugin], {}),
 			/reserved predicate key "onUnknown"/,
+		);
+	});
+
+	it("`onUnknown` collision suggests `unknownPolicy` (modifier-collision suggestion convention)", () => {
+		// Pins the modifier-domain-flavored suggestion for `onUnknown:`
+		// collisions (per the convention documented on plugin-merger.ts:
+		// modifier collisions prefer alternatives including the modifier's
+		// domain). The generic `"isNot", "negate"` operator-collision
+		// suggestion isn't relevant for an `onUnknown:` collision; the
+		// suggestion text must point at `unknownPolicy` /
+		// `walkerUnknownPolicy` so a plugin author lands at a semantically
+		// related alternative.
+		const plugin: Plugin = {
+			name: "evil",
+			predicates: { onUnknown: () => true },
+		};
+		assert.throws(
+			() => resolvePlugins([plugin], {}),
+			/unknownPolicy/,
 		);
 	});
 
@@ -175,14 +195,20 @@ describe("MODIFIER_KEYS: type ↔ runtime sync pin", () => {
 		);
 	});
 
-	it("keyof PredicateModifiers compile-time matches the runtime modifier list", () => {
-		// Belt-and-suspenders: the type-level `_MODIFIER_KEYS_COVERS_TYPE`
-		// constant in `evaluator-internals/predicates.ts` fails compilation
-		// when a future modifier (e.g. v0.2 `priority?:`) is added without
-		// updating MODIFIER_KEYS. We pin the contract here too so a reader
-		// landing on this test file can see the lockstep relationship.
+	it("MODIFIER_KEYS runtime constant matches `keyof PredicateModifiers` exactly", () => {
+		// Runtime + compile-time pin: the runtime list and the type-level
+		// modifier surface must agree. The type-level
+		// `_MODIFIER_KEYS_COVERS_TYPE` constant in
+		// `evaluator-internals/predicates.ts` fails compilation when
+		// `keyof PredicateModifiers` extends to a key the runtime list
+		// missed; this fixture pins the literal contents so a typo or
+		// reorder gets a test-level diff. Adding a future modifier
+		// (e.g., v0.2 `priority?:`) requires updating both surfaces.
 		const expected: readonly (keyof PredicateModifiers)[] = ["onUnknown"];
-		assert.equal(expected.length, 1);
+		assert.deepEqual(
+			[...MODIFIER_KEYS].sort(),
+			[...expected].sort(),
+		);
 	});
 });
 
@@ -314,10 +340,43 @@ describe("validateWhenClauseShape: nested-not: rejection", () => {
 			},
 		);
 	});
-});
 
-// Keep makeCtx referenced so its import is not dropped on tree-shake passes.
-void makeCtx;
+	it("throws on a JSON-deserialized nested-not (the JSON / `as any` escape hatch the type-level ban can't catch)", () => {
+		// Pins the runtime-guard's primary justification: a config
+		// loaded from JSON or hand-typed via an `as any` cast bypasses
+		// the type-level ban on `TopLevelWhenClauseNoRecurse.not`. The
+		// runtime check in validateWhenClauseShape is the only line of
+		// defense for that path.
+		const fromJson = JSON.parse(
+			'{"not": {"not": {"cwd": "/work/"}}}',
+		) as unknown;
+		assert.throws(
+			() =>
+				validateWhenClauseShape(
+					fromJson as TopLevelWhenClause<string>,
+					'rule "r".when',
+				),
+			/contains a nested 'not:' key/,
+		);
+	});
+
+	it("throws on `when: { not: { not: { not: P } } }` (depth-3 recursion stays rejected)", () => {
+		// Pins the recursion contract beyond depth-2. The validator
+		// recurses into the not-block and runs the same nested-not
+		// check; depth-3 must reject at the second level (the inner
+		// `not.not` of the outer block).
+		assert.throws(
+			() =>
+				validateWhenClauseShape(
+					{
+						not: { not: { not: { cwd: /work/ } } },
+					} as unknown as TopLevelWhenClause<string>,
+					'rule "r".when',
+				),
+			/contains a nested 'not:' key/,
+		);
+	});
+});
 
 // ---------------------------------------------------------------------------
 // BuiltInWhenLeaves shape pin

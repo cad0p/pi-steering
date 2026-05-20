@@ -194,7 +194,7 @@ export function validateWhenClauseShape(
  * leaf by {@link validateWhenClauseShape}, masking empty-clause
  * configs that are now "only modifiers, no real leaves."
  */
-const MODIFIER_KEYS = ["onUnknown"] as const satisfies readonly (keyof PredicateModifiers)[];
+export const MODIFIER_KEYS = ["onUnknown"] as const satisfies readonly (keyof PredicateModifiers)[];
 
 /**
  * Type-level assertion that {@link MODIFIER_KEYS} covers every

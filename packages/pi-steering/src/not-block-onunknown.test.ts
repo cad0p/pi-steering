@@ -489,4 +489,51 @@ describe("BuiltInWhenLeaves: shape pin", () => {
 
 		assert.ok(true);
 	});
+
+	it("Rule.when rejects spread shape on outer condition: (bare PredicateFn only)", () => {
+		// Negative type-pin: `condition?:` is bare-`PredicateFn`-typed at
+		// every placement (outer + inner). Future widening to a
+		// {@link PredicateShape} that admits a leaf-level `onUnknown:`
+		// modifier would silently bypass the engine's outer
+		// `condition:` contract (default `"block"` policy hard-coded;
+		// authors needing fail-OPEN wrap inside `not: { condition: fn,
+		// onUnknown: "allow" }`). Pin the constraint at the authoring
+		// surface so any future shape-widening trips the typecheck gate
+		// instead of regressing the contract silently.
+		const _banSpread: Rule = {
+			name: "x",
+			tool: "bash",
+			field: "command",
+			pattern: "^x",
+			reason: "x",
+			when: {
+				// @ts-expect-error: condition?: is bare PredicateFn — spread shape forbidden
+				condition: { value: () => true, onUnknown: "allow" },
+			},
+		};
+		void _banSpread;
+
+		// Sibling positive cases: bare callback at outer + inside `not:`.
+		const _bareOuter: Rule = {
+			name: "x",
+			tool: "bash",
+			field: "command",
+			pattern: "^x",
+			reason: "x",
+			when: { condition: () => true },
+		};
+		void _bareOuter;
+
+		const _bareInner: Rule = {
+			name: "x",
+			tool: "bash",
+			field: "command",
+			pattern: "^x",
+			reason: "x",
+			when: { not: { condition: () => true } },
+		};
+		void _bareInner;
+
+		assert.ok(true);
+	});
 });

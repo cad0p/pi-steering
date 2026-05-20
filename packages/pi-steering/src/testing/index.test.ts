@@ -236,19 +236,20 @@ describe("loadHarness", () => {
 	it("default host's unstubbed exec surfaces as a logged warning + fires fail-CLOSED (S1)", async () => {
 		// S1: a throwing predicate (here: the default host's `exec`
 		// throwing 'exec not stubbed') is caught by the evaluator and
-		// treated as `"unknown"`. With no `onUnknown:` sibling on the
-		// `condition:` leaf, the default `"block"` policy fires the rule
-		// fail-CLOSED. The test's original intent — 'authors who forget
-		// to stub exec see a clear error' — still holds: the warning
-		// names the rule and carries the original error message.
+		// treated as `"unknown"`. Outer-level `condition:` is
+		// bare-`PredicateFn`-typed (no leaf-level `onUnknown:` opt-in
+		// available), so the projection always uses the default `"block"`
+		// policy and the rule fires fail-CLOSED. The test's original
+		// intent — 'authors who forget to stub exec see a clear error' —
+		// still holds: the warning names the rule + its source and carries
+		// the original error message.
 		//
 		// Symmetry note: outer-level `condition:` throws now mirror the
 		// inner not-block treatment + the plugin-handler exception
-		// contract — throw → `"unknown"` → leaf-level `onUnknown:`
-		// projection. Authors who want fail-OPEN treatment for a
-		// throwing condition need to express the policy at the
-		// containing block level (e.g. inside `not: { condition: fn,
-		// onUnknown: "allow" }`).
+		// contract — throw → `"unknown"` → default `"block"` projection.
+		// Authors who want fail-OPEN treatment for a throwing condition
+		// need to express the policy at the containing block level (e.g.
+		// inside `not: { condition: fn, onUnknown: "allow" }`).
 		const rule: Rule = {
 			name: "uses-exec",
 			tool: "bash",
@@ -280,13 +281,13 @@ describe("loadHarness", () => {
 				0,
 			);
 			// Rule fires fail-CLOSED (condition: threw → unknown → default
-			// block-level `"block"` policy fires the rule).
+			// leaf-level `"block"` policy fires the rule).
 			assert.ok(result && result.block === true);
-			// Warning names the rule + the unstubbed-exec message via the
-			// `when.condition threw` channel.
+			// Warning names the rule + its `@<source>` tag + the
+			// unstubbed-exec message via the `when.condition threw` channel.
 			assert.ok(
 				warnings.some((w) =>
-					/Rule "uses-exec".*when\.condition threw.*exec not stubbed/.test(
+					/Rule "uses-exec"@user.*when\.condition threw.*exec not stubbed/.test(
 						w,
 					),
 				),

@@ -684,6 +684,7 @@ async function runPredicateChain(
 	cand: Candidate,
 	shared: SharedEvalContext,
 ): Promise<PredicateContext | null> {
+	const source = shared.ruleSources.get(rule) ?? "user";
 	try {
 		// Pattern-miss is the common case; exit before allocating ctx.
 		if (!matchesPattern(rule.pattern, cand.target)) return null;
@@ -719,12 +720,12 @@ async function runPredicateChain(
 			ctx,
 			shared.predicates,
 			rule.name,
+			source,
 		);
 		if (!whenOk) return null;
 
 		return ctx;
 	} catch (err) {
-		const source = shared.ruleSources.get(rule) ?? "user";
 		console.warn(
 			`[pi-steering] predicate threw for rule "${rule.name}"@${source}: ${formatError(err)}`,
 		);

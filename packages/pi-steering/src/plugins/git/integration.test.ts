@@ -527,16 +527,17 @@ describe("git plugin: no-main-commit-github walker-unknown cwd", () => {
 // ---------------------------------------------------------------------------
 // 7. isClean spread-form engine end-to-end
 //
-// Pins the engine's strip-modifier-then-call-handler contract for
-// boolean predicates: the spread form `{ value: false, onUnknown:
-// "allow" }` must reach the handler with `onUnknown:` stripped (the
-// engine's `readLeafOnUnknown` consumes it before dispatch). This
-// drives `evaluateWhen` → `readLeafOnUnknown` → `isClean` handler
-// end-to-end.
+// Pins the engine's leaf-onUnknown read + handler-dispatch contract
+// for boolean predicates: the spread form `{ value: false,
+// onUnknown: "allow" }` flows verbatim to the handler; the engine's
+// `readLeafOnUnknown` reads the modifier and `projectVerdict` projects
+// the handler's `"unknown"` returns under that policy. The handler
+// itself treats `onUnknown:` as an opaque sibling field. This drives
+// `evaluateWhen` → `readLeafOnUnknown` → `isClean` handler end-to-end.
 // ---------------------------------------------------------------------------
 
 describe("git plugin: isClean spread form drives through readLeafOnUnknown", () => {
-	it("`isClean: { value: false, onUnknown: \"allow\" }` fires when working tree is dirty (engine strips the modifier before dispatch)", async () => {
+	it("`isClean: { value: false, onUnknown: \"allow\" }` fires when working tree is dirty (handler unwraps `value:` and ignores `onUnknown:`)", async () => {
 		// Stub `git status --porcelain` to report a dirty tree.
 		const { evaluator } = buildRuntime(
 			{
@@ -575,7 +576,7 @@ describe("git plugin: isClean spread form drives through readLeafOnUnknown", () 
 		);
 		assert.ok(
 			res && res.block === true,
-			"engine strips `onUnknown: 'allow'` and calls the handler with `{ value: false }`; handler unwraps to `false`, sees dirty tree, returns true → rule fires",
+			"engine reads `onUnknown: 'allow'` via `readLeafOnUnknown`; handler receives the raw `{ value, onUnknown }` arg, unwraps `value: false`, sees dirty tree (boolean returns from a dirty tree are concrete false/true so `onUnknown` plays no role on this path), returns true → rule fires",
 		);
 		assert.match(
 			res.reason!,

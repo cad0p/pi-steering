@@ -115,7 +115,7 @@ This fails at `tsc --noEmit` time — rule / plugin / observer names are threade
 
 Three orthogonal axes, three distinct word families. Keep them straight and the docs / rules / errors all line up.
 
-**Time scope** (`WhenClause.happened.in`):
+**Time scope** (`TopLevelWhenClause.happened.in`):
 
 - **`agent_loop`** — the current user prompt plus every tool call it spawns. Bumped on pi's `agent_start` event. Most common scope for workflow rules.
 - **`session`** — the entire pi session across all agent loops. Persisted in the session JSONL, survives restarts.
@@ -223,7 +223,7 @@ interface Rule {
   pattern: string | RegExp;                     // main match
   requires?: Pattern | PredicateFn;             // AND extra
   unless?: Pattern | PredicateFn;               // exemption
-  when?: WhenClause;                            // composable predicates
+  when?: TopLevelWhenClause;                   // composable predicates
   reason: string | ReasonFn;                    // message (or fn) to the agent
   noOverride?: boolean;                         // default: true (fail-closed)
   observer?: Observer | string;                 // name-ref to a shipped observer
@@ -252,33 +252,58 @@ The **reason** is written for the agent. Include what was blocked and what the s
 
 Reason functions are awaited, and the result is prefixed the same way as string reasons (`[steering:<rule>@<source>] …`). If the function throws or rejects, the engine logs the error with `console.warn` and emits a fail-safe fallback body (`(reason failed to format; see log)`) so the block verdict still lands without leaking the raw error to the agent.
 
-### `WhenClause`
+### `TopLevelWhenClause`
 
 ```ts
-interface WhenClause {
-  cwd?: Pattern | { pattern: Pattern; onUnknown?: "allow" | "block" };
+type TopLevelWhenClause<Writes extends string = string> = {
+  // Built-in non-registry leaves (lifted onto BuiltInWhenLeavesOuter):
+  cwd?: Pattern | Pattern[]
+      | { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };
   happened?: {
-    event: string;
+    event: Writes;
     in: "agent_loop" | "session" | "tool_call";
-    since?: string;  // optional invalidation sentinel
+    since?: Writes;     // optional invalidation sentinel
     notIn?: "agent_loop" | "session" | "tool_call";  // scope subtraction
   };
-  not?: WhenClause;
   condition?: (ctx: PredicateContext) => boolean | Promise<boolean>;
 
-  // Plugin-registered keys:
-  [customKey: string]: unknown;
-}
+  // One level of negation (no recursion). Inside `not:`, leaf-level
+  // `onUnknown:` is forbidden; the block-level modifier owns the
+  // walker-unknown projection (default `"block"` = fail-CLOSED).
+  not?: TopLevelWhenClauseNoRecurse<Writes>;
+} & {
+  // Plugin-registered predicate leaves — narrowed via the
+  // PiSteeringPredicates registry. `branch:`, `upstream:`,
+  // `isClean:`, etc. each declare their bare / spread shape via
+  // `declare global` augmentation in the plugin's index.ts.
+  [K in PluginPredicateKey]?: OuterValue<K>;
+};
 ```
 
 Built-ins:
 
 - **`cwd`** — rule fires only when the command's effective cwd matches. For bash, this is the per-ref cwd from the walker (so `cd ~/personal && git commit` evaluates against `~/personal`). Dynamic targets — `cd "$WS_DIR/pkg"`, `cd ~/proj` — resolve through the walker's env tracker (seeded from `process.env.{HOME, USER, PWD}` plus any bare assignments, `export`s, or `unset`s in the same chain). Intractable targets (`cd $(pwd)`, `cd $UNDEFINED`) surface as the `"unknown"` sentinel; apply `onUnknown: "allow" | "block"` (default `"block"`, fail-closed) to choose. For write/edit, it's the session cwd.
 - **`happened`** — fires when an entry of `event` has NOT occurred in `in` scope. `"agent_loop"` filters by `_agentLoopIndex === ctx.agentLoopIndex` (one user prompt + its tool calls); `"session"` scans the whole session JSONL; `"tool_call"` considers only speculative entries synthesized for THIS tool_call's `&&`-chain. Optional `since` acts as an invalidation sentinel — see "Temporal ordering with `happened.since`" below. Optional `notIn` subtracts a narrower scope from `in` (e.g. `{ in: "agent_loop", notIn: "tool_call" }` means "happened in a prior tool_call in this loop", blocking the same-tool_call speculative bypass). `notIn` is set subtraction, distinct from the clause-level `not` (boolean negation). Synthesizes speculative entries across `&&` bash chains — see "`&&`-chain speculative allow" below.
-- **`not`** — boolean NOT over a nested clause. Use to invert a sub-clause (e.g. `not: { upstream: /^origin\/main$/ }` fires unless upstream is origin/main).
+- **`not`** — boolean NOT over an inner predicate block. One level only (no `not: not: ...` recursion). Inside `not:`, leaf-level `onUnknown:` is forbidden; the block-level `onUnknown:` modifier projects walker-unknown verdicts (default `"block"` = fail-CLOSED, rule fires).
 - **`condition`** — escape hatch for one-off logic. Prefer plugin predicates when the logic is reusable.
 
-Plugin predicates fill the `[customKey: string]` slot. `when.branch: /^main$/` is valid only if a plugin registered `branch` under `predicates`.
+Plugin-registered predicate leaves come from the `PiSteeringPredicates` registry, populated by each plugin's `declare global` block:
+
+```ts
+// inside a plugin's index.ts
+declare global {
+  interface PiSteeringPredicates {
+    branch: PredicateShape<{
+      bare: Pattern;
+      spreadBase: { pattern: Pattern };
+    }>;
+  }
+}
+```
+
+Each key contributes a leaf-level field on `TopLevelWhenClause` accepting the bare or spread form. `when.branch: /^main$/` is valid only when a plugin has augmented `PiSteeringPredicates` with a `branch` key. See `plugins/git/index.ts` for a worked example.
+
+The legacy `WhenClause` interface is `@deprecated` for the JSON-v1 compatibility path (`compat.ts`); new code authors against `TopLevelWhenClause`.
 
 ### Predicate context
 

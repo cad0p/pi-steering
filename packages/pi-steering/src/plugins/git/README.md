@@ -355,25 +355,13 @@ A common request: "don't block commits to main inside my vault
 directory" (vault flows like napkin-distill commit to a `main`
 branch by design). Cwd-based exemptions need care because:
 
-1. **The generic `no-main-commit` still fires on vault paths.**
-   Disabling only the github specialization isn't enough — the
-   generic rule's `when:` is just `{ branch: ... }` (no `remote:`
-   gate), so it fires on any github clone or any other repo whose
-   branch is one of the protected names. To actually exempt a path
-   you need to disable BOTH shipped rules and register a
-   user-authored rule.
-
-2. **`not: { cwd: ... }` flips fail-closed to fail-OPEN under
-   walker-unknown cwd.** When the walker can't statically resolve
-   cwd (`cd "$VAR" && git commit`), the inner predicate's
-   fail-closed-on-unknown default fires `cwd: ...` → the `not:`
-   wrapper inverts → the carve-out predicate FAILS → the rule
-   skips. A user committing inside `cd "$VAULT_PATH" && git
-   commit` slips past the rule even when not in a vault path. The
-   fix is to use the predicate's object form with explicit
-   `onUnknown: "allow"` so the inner predicate allows on unknown,
-   the `not:` inverts to fire, and the outer rule fires fail-closed
-   under walker-unknown cwd.
+**The generic `no-main-commit` still fires on vault paths.**
+Disabling only the github specialization isn't enough — the
+generic rule's `when:` is just `{ branch: ... }` (no `remote:`
+gate), so it fires on any github clone or any other repo whose
+branch is one of the protected names. To actually exempt a path
+you need to disable BOTH shipped rules and register a
+user-authored rule.
 
 Worked example:
 
@@ -392,15 +380,14 @@ const noMainCommitExceptVault = {
   name: "myorg-no-main-commit-except-vault",
   when: {
     ...noMainCommit.when,
-    // Object form with `onUnknown: "allow"` is LOAD-BEARING here.
-    // Bare `not: { cwd: VAULT_DIRS }` would be fail-OPEN under
-    // walker-unknown cwd — the inner cwd: predicate fires fail-
-    // closed on unknown, the `not:` inverts, the outer rule
-    // skips, and a `cd "$VAR" && git commit` slips past. Setting
-    // `onUnknown: "allow"` on the inner predicate makes it
-    // ALLOW under unknown — the `not:` then inverts to FIRE —
-    // and the outer rule stays fail-closed.
-    not: { cwd: { pattern: VAULT_DIRS, onUnknown: "allow" } },
+    // Bare `not: { cwd: VAULT_DIRS }` is fail-CLOSED under
+    // walker-unknown cwd via the not-block's default block-level
+    // `onUnknown: "block"` modifier (see Walker-unknown cwd
+    // below). The inner `cwd:` predicate produces an `"unknown"`
+    // verdict, the not-block projects it to `false`, the outer
+    // rule fires — a `cd "$VAR" && git commit` is blocked rather
+    // than slipping past.
+    not: { cwd: VAULT_DIRS },
   },
 } as const satisfies Rule;
 
@@ -413,6 +400,28 @@ export default defineConfig({
   rules: [noMainCommitExceptVault],
 });
 ```
+
+### Walker-unknown cwd
+
+When the walker can't statically resolve cwd (e.g.
+`cd "$VAR" && git commit`), the inner `cwd:` predicate returns
+`"unknown"` and the not-block applies its block-level
+`onUnknown:` modifier (default `"block"`) to project the verdict.
+Default `"block"` means the not-block evaluates to `false`, the
+outer rule's `not:` flips to `true`, and the rule fires —
+fail-CLOSED. Authors who want walker-unknown vault paths to skip
+the rule (fail-OPEN exemption) opt in with the block-level
+modifier:
+
+```ts
+not: { cwd: VAULT_DIRS, onUnknown: "allow" }
+```
+
+The full truth table for `not: { cwd: ... }` under walker-known
+vs walker-unknown cwd lives in the
+[`dynamic-reason-runtime-cwd` example README][cwd-truth-table].
+
+[cwd-truth-table]: ../../../examples/dynamic-reason-runtime-cwd/README.md
 
 The `Pattern[]` annotation on `VAULT_DIRS` lets you mix string
 patterns and RegExp without TS narrowing the array's element type

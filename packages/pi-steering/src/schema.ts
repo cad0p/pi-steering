@@ -679,6 +679,13 @@ export type AnyPredicateHandler = PredicateHandler<any>;
  * not-block bodies (both are registry-driven and enforce the
  * five compile-time constraints documented on {@link BaseRule.when}).
  *
+ * Note: even though this legacy interface permits `not: { not: ... }`
+ * recursion at the type level, the engine's runtime
+ * `validateWhenClauseShape` rejects nested-`not` shapes at
+ * `buildEvaluator` time. Authors smuggling depth-2 recursion through
+ * JSON v1 / `as any` casts hit the runtime guard, not silent
+ * acceptance.
+ *
  * @deprecated Internal v1-compat type. Use {@link TopLevelWhenClause}
  *             at authoring sites; this interface is preserved only
  *             for the JSON v1→v2 conversion path in `compat.ts`.
@@ -1037,7 +1044,9 @@ export interface EditRule<
  * Shape refinements vs. v1:
  *   - `pattern` accepts `RegExp` in addition to `string`.
  *   - `requires` / `unless` accept `Pattern | PredicateFn`.
- *   - `when` is a recursive {@link WhenClause}.
+ *   - `when` is a {@link TopLevelWhenClause} — registry-driven
+ *     mapped type with one level of `not:` allowed (no nested
+ *     `not: not: ...`).
  *   - `observer` references an {@link Observer} by name (string) or
  *     inline definition.
  *   - `Rule` is a discriminated union by `tool`.

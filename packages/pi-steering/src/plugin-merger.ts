@@ -392,10 +392,7 @@ export function resolvePlugins(
 			// in `evaluator-internals/predicates.ts`.
 			if (isReservedPredicateKey(key)) {
 				// Key-specific suggestion: `not` collides with the operator
-				// field, `onUnknown` with the modifier surface. Generic
-				// `"isNot", "negate"` was misleading for `onUnknown`
-				// collisions where neither alternative is semantically
-				// related to a walker-unknown policy.
+				// field, `onUnknown` with the modifier surface.
 				//
 				// Convention for future {@link PredicateModifiers} /
 				// {@link OperatorField} additions:
@@ -416,7 +413,9 @@ export function resolvePlugins(
 					not: '"isNot", "negate"',
 					onUnknown: '"unknownPolicy", "walkerUnknownPolicy"',
 				};
-				const suggestion = suggestions[key as ReservedPredicateKey];
+				// `key` is narrowed to `ReservedPredicateKey` by the
+				// `isReservedPredicateKey` type guard above.
+				const suggestion = suggestions[key];
 				throw new Error(
 					`[pi-steering] Plugin "${plugin.name}" attempted to register ` +
 						`reserved predicate key "${key}". This name conflicts with ` +

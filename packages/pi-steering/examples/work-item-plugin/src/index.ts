@@ -22,7 +22,7 @@
  *         prior `TEST_PASSED_EVENT` entries via `happened.since`.
  *   - `rules/commit-requires-work-item.ts`
  *       - Plugin-registered predicate consumption via `when.<key>`.
- *       - `not:` inversion in a `WhenClause`.
+ *       - `not:` inversion in a {@link TopLevelWhenClause}.
  *   - `rules/push-requires-tests.ts`
  *       - `when.happened: { in: "agent_loop" }` gating.
  *       - Observer → rule coupling via the shared EVENT constants.

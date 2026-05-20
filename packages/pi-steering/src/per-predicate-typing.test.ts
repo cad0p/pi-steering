@@ -45,6 +45,7 @@ import type {
 	PluginPredicateKey,
 	PredicateHandler,
 	TopLevelWhenClause,
+	TopLevelWhenClauseNoRecurse,
 } from "./schema.ts";
 
 const _gitPluginRegistered: typeof gitPlugin = gitPlugin;

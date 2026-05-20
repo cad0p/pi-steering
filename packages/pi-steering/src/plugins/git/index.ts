@@ -69,7 +69,13 @@
  * them. Copy-adapt liberally.
  */
 
-import type { Pattern, Plugin, PredicateShape } from "../../schema.ts";
+import type {
+	BuiltInWhenLeaves,
+	Pattern,
+	Plugin,
+	PredicateShape,
+} from "../../schema.ts";
+import type { DEFAULT_PLUGINS } from "../../defaults.ts";
 import type { Tracker } from "unbash-walker";
 import { branchTracker } from "./branch-tracker.ts";
 import { gitCwdExtensions } from "./cwd-extensions.ts";

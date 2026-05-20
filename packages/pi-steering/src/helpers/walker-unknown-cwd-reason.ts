@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Part of pi-steering.
 
-import type { PredicateContext } from "../schema.ts";
+import type {
+	PredicateContext,
+	TopLevelWhenClauseNoRecurse,
+} from "../schema.ts";
 
 /**
  * Generate the agent-facing reason text for the walker-unknown-cwd

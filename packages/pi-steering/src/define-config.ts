@@ -35,6 +35,7 @@
  */
 
 import type {
+	BuiltInWhenLeavesOuter,
 	Observer,
 	Plugin,
 	Rule,

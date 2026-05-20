@@ -59,6 +59,7 @@ import type {
 	Pattern,
 	PredicateContext,
 	PredicateHandler,
+	PredicateShape,
 	PredicateVerdict,
 } from "../../schema.ts";
 import { isPattern } from "../../internal/pattern-utils.ts";

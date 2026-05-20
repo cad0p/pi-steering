@@ -420,6 +420,28 @@ describe("predicate: commitsAhead", () => {
 		]);
 		assert.equal(await commitsAhead({ lt: 5 }, ctxBelow), true);
 	});
+
+	it("bare-number `commitsAhead: N` is sugar for `{ eq: N }` (schema-advertised shape)", async () => {
+		const { ctx, execCalls } = makeCtx([
+			{
+				match: (cmd, args) =>
+					cmd === "git" &&
+					args[0] === "rev-list" &&
+					args[1] === "--count" &&
+					args[2] === "@{upstream}..HEAD",
+				result: execOk("1\n"),
+			},
+		]);
+		assert.equal(await commitsAhead(1, ctx), true);
+		assert.equal(execCalls.length, 1);
+	});
+
+	it("bare-number `commitsAhead: 0` matches when count is 0 (sugar for `{ eq: 0 }`)", async () => {
+		const { ctx } = makeCtx([
+			{ match: (cmd) => cmd === "git", result: execOk("0\n") },
+		]);
+		assert.equal(await commitsAhead(0, ctx), true);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -482,6 +504,39 @@ describe("predicate: hasStagedChanges", () => {
 			false,
 		);
 	});
+
+	it("spread `{ value: true }` is equivalent to bare `true` (schema-advertised shape)", async () => {
+		const { ctx, execCalls } = makeCtx([
+			{
+				match: (cmd, args) =>
+					cmd === "git" &&
+					args[0] === "diff" &&
+					args[1] === "--cached" &&
+					args[2] === "--quiet",
+				result: execFail(1), // staged changes exist
+			},
+		]);
+		assert.equal(await hasStagedChanges({ value: true }, ctx), true);
+		assert.equal(execCalls.length, 1);
+	});
+
+	it("spread `{ value: false, onUnknown: 'allow' }` ignores onUnknown in handler body", async () => {
+		const { ctx } = makeCtx([
+			{
+				match: (cmd) => cmd === "git",
+				result: execOk(""), // no staged changes
+			},
+		]);
+		// onUnknown is read by readLeafOnUnknown at the engine layer;
+		// the handler itself just unwraps `value:`.
+		assert.equal(
+			await hasStagedChanges(
+				{ value: false, onUnknown: "allow" } as unknown as boolean,
+				ctx,
+			),
+			true,
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -530,6 +585,36 @@ describe("predicate: isClean", () => {
 	it("non-boolean arg -> false", async () => {
 		const { ctx } = makeCtx([]);
 		assert.equal(await isClean(1 as unknown as boolean, ctx), false);
+	});
+
+	it("spread `{ value: true }` is equivalent to bare `true` (schema-advertised shape)", async () => {
+		const { ctx, execCalls } = makeCtx([
+			{
+				match: (cmd, args) =>
+					cmd === "git" &&
+					args[0] === "status" &&
+					args[1] === "--porcelain",
+				result: execOk(""), // clean
+			},
+		]);
+		assert.equal(await isClean({ value: true }, ctx), true);
+		assert.equal(execCalls.length, 1);
+	});
+
+	it("spread `{ value: false, onUnknown: 'allow' }` unwraps value cleanly", async () => {
+		const { ctx } = makeCtx([
+			{
+				match: (cmd) => cmd === "git",
+				result: execOk(" M file.ts\n"), // dirty
+			},
+		]);
+		assert.equal(
+			await isClean(
+				{ value: false, onUnknown: "allow" } as unknown as boolean,
+				ctx,
+			),
+			true,
+		);
 	});
 });
 

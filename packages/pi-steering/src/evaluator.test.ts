@@ -44,6 +44,7 @@ import type {
 	PredicateHandler,
 	Rule,
 	SteeringConfig,
+	WhenClause,
 } from "./schema.ts";
 
 // ---------------------------------------------------------------------------
@@ -2768,7 +2769,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 	}
 
 	function makeRule(
-		when: NonNullable<Rule["when"]>,
+		when: WhenClause,
 		name: string = "r",
 	): Rule {
 		return {
@@ -2777,12 +2778,12 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			field: "command",
 			pattern: "^git\\s+push",
 			reason: name,
-			when,
+			when: when as NonNullable<Rule["when"]>,
 		};
 	}
 
 	function buildWith(
-		when: NonNullable<Rule["when"]>,
+		when: WhenClause,
 		plugin: Plugin,
 		name: string = "r",
 	) {
@@ -3086,7 +3087,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
 			field: "command",
 			pattern: "^git\\s+push",
 			reason: "r",
-			when: { tri: "x" }, // bare — no leaf-level onUnknown:
+			when: { tri: "x" } as unknown as NonNullable<Rule["when"]>, // bare — no leaf-level onUnknown:
 		};
 		const ev = buildEvaluator(
 			{ rules: [rule] },
@@ -3107,7 +3108,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
 			field: "command",
 			pattern: "^git\\s+push",
 			reason: "r",
-			when: { tri: { value: "x", onUnknown: "allow" } as any },
+			when: { tri: { value: "x", onUnknown: "allow" } as any } as unknown as NonNullable<Rule["when"]>,
 		};
 		const ev = buildEvaluator(
 			{ rules: [rule] },
@@ -3129,7 +3130,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
 			field: "command",
 			pattern: "^git\\s+push",
 			reason: "r",
-			when: { tri: "x" },
+			when: { tri: "x" } as unknown as NonNullable<Rule["when"]>,
 		};
 		const ev = buildEvaluator(
 			{ rules: [rule] },
@@ -3157,7 +3158,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
 			field: "command",
 			pattern: "^git\\s+push",
 			reason: "r",
-			when: { not: { tri: "x" } },
+			when: { not: { tri: "x" } } as unknown as NonNullable<Rule["when"]>,
 		};
 		const ev = buildEvaluator(
 			{ rules: [rule] },
@@ -3290,7 +3291,7 @@ describe("buildEvaluator: plugin predicates", () => {
 			field: "command",
 			pattern: "^git",
 			reason: "bad",
-			when: { totallyMadeUp: /whatever/ },
+			when: { totallyMadeUp: /whatever/ } as unknown as NonNullable<Rule["when"]>,
 		};
 		const warnings = captureWarnings();
 		try {

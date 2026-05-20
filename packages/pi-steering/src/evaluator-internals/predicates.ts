@@ -30,8 +30,11 @@ import type {
 	PredicateContext,
 	PredicateFn,
 	PredicateHandler,
+	PredicateModifiers,
 	PredicateVerdict,
 	ReservedPredicateKey,
+	TopLevelWhenClause,
+	TopLevelWhenClauseNoRecurse,
 	WhenClause,
 } from "../schema.ts";
 import { isPattern } from "../internal/pattern-utils.ts";
@@ -119,7 +122,7 @@ export function isReservedPredicateKey(
  * `'rule "no-main-commit".when'` or `'rule "no-git-worktree".when.not'`.
  */
 export function validateWhenClauseShape(
-	block: WhenClause | undefined,
+	block: TopLevelWhenClause<string> | undefined,
 	path: string,
 ): void {
 	if (block === undefined) return;
@@ -148,8 +151,24 @@ export function validateWhenClauseShape(
 	// recursion is scoped to the `not:` operator only.
 	const notBlock = (block as { not?: unknown }).not;
 	if (notBlock !== undefined && typeof notBlock === "object" && notBlock !== null) {
+		// Reject nested `not:` at runtime. The type-level ban
+		// ({@link TopLevelWhenClauseNoRecurse} omits the `not?:` field)
+		// catches authoring-time mistakes, but JSON-loaded configs and
+		// `as any` escape hatches can author the shape; without this
+		// guard the engine's reserved-key skip would silently drop the
+		// inner `not:` (zero verdicts → vacuous true → outer not-flip =
+		// false → rule never fires). See not-block onUnknown design,
+		// open question 8.
+		if ("not" in notBlock && (notBlock as { not?: unknown }).not !== undefined) {
+			throw new Error(
+				`[pi-steering] '${path}.not' contains a nested 'not:' key. ` +
+					`Use a single 'not:' wrapper; nested 'not: { not: ... }' is ` +
+					`semantically equivalent to the unwrapped form and is forbidden ` +
+					`by the schema.`,
+			);
+		}
 		validateWhenClauseShape(
-			notBlock as WhenClause,
+			notBlock as TopLevelWhenClause<string>,
 			`${path}.not`,
 		);
 	}
@@ -160,11 +179,35 @@ export function validateWhenClauseShape(
  * {@link validateWhenClauseShape} to strip modifiers when counting
  * leaves. Operator fields (currently `"not"`) are NOT modifiers; they
  * produce verdicts and count as leaves.
+ *
+ * Type-level coverage assertion (mirrors the
+ * {@link _RESERVED_PREDICATE_KEYS_COVERS_TYPE} pattern): the
+ * `satisfies readonly (keyof PredicateModifiers)[]` clause pins each
+ * entry to a real modifier key, AND the
+ * {@link _MODIFIER_KEYS_COVERS_TYPE} constant fails compilation if a
+ * future modifier (e.g. a hypothetical v0.2 `priority?: number`) is
+ * added to {@link PredicateModifiers} without updating this list.
+ * Without the lockstep check, the new modifier would be counted as a
+ * leaf by {@link validateWhenClauseShape}, masking empty-clause
+ * configs that are now "only modifiers, no real leaves."
  */
-const MODIFIER_KEYS: readonly string[] = ["onUnknown"];
+const MODIFIER_KEYS = ["onUnknown"] as const satisfies readonly (keyof PredicateModifiers)[];
+
+/**
+ * Type-level assertion that {@link MODIFIER_KEYS} covers every
+ * member of `keyof PredicateModifiers`. Mirrors the
+ * {@link _RESERVED_PREDICATE_KEYS_COVERS_TYPE} pattern — the constant
+ * is `_`-prefixed and never read at runtime; its sole job is to fail
+ * compilation when a new modifier is added without updating the
+ * runtime list.
+ */
+type _ModifierKeyCoverage =
+	keyof PredicateModifiers extends (typeof MODIFIER_KEYS)[number] ? true : false;
+const _MODIFIER_KEYS_COVERS_TYPE: _ModifierKeyCoverage = true;
+void _MODIFIER_KEYS_COVERS_TYPE;
 
 function isModifierKey(key: string): boolean {
-	return MODIFIER_KEYS.includes(key);
+	return (MODIFIER_KEYS as readonly string[]).includes(key);
 }
 
 // ---------------------------------------------------------------------------
@@ -759,7 +802,7 @@ function kleeneAnd(verdicts: readonly PredicateVerdict[]): PredicateVerdict {
  *       "allow" → not-clause = false (fail-OPEN — rule skips)
  */
 async function evaluateNotBlock(
-	block: WhenClause,
+	block: TopLevelWhenClauseNoRecurse<string>,
 	state: WhenWalkerState,
 	ctx: PredicateContext,
 	predicates: Record<string, PredicateHandler>,
@@ -771,10 +814,13 @@ async function evaluateNotBlock(
 			? "allow"
 			: "block";
 
-	// Evaluate each leaf to a trinary verdict. Reserved keys
-	// (modifiers + the operator field, even though `not:` recursion is
-	// type-banned) are skipped; the unknown-predicate check still fires
-	// for unregistered keys.
+	// Evaluate each leaf to a trinary verdict. Reserved keys (modifiers
+	// + the operator field) are skipped; nested `not:` recursion is
+	// rejected at runtime in {@link validateWhenClauseShape} — the
+	// type-level ban via {@link TopLevelWhenClauseNoRecurse} catches
+	// authoring-time mistakes, the validator catches JSON / `as any`
+	// escape hatches before the engine ever runs. The unknown-predicate
+	// check still fires for unregistered keys.
 	const verdicts: PredicateVerdict[] = [];
 	for (const [key, value] of Object.entries(block)) {
 		if (value === undefined) continue;
@@ -869,7 +915,7 @@ async function evaluateNotBlock(
  * containing leaf) is type-banned but skipped here defensively.
  */
 export async function evaluateWhen(
-	when: WhenClause | undefined,
+	when: TopLevelWhenClause<string> | undefined,
 	state: WhenWalkerState,
 	ctx: PredicateContext,
 	predicates: Record<string, PredicateHandler>,
@@ -904,7 +950,7 @@ export async function evaluateWhen(
 		// Built-in: not (recursive inversion via the corrected
 		// not-block evaluator).
 		if (key === "not") {
-			const nested = value as WhenClause;
+			const nested = value as TopLevelWhenClauseNoRecurse<string>;
 			const notFires = await evaluateNotBlock(
 				nested,
 				state,

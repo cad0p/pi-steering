@@ -303,17 +303,60 @@ export type InnerValue<K extends PluginPredicateKey> =
 	| PiSteeringPredicates[K]["spreadBase"];
 
 /**
- * Top-level when-clause attached to a Rule. Each plugin-registered
- * predicate (filtered for reserved keys) gets a leaf-level field
- * accepting the bare or spread form. The `not?:` operator allows one
- * level of negation (no recursion).
+ * Built-in non-registry leaves attached to a {@link Rule.when} clause.
+ * These predicates ship with the engine itself (not via a plugin), so
+ * they aren't in {@link PiSteeringPredicates} but DO need to surface
+ * on {@link TopLevelWhenClause} as typed fields.
+ *
+ * The `Writes` generic threads through {@link defineConfig} so that
+ * `when.happened.event` / `when.happened.since` references are
+ * compile-time-checked against the union of declared `writes` arrays
+ * across plugins + observers.
+ *
+ * @see WhenClause.happened for the `happened:` shape's full semantics.
+ * @see WhenClause.condition for the escape-hatch callback.
+ */
+export interface BuiltInWhenLeaves<Writes extends string = string> {
+	/**
+	 * Rule fires when the given `event` has NOT happened in the given
+	 * scope. Mirrors {@link WhenClause.happened}; lifted onto
+	 * {@link TopLevelWhenClause} so the `Writes` cross-reference check
+	 * still flows through after the migration to the registry-driven
+	 * mapped type.
+	 */
+	happened?: {
+		event: Writes;
+		in: "agent_loop" | "session" | "tool_call";
+		since?: Writes;
+		notIn?: "agent_loop" | "session" | "tool_call";
+	};
+
+	/**
+	 * Escape-hatch predicate for one-off logic. Mirrors
+	 * {@link WhenClause.condition}; lifted onto
+	 * {@link TopLevelWhenClause} so authors can still reach for the
+	 * inline-callback form without having to register a plugin.
+	 */
+	condition?: PredicateFn;
+}
+
+/**
+ * Top-level when-clause attached to a {@link Rule}. Each
+ * plugin-registered predicate (filtered for reserved keys) gets a
+ * leaf-level field accepting the bare or spread form. The `not?:`
+ * operator allows one level of negation (no recursion).
+ *
+ * Generic over `Writes` so the built-in `happened?:` leaf's `event` /
+ * `since` references narrow to the union of declared `writes` strings
+ * threaded through by {@link defineConfig}.
  *
  * @see TopLevelWhenClauseNoRecurse for the body of `not:`.
  * @see PredicateModifiers for available leaf-level modifier fields.
+ * @see BuiltInWhenLeaves for the engine's non-registry leaf set.
  */
-export type TopLevelWhenClause = {
+export type TopLevelWhenClause<Writes extends string = string> = {
 	[K in PluginPredicateKey]?: OuterValue<K>;
-} & {
+} & BuiltInWhenLeaves<Writes> & {
 	/**
 	 * Logical NOT: rule fires when the inner predicates' AND is false.
 	 *
@@ -325,12 +368,13 @@ export type TopLevelWhenClause = {
 	 * No leaf-level `onUnknown:` here (forbidden at type level —
 	 * modifiers live at the not-block level). No `not:` recursion
 	 * (forbidden at type level — semantically equivalent to the
-	 * unwrapped form).
+	 * unwrapped form). Nested `not:` is also rejected at runtime by
+	 * `validateWhenClauseShape` for JSON / `as any` escape hatches.
 	 *
 	 * @see TopLevelWhenClauseNoRecurse
 	 * @see PredicateModifiers
 	 */
-	not?: TopLevelWhenClauseNoRecurse;
+	not?: TopLevelWhenClauseNoRecurse<Writes>;
 };
 
 /**
@@ -338,12 +382,15 @@ export type TopLevelWhenClause = {
  * forms (NO leaf-level modifiers — modifiers live at this block's top
  * level via `& PredicateModifiers`). No nested `not:` (no recursion).
  *
+ * Generic over `Writes` so the built-in `happened?:` leaf inherits
+ * the same compile-time event-narrowing as the outer level.
+ *
  * @see TopLevelWhenClause for the rule-attached when-clause.
  * @see PredicateModifiers for block-level modifier fields.
  */
-export type TopLevelWhenClauseNoRecurse = {
+export type TopLevelWhenClauseNoRecurse<Writes extends string = string> = {
 	[K in PluginPredicateKey]?: InnerValue<K>;
-} & PredicateModifiers;
+} & BuiltInWhenLeaves<Writes> & PredicateModifiers;
 
 /**
  * Type-erased alias for {@link PredicateHandler} used at registry
@@ -612,13 +659,32 @@ export interface BaseRule<
 	unless?: Pattern | PredicateFn;
 
 	/**
-	 * Composable predicate block. See {@link WhenClause}.
+	 * Composable predicate block. See {@link TopLevelWhenClause}.
 	 *
 	 * `Writes` is the union of session-entry event literals the rule's
 	 * `when.happened.event` is allowed to reference. Threaded through by
 	 * {@link defineConfig} from all declared `writes` arrays in scope.
+	 *
+	 * The five compile-time constraints from the not-block onUnknown
+	 * design land here:
+	 *   1. Each plugin-registered predicate is shape-checked against
+	 *      its `PiSteeringPredicates[K]` registry entry (bare /
+	 *      spreadBase). Typos / unknown predicates surface as
+	 *      compile errors at the rule definition.
+	 *   2. Reserved keys (`not`, `onUnknown`, plus future modifiers)
+	 *      are dropped from the registry-driven mapped type via
+	 *      {@link PluginPredicateKey} so a plugin author can't shadow
+	 *      the operator/modifier surface.
+	 *   3. Leaf-level `onUnknown:` inside `not:` is forbidden (the
+	 *      inner mapped type uses {@link InnerValue} which excludes
+	 *      modifiers — those live at the not-block top level).
+	 *   4. `not: not:` recursion is forbidden
+	 *      ({@link TopLevelWhenClauseNoRecurse} has no `not?:` field).
+	 *   5. Rule-level `onUnknown:` is forbidden
+	 *      ({@link TopLevelWhenClause} doesn't intersect with
+	 *      {@link PredicateModifiers}; only the inner `not:` body does).
 	 */
-	when?: WhenClause<Writes>;
+	when?: TopLevelWhenClause<Writes>;
 
 	/**
 	 * Message shown to the agent when blocked.

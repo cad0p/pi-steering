@@ -735,7 +735,7 @@ async function evaluateLeafTrinary(
 		console.warn(
 			`[pi-steering] Rule "${ruleName}": when.${key} handler returned ` +
 				`${JSON.stringify(result)}; expected boolean | "unknown". ` +
-				`Treating as "unknown" (fail-CLOSED via onUnknown policy).`,
+				`Treating as "unknown" (treated via leaf-level onUnknown policy).`,
 		);
 		return "unknown";
 	} catch (err) {

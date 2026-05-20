@@ -2976,6 +2976,30 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 		);
 	});
 
+	it("Kleene AND: false absorbs unknown with default 'block' modifier (degenerate matrix cell)", async () => {
+		// Sibling of the previous test, completing the F+U matrix cell
+		// for the default-block branch. Demonstrates that false absorbs
+		// regardless of which `onUnknown:` modifier is set — the policy
+		// is only consulted when the combined verdict is `"unknown"`.
+		const plugin = trinaryPlugin(
+			() => false,
+			() => "unknown",
+		);
+		const ev = buildWith(
+			{ not: { triA: "x", triB: "y" } }, // no onUnknown: → default block
+			plugin,
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			r && r.block === true,
+			"false absorbs regardless of onUnknown modifier; default block fires same as explicit allow",
+		);
+	});
+
 	it("corrected evaluateNot: cwd-only not-block under walker-unknown fires fail-CLOSED (default)", async () => {
 		// Closes the silent fail-OPEN class: `not: { cwd: P }` under
 		// walker-unknown cwd surfaces unknown via the trinary cwd
@@ -3178,6 +3202,105 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
 			"throw inside not-block → unknown leaf → Kleene unknown → default block-level 'block' → rule fires",
 		);
 	});
+	it("plugin handler returning null → narrowed to 'unknown' → default 'block' fires", async () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git\\s+push",
+			reason: "r",
+			when: { tri: "x" } as unknown as NonNullable<Rule["when"]>,
+		};
+		const warnings = captureWarnings();
+		try {
+			const ev = buildEvaluator(
+				{ rules: [rule] },
+				resolvePlugins(
+					[trinaryPlugin(() => null as unknown as boolean)],
+					{},
+				),
+				makeHost(),
+			);
+			const r = await ev.evaluate(
+				bashEvent("git push"),
+				makeCtx("/repo"),
+				0,
+			);
+			assert.ok(
+				r && r.block === true,
+				"non-trinary handler return narrows to 'unknown' → default block fires",
+			);
+			assert.ok(
+				warnings.some((w) => w.includes("handler returned")),
+				"console.warn surfaces the malformed return",
+			);
+		} finally {
+			warnings.restore();
+		}
+	});
+
+	it("plugin handler returning undefined → narrowed to 'unknown' → default 'block' fires", async () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git\\s+push",
+			reason: "r",
+			when: { tri: "x" } as unknown as NonNullable<Rule["when"]>,
+		};
+		const warnings = captureWarnings();
+		try {
+			const ev = buildEvaluator(
+				{ rules: [rule] },
+				resolvePlugins(
+					[trinaryPlugin(() => undefined as unknown as boolean)],
+					{},
+				),
+				makeHost(),
+			);
+			const r = await ev.evaluate(
+				bashEvent("git push"),
+				makeCtx("/repo"),
+				0,
+			);
+			assert.ok(r && r.block === true);
+		} finally {
+			warnings.restore();
+		}
+	});
+
+	it("plugin handler returning the string 'true' → narrowed to 'unknown' → default 'block' fires", async () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git\\s+push",
+			reason: "r",
+			when: { tri: "x" } as unknown as NonNullable<Rule["when"]>,
+		};
+		const warnings = captureWarnings();
+		try {
+			const ev = buildEvaluator(
+				{ rules: [rule] },
+				resolvePlugins(
+					[trinaryPlugin(() => "true" as unknown as boolean)],
+					{},
+				),
+				makeHost(),
+			);
+			const r = await ev.evaluate(
+				bashEvent("git push"),
+				makeCtx("/repo"),
+				0,
+			);
+			assert.ok(
+				r && r.block === true,
+				"a string-typed return is treated as malformed (not coerced to boolean truthy)",
+			);
+		} finally {
+			warnings.restore();
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -3241,6 +3364,47 @@ describe("buildEvaluator: empty-clause validation at config-resolve", () => {
 					resolve(),
 					makeHost(),
 				),
+		);
+	});
+
+	it("throws on plugin-shipped rule with empty when: {} (matches user-rule path)", () => {
+		const plugin: Plugin = {
+			name: "p",
+			rules: [
+				{
+					name: "plugin-empty",
+					tool: "bash",
+					field: "command",
+					pattern: "^git",
+					reason: "plugin",
+					when: {},
+				},
+			],
+		};
+		assert.throws(
+			() =>
+				buildEvaluator({}, resolvePlugins([plugin], {}), makeHost()),
+			/contains no predicate leaves/,
+		);
+	});
+
+	it("throws on outer-level modifier-only when: { onUnknown: 'block' } (JSON / `as any` path)", () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git",
+			reason: "r",
+			when: { onUnknown: "block" } as unknown as NonNullable<Rule["when"]>,
+		};
+		assert.throws(
+			() =>
+				buildEvaluator(
+					{ rules: [rule] },
+					resolve(),
+					makeHost(),
+				),
+			/contains no predicate leaves/,
 		);
 	});
 });

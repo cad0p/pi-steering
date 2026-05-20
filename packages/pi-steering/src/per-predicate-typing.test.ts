@@ -116,6 +116,36 @@ describe("per-predicate typing: positive cases", () => {
 		assert.ok(bare !== undefined);
 		assert.ok(spread !== undefined);
 	});
+
+	it("upstream: bare + spread + leaf-level onUnknown:", () => {
+		const bare: OuterValue<"upstream"> = /origin\/main/;
+		const spread: OuterValue<"upstream"> = {
+			pattern: /origin\/main/,
+			onUnknown: "allow",
+		};
+		assert.ok(bare !== undefined);
+		assert.ok(spread !== undefined);
+	});
+
+	it("remote: bare + spread + leaf-level onUnknown:", () => {
+		const bare: OuterValue<"remote"> = /github\.com/;
+		const spread: OuterValue<"remote"> = {
+			pattern: /github\.com/,
+			onUnknown: "allow",
+		};
+		assert.ok(bare !== undefined);
+		assert.ok(spread !== undefined);
+	});
+
+	it("hasStagedChanges: bare boolean + spread { value, onUnknown? }", () => {
+		const bare: OuterValue<"hasStagedChanges"> = true;
+		const spread: OuterValue<"hasStagedChanges"> = {
+			value: true,
+			onUnknown: "allow",
+		};
+		assert.ok(bare !== undefined);
+		assert.ok(spread !== undefined);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -201,6 +231,31 @@ describe("PredicateShape: DefaultSpreadBase auto-detection", () => {
 		type CAShape = PiSteeringPredicates["commitsAhead"];
 		const _spread: CAShape["spreadBase"] = { eq: 1, wrt: "origin/main" };
 		void _spread;
+		assert.ok(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// PluginPredicateKey reserved-key filter
+// ---------------------------------------------------------------------------
+
+describe("PluginPredicateKey: reserved-key filter", () => {
+	it("filters out reserved names (`not`, `onUnknown`)", () => {
+		// Belt-and-suspenders type-only check. The runtime guard in
+		// `plugin-merger.ts` is the authoritative gate (it throws at
+		// config-resolve time when a plugin attempts to register a
+		// reserved key); this assertion pins the type-level filter that
+		// drops reserved names from the registry-driven mapped types
+		// (`TopLevelWhenClause`, `TopLevelWhenClauseNoRecurse`) so an IDE
+		// hover never suggests a key the runtime would reject.
+		type ContainsNot = "not" extends PluginPredicateKey ? true : false;
+		type ContainsOnUnknown = "onUnknown" extends PluginPredicateKey
+			? true
+			: false;
+		const _a: ContainsNot = false;
+		const _b: ContainsOnUnknown = false;
+		void _a;
+		void _b;
 		assert.ok(true);
 	});
 });

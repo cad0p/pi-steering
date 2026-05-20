@@ -34,6 +34,7 @@ import type {
 	Observer,
 	Plugin,
 	PredicateHandler,
+	ReservedPredicateKey,
 	Rule,
 	SteeringConfig,
 } from "./schema.ts";
@@ -390,12 +391,23 @@ export function resolvePlugins(
 			// pinned by the `_RESERVED_PREDICATE_KEYS_COVERS_TYPE` assertion
 			// in `evaluator-internals/predicates.ts`.
 			if (isReservedPredicateKey(key)) {
+				// Key-specific suggestion: `not` collides with the operator
+				// field, `onUnknown` with the modifier surface. Generic
+				// `"isNot", "negate"` was misleading for `onUnknown`
+				// collisions where neither alternative is semantically
+				// related to a walker-unknown policy.
+				const suggestions: Record<ReservedPredicateKey, string> = {
+					not: '"isNot", "negate"',
+					onUnknown: '"unknownPolicy", "walkerUnknownPolicy"',
+				};
+				const suggestion = suggestions[key as ReservedPredicateKey] ??
+					'"a different name"';
 				throw new Error(
 					`[pi-steering] Plugin "${plugin.name}" attempted to register ` +
 						`reserved predicate key "${key}". This name conflicts with ` +
 						`the schema's operator/modifier surface ` +
 						`(${RESERVED_PREDICATE_KEYS.join(", ")}). Choose a different ` +
-						`name (e.g., "isNot", "negate").`,
+						`name (e.g., ${suggestion}).`,
 				);
 			}
 			const prior = predicateOwner.get(key);

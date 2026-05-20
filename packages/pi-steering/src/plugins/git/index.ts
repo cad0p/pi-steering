@@ -94,19 +94,19 @@ declare global {
 	 * `& PredicateModifiers` (outer leaf) or at the not-block top
 	 * level (inside `not:`).
 	 *
+	 * Note: `cwd` is intentionally NOT in this block. It's a built-in
+	 * non-registry leaf on {@link BuiltInWhenLeaves} (see schema.ts) so
+	 * authors can write `when: { cwd: /work/ }` against pi-steering core
+	 * without needing gitPlugin's module augmentation in scope. The
+	 * runtime handler that wires `when.cwd` to the walker still lives
+	 * in pi-steering core; gitPlugin layers `git --git-dir=` /
+	 * `--work-tree=` cwd extensions via {@link gitCwdExtensions} but
+	 * does not own the predicate's registry shape.
+	 *
 	 * @see PredicateShape, DefaultSpreadBase, PredicateModifiers in
 	 *      `schema.ts` for the full registry contract.
 	 */
 	interface PiSteeringPredicates {
-		/**
-		 * `when.cwd` — match the command's effective cwd against a
-		 * Pattern (string or RegExp) or an OR-of-Patterns array. Bare
-		 * shorthand for the common `{ pattern: ... }` spread form;
-		 * spread form intersects with `PredicateModifiers` (outer
-		 * leaf) or contributes to a not-block's leaf set (inner).
-		 */
-		cwd: PredicateShape<Patterns>;
-
 		/**
 		 * `when.branch` — match the current git branch. Pattern leaf,
 		 * tracker-aware (in-chain `git checkout X` resolves statically;

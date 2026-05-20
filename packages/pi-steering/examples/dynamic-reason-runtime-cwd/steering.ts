@@ -6,8 +6,10 @@
  *
  * Demonstrates how external plugin authors compose runtime-cwd
  * predicates (gitPlugin's `isClean` / `hasStagedChanges` / `remote` /
- * `upstream` / `commitsAhead` — all `requireKnownCwd`-wrapped) with
- * informative agent-facing reasons that distinguish two branches:
+ * `upstream` / `commitsAhead` — each inlines a walker-unknown-cwd
+ * guard at the top of its handler and surfaces trinary `"unknown"`)
+ * with informative agent-facing reasons that distinguish two
+ * branches:
  *
  *   - Static cwd + predicate fires: domain-specific reason text
  *     (the working tree is genuinely dirty).
@@ -35,28 +37,39 @@ import gitPlugin from "pi-steering/plugins/git";
  *
  * The `reason` field is a {@link ReasonFn} that branches on
  * `ctx.walkerState?.cwd === "unknown"` to detect the
- * walker-unknown-cwd fail-closed branch (gitPlugin's `isClean` is
- * `requireKnownCwd`-wrapped). On that branch, `walkerUnknownCwdReason`
- * produces the canonical agent-facing explanation; the example
- * appends domain-specific retry guidance after it.
+ * walker-unknown-cwd fail-CLOSED branch. gitPlugin's `isClean` inlines
+ * a walker-unknown-cwd guard at the top of its handler and surfaces
+ * trinary `"unknown"` when the walker can't statically resolve cwd;
+ * the engine's leaf-level `onUnknown:` policy (default `"block"`)
+ * projects to a definite `true` and the rule fires fail-CLOSED. On
+ * that branch, `walkerUnknownCwdReason` produces the canonical
+ * agent-facing explanation; the example appends domain-specific
+ * retry guidance after it.
  */
 const deployRequiresCleanTree = {
 	name: "deploy-requires-clean-tree",
 	tool: "bash",
 	field: "command",
 	pattern: /^npm\s+run\s+deploy\b/,
-	// Fail-closed semantics under walker-unknown cwd: use `isClean: false`
-	// (the canonical "fires when dirty" form per gitPlugin's predicates.ts
-	// JSDoc) NOT `not: { isClean: true }`. The requireKnownCwd wrap returns
-	// true unconditionally under walker-unknown cwd; the `not:` form
-	// inverts that to false and silently fails OPEN. See README
-	// "Why isClean: false, not not: { isClean: true }" subsection.
+	// Canonical positive form: `isClean: false` ("fires when dirty")
+	// reads forward and lets per-leaf modifiers attach at the leaf if
+	// ever needed. The equivalent `not: { isClean: true }` form is also
+	// safe under the new engine — the trinary `"unknown"` from the
+	// inline walker-unknown-cwd guard composes via the not-block's
+	// default block-level `onUnknown: "block"` to fire fail-CLOSED on
+	// the walker-unknown branch — but `isClean: false` is the simpler
+	// shape when no other leaves share the not-block. See README
+	// "Why isClean: false over not: { isClean: true }" for the full
+	// truth table and the migration story from v0.0.x.
 	when: { isClean: false },
 	reason: (ctx) => {
 		if (ctx.walkerState?.cwd === "unknown") {
-			// requireKnownCwd-wrap fired: walker couldn't resolve cwd
-			// statically. Use the helper for a consistent agent-facing
-			// explanation; append domain-specific retry guidance.
+			// Walker couldn't statically resolve cwd. The handler's
+			// inline guard surfaced trinary `"unknown"`; the engine's
+			// default leaf-level `onUnknown: "block"` projected it to true
+			// and the rule fired fail-CLOSED. Use the helper for a
+			// consistent agent-facing explanation; append domain-specific
+			// retry guidance.
 			return (
 				walkerUnknownCwdReason(ctx, "working tree status") +
 				" Run from inside the package directory with a literal path."

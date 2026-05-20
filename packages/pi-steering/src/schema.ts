@@ -578,12 +578,31 @@ export type BuiltInWhenLeaves<Writes extends string = string> =
  * `since` references narrow to the union of declared `writes` strings
  * threaded through by {@link defineConfig}.
  *
+ * Mapping shape note: the constraint is `keyof PiSteeringPredicates`
+ * with an `as`-filter excluding {@link ReservedPredicateKey}, rather
+ * than the pre-computed alias `[K in PluginPredicateKey]`. Both shapes
+ * produce the same keyset, but only the `keyof T as Filter<K>` form is
+ * homomorphic from TypeScript's checker perspective
+ * (`resolveMappedTypeMembers` requires the literal `keyof T` AST plus
+ * a Filter-shape `as` clause that returns `K | never`). The
+ * homomorphic shape is what propagates JSDoc from
+ * `PiSteeringPredicates.<key>` declarations onto the synthesized
+ * fields. Plugin authors hovering `when: { isClean: ... }` see the
+ * JSDoc declared on `PiSteeringPredicates.isClean` in the registering
+ * plugin's `declare global { interface PiSteeringPredicates { ... } }`
+ * block. The `& PluginPredicateKey` intersection in the value
+ * position narrows `K` back to the constraint expected by
+ * {@link OuterValue} after the `as` clause has filtered out reserved
+ * keys at the type level.
+ *
  * @see TopLevelWhenClauseNoRecurse for the body of `not:`.
  * @see PredicateModifiers for available leaf-level modifier fields.
  * @see BuiltInWhenLeaves for the engine's non-registry leaf set.
  */
 export type TopLevelWhenClause<Writes extends string = string> = {
-	[K in PluginPredicateKey]?: OuterValue<K>;
+	[K in keyof PiSteeringPredicates as K extends ReservedPredicateKey
+		? never
+		: K]?: OuterValue<K & PluginPredicateKey>;
 } & BuiltInWhenLeavesOuter<Writes> & {
 	/**
 	 * Logical NOT: rule fires when the inner predicates' AND is false.
@@ -613,11 +632,20 @@ export type TopLevelWhenClause<Writes extends string = string> = {
  * Generic over `Writes` so the built-in `happened?:` leaf inherits
  * the same compile-time event-narrowing as the outer level.
  *
+ * Mapping shape note: same homomorphic-with-filter shape as
+ * {@link TopLevelWhenClause} (constraint `keyof PiSteeringPredicates`
+ * + `as`-filter excluding {@link ReservedPredicateKey}). Required for
+ * JSDoc to propagate from `PiSteeringPredicates.<key>` declarations
+ * onto synthesized fields under `not:`. See the mapping-shape note on
+ * {@link TopLevelWhenClause} for the underlying checker rule.
+ *
  * @see TopLevelWhenClause for the rule-attached when-clause.
  * @see PredicateModifiers for block-level modifier fields.
  */
 export type TopLevelWhenClauseNoRecurse<Writes extends string = string> = {
-	[K in PluginPredicateKey]?: InnerValue<K>;
+	[K in keyof PiSteeringPredicates as K extends ReservedPredicateKey
+		? never
+		: K]?: InnerValue<K & PluginPredicateKey>;
 } & BuiltInWhenLeavesInner<Writes> & PredicateModifiers;
 
 /**

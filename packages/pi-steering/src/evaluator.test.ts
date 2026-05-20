@@ -2976,13 +2976,17 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 		);
 	});
 
-	it("Kleene AND: false absorbs unknown with default 'block' modifier (degenerate matrix cell)", async () => {
-		// Sibling of the previous test, completing the F+U matrix cell
-		// for the default-block branch. Demonstrates that false absorbs
-		// regardless of which `onUnknown:` modifier is set — the policy
-		// is only consulted when the combined verdict is `"unknown"`.
+	it("Kleene AND: all-unknown leaves with default 'block' modifier project to rule-fires (no false to absorb)", async () => {
+		// Different code path from the F+U + 'allow' sibling above. With
+		// no `false` leaf to absorb, Kleene AND of all-unknown verdicts
+		// stays `"unknown"`; the block-level `onUnknown:` policy then
+		// projects to a definite verdict. Default `"block"` fires the
+		// rule fail-CLOSED. Pins the not-block evaluator's
+		// readBlockLevelOnUnknown → verdictAfterPolicy path on the
+		// no-false-absorb branch, which the F+U cell can't exercise
+		// (false absorbs to false BEFORE the modifier is consulted).
 		const plugin = trinaryPlugin(
-			() => false,
+			() => "unknown",
 			() => "unknown",
 		);
 		const ev = buildWith(
@@ -2996,7 +3000,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 		);
 		assert.ok(
 			r && r.block === true,
-			"false absorbs regardless of onUnknown modifier; default block fires same as explicit allow",
+			"all-unknown → Kleene AND yields 'unknown' → default block-level 'block' projects fail-CLOSED → rule fires",
 		);
 	});
 
@@ -3426,7 +3430,7 @@ describe("buildEvaluator: empty-clause validation at config-resolve", () => {
 		);
 	});
 
-	it("throws on plugin-shipped rule with empty when: {} (matches user-rule path)", () => {
+	it("throws on plugin-shipped rules too (validator covers resolved.rules, not just config.rules)", () => {
 		const plugin: Plugin = {
 			name: "p",
 			rules: [

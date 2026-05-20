@@ -43,9 +43,11 @@ import type {
 	BuiltInWhenLeavesOuter,
 	Plugin,
 	PredicateModifiers,
+	PredicateShape,
 	ReservedPredicateKey,
 	Rule,
 	TopLevelWhenClause,
+	TopLevelWhenClauseNoRecurse,
 } from "./schema.ts";
 
 // ---------------------------------------------------------------------------

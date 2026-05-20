@@ -32,8 +32,10 @@
 import type { Modifier, Tracker } from "unbash-walker";
 import type {
 	Observer,
+	OperatorField,
 	Plugin,
 	PredicateHandler,
+	PredicateModifiers,
 	ReservedPredicateKey,
 	Rule,
 	SteeringConfig,

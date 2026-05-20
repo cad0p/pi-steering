@@ -123,13 +123,9 @@ export type AllObserverNames<
 // ---------------------------------------------------------------------------
 
 /**
- * Union of {@link DEFAULT_RULES} `name` literals — the names of
- * rules shipped by the engine itself (`no-force-push`,
- * `no-hard-reset`, `no-rm-rf-slash`, `no-long-running-commands`).
- *
- * Folded into {@link AllRuleNames} so `disabledRules: ["no-force-push"]`
- * typechecks without a cast: a typo of a default rule name is a
- * compile error, the same as a typo of a plugin or user rule name.
+ * Union of {@link DEFAULT_RULES} `name` literals — the names of rules
+ * shipped by the engine itself. Folded into {@link AllRuleNames}; the
+ * live list is the `name` field of each entry in {@link DEFAULT_RULES}.
  *
  * Relies on {@link DEFAULT_RULES} being authored as
  * `as const satisfies readonly Rule[]` so the literal `name` values
@@ -139,9 +135,9 @@ export type AllObserverNames<
 export type DefaultRuleName = (typeof DEFAULT_RULES)[number]["name"];
 
 /**
- * Union of {@link DEFAULT_PLUGINS} `name` literals — currently the
- * single-element union `"git"`. Folded into {@link AllPluginNames} so
- * `disabledPlugins: ["git"]` typechecks without a cast.
+ * Union of {@link DEFAULT_PLUGINS} `name` literals. Folded into
+ * {@link AllPluginNames} so `disabledPlugins` typechecks against
+ * shipped defaults without a cast.
  */
 export type DefaultPluginName = (typeof DEFAULT_PLUGINS)[number]["name"];
 

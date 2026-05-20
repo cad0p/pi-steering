@@ -1593,6 +1593,18 @@ export interface SteeringConfig {
 	 * state - "these are the rules that are disabled." Distinct from
 	 * the imperative flag {@link disableDefaults} (action: disable
 	 * the default plugins + rules).
+	 *
+	 * **Navigation note:** these are string literals projected from
+	 * `DEFAULT_RULES` (engine defaults), `plugin.rules[*].name`, and
+	 * inline `rules[*].name`. Ctrl+Click on a literal jumps to the
+	 * `AllRuleNames` union, NOT the rule's source — TypeScript-language
+	 * limitation on string-literal union members. To inspect a shipped
+	 * default's `reason` / `pattern`, import `DEFAULT_RULES` directly:
+	 *
+	 * ```ts
+	 * import { DEFAULT_RULES } from "pi-steering";
+	 * // hover DEFAULT_RULES[0] to see the rule body
+	 * ```
 	 */
 	disabledRules?: string[];
 
@@ -1600,6 +1612,16 @@ export interface SteeringConfig {
 	 * Plugins to disable by name. Additive union across layers.
 	 * A disabled plugin contributes NOTHING - no rules, no observers,
 	 * no predicates, no trackers.
+	 *
+	 * **Navigation note:** same TypeScript-language limitation as
+	 * {@link disabledRules} — Ctrl+Click on a string literal jumps to
+	 * the `AllPluginNames` union, not the plugin's source. To inspect a
+	 * shipped default plugin, import `DEFAULT_PLUGINS` directly:
+	 *
+	 * ```ts
+	 * import { DEFAULT_PLUGINS } from "pi-steering";
+	 * // hover DEFAULT_PLUGINS[0] to see the plugin body
+	 * ```
 	 */
 	disabledPlugins?: string[];
 

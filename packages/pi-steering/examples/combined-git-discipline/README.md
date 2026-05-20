@@ -2,7 +2,7 @@
 
 A batteries-included rule pack that stacks the three individual PR/git-hygiene examples plus the upstream safety defaults. Drop-in starting point for teams that want disciplined PR workflows.
 
-> **TypeScript form (canonical):** see [`steering.ts`](./steering.ts) — drop in at `~/.pi/steering.ts` or `<project-root>/.pi/steering.ts`. TypeScript gets compile-time typo checks via `defineConfig`. The [`steering.json`](./steering.json) form is also accepted as a documented subset (pattern-strings only — no plugins, observers, function-valued fields, or `when.<predicate>` keys; those require TypeScript).
+> **TypeScript form (canonical):** see [`steering.ts`](./steering.ts) — drop in at `~/.pi/steering.ts` or `<project-root>/.pi/steering.ts`. The loader accepts TypeScript only. The [`steering.json`](./steering.json) form is provided for reference + `pi-steering import-json` migration; the loader does NOT pick up JSON files. See [examples/README.md#json](../README.md#json) for migration steps.
 
 ## What it enforces
 
@@ -49,4 +49,4 @@ Use this as a starting point and carve out exceptions with inline override comme
 
 ## Install
 
-Drop the file at `~/.pi/agent/steering.json` (global) or at `<project-root>/.pi/steering.json` (scoped via walk-up loader). For tighter scoping, add `when.cwd` to individual rules — see [`../no-amend`](../no-amend) for an example.
+Copy [`steering.ts`](./steering.ts) to `~/.pi/steering.ts` (global) or to `<project-root>/.pi/steering.ts` (scoped via walk-up loader). For tighter scoping, add `when.cwd` to individual rules — see [`../no-amend`](../no-amend) for an example. The loader accepts TypeScript only; see [examples/README.md#json](../README.md#json) if you're migrating from a `steering.json`.

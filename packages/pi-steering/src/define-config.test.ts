@@ -16,7 +16,20 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import shippedGitPlugin from "./plugins/git/index.ts";
 import { defineConfig } from "./define-config.ts";
+import type { DefaultPluginName, DefaultRuleName } from "./define-config.ts";
 import type { Observer, Plugin, PredicateContext } from "./schema.ts";
+
+// Type-equality helper for direct type-identity assertions. Pinning
+// `Equal<X, Y>` to `true` forces a same-CR test update if `X` widens
+// or narrows — catches partial regressions the behavioral typo-check
+// can miss (e.g. dropping one literal from a union of four would leave
+// the other three positive cases passing while silently weakening the
+// fence).
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <
+	T,
+>() => T extends B ? 1 : 2
+	? true
+	: false;
 
 const readObserver = {
 	name: "description-reads",
@@ -603,7 +616,7 @@ describe("defineConfig: default rule + plugin names in typo-check union", () => 
 		assert.equal(cfg.disabledRules?.length, 3);
 	});
 
-	it("disabledRules rejects unknown names even when no plugins/user rules are registered", () => {
+	it("disabledRules rejects misspellings of default-rule names", () => {
 		const cfg = defineConfig({
 			// @ts-expect-error — "no-force-pushh" is a typo of the default
 			// rule "no-force-push". Default rule names are part of the
@@ -620,7 +633,16 @@ describe("defineConfig: default rule + plugin names in typo-check union", () => 
 		assert.deepEqual(cfg.disabledPlugins, ["git"]);
 	});
 
-	it("disabledPlugins rejects unknown names even when no plugins are registered", () => {
+	it("disabledPlugins accepts a mix of default + user plugin names", () => {
+		const userPlugin = { name: "my-plugin" } as const satisfies Plugin;
+		const cfg = defineConfig({
+			plugins: [userPlugin],
+			disabledPlugins: ["git", "my-plugin"],
+		});
+		assert.equal(cfg.disabledPlugins?.length, 2);
+	});
+
+	it("disabledPlugins rejects misspellings of the default plugin name", () => {
 		const cfg = defineConfig({
 			// @ts-expect-error — "gti" is a typo of the default plugin
 			// "git". Default plugin names are part of the typo-check union.
@@ -628,6 +650,24 @@ describe("defineConfig: default rule + plugin names in typo-check union", () => 
 		});
 		assert.equal(cfg.disabledPlugins?.length, 1);
 	});
+
+	// Direct type-identity assertions. The behavioral typo tests above
+	// pin the unions transitively (a `string` regression would stop the
+	// `@ts-expect-error` directives from firing). The assertions below
+	// pin the exact literal set: dropping one default name or hand-rolling
+	// `DefaultRuleName` to a partial enumeration is a typecheck failure
+	// here even when the positive tests above happen to cover the
+	// remaining literals.
+	type _RuleUnionCheck = Equal<
+		DefaultRuleName,
+		"no-force-push" | "no-hard-reset" | "no-rm-rf-slash" | "no-long-running-commands"
+	>;
+	const _ruleUnionCheck: _RuleUnionCheck = true;
+	void _ruleUnionCheck;
+
+	type _PluginUnionCheck = Equal<DefaultPluginName, "git">;
+	const _pluginUnionCheck: _PluginUnionCheck = true;
+	void _pluginUnionCheck;
 });
 
 describe("defineConfig: cross-module plugin typo detection (F2 regression fence)", () => {

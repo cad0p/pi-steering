@@ -316,8 +316,13 @@ export type ReservedPredicateKey = OperatorField | keyof PredicateModifiers;
 
 /**
  * Plugin-registered predicate keys with reserved names filtered out.
- * Used as the iteration domain for `TopLevelWhenClause` and
- * `TopLevelWhenClauseNoRecurse`'s mapped types.
+ * Used as the value-position constraint on {@link OuterValue} /
+ * {@link InnerValue}, and as the `K & PluginPredicateKey`
+ * intersection narrowing inside {@link TopLevelWhenClause} /
+ * {@link TopLevelWhenClauseNoRecurse}. NOT used as the mapped-type
+ * iteration source — those mapped types iterate `keyof
+ * PiSteeringPredicates` directly with an `as`-filter, see their
+ * mapping-shape note for why.
  */
 export type PluginPredicateKey = Exclude<
 	keyof PiSteeringPredicates,
@@ -581,19 +586,20 @@ export type BuiltInWhenLeaves<Writes extends string = string> =
  * Mapping shape note: the constraint is `keyof PiSteeringPredicates`
  * with an `as`-filter excluding {@link ReservedPredicateKey}, rather
  * than the pre-computed alias `[K in PluginPredicateKey]`. Both shapes
- * produce the same keyset, but only the `keyof T as Filter<K>` form is
- * homomorphic from TypeScript's checker perspective
- * (`resolveMappedTypeMembers` requires the literal `keyof T` AST plus
- * a Filter-shape `as` clause that returns `K | never`). The
- * homomorphic shape is what propagates JSDoc from
- * `PiSteeringPredicates.<key>` declarations onto the synthesized
- * fields. Plugin authors hovering `when: { isClean: ... }` see the
- * JSDoc declared on `PiSteeringPredicates.isClean` in the registering
- * plugin's `declare global { interface PiSteeringPredicates { ... } }`
- * block. The `& PluginPredicateKey` intersection in the value
- * position narrows `K` back to the constraint expected by
- * {@link OuterValue} after the `as` clause has filtered out reserved
- * keys at the type level.
+ * produce the same keyset, but only the homomorphic-with-filter form
+ * propagates JSDoc on hover from `PiSteeringPredicates.<key>` source
+ * declarations onto the synthesized field. The `& PluginPredicateKey`
+ * intersection in the value position narrows `K` back to the
+ * constraint expected by {@link OuterValue}. Keep both the constraint
+ * and the `as`-filter inlined — extracting either to a type alias
+ * silently regresses the propagation.
+ *
+ * Hover-on-`defineConfig`-inline-rules caveat: passing rule literals
+ * directly into `defineConfig({ rules: [{ ... }] })` bypasses the
+ * mapped-type linkage — the `const R extends readonly Rule[]`
+ * signature narrows the literal to its `const`-inferred shape.
+ * Factor rules out (`const myRule = { ... } as const satisfies Rule`)
+ * when hover-rich authoring matters; see the `defineConfig` JSDoc.
  *
  * @see TopLevelWhenClauseNoRecurse for the body of `not:`.
  * @see PredicateModifiers for available leaf-level modifier fields.
@@ -632,12 +638,9 @@ export type TopLevelWhenClause<Writes extends string = string> = {
  * Generic over `Writes` so the built-in `happened?:` leaf inherits
  * the same compile-time event-narrowing as the outer level.
  *
- * Mapping shape note: same homomorphic-with-filter shape as
- * {@link TopLevelWhenClause} (constraint `keyof PiSteeringPredicates`
- * + `as`-filter excluding {@link ReservedPredicateKey}). Required for
- * JSDoc to propagate from `PiSteeringPredicates.<key>` declarations
- * onto synthesized fields under `not:`. See the mapping-shape note on
- * {@link TopLevelWhenClause} for the underlying checker rule.
+ * Same homomorphic-with-filter mapping shape as
+ * {@link TopLevelWhenClause} (and the same `defineConfig`-inline
+ * caveat). See the mapping-shape note there for the rationale.
  *
  * @see TopLevelWhenClause for the rule-attached when-clause.
  * @see PredicateModifiers for block-level modifier fields.

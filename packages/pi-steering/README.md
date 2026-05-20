@@ -276,7 +276,12 @@ type TopLevelWhenClause<Writes extends string = string> = {
   // PiSteeringPredicates registry. `branch:`, `upstream:`,
   // `isClean:`, etc. each declare their bare / spread shape via
   // `declare global` augmentation in the plugin's index.ts.
-  [K in PluginPredicateKey]?: OuterValue<K>;
+  // Homomorphic-with-filter mapping (constraint inlined as `keyof
+  // PiSteeringPredicates` + as-clause filter); see the schema
+  // doc-comment for why this AST shape is load-bearing for hover.
+  [K in keyof PiSteeringPredicates as K extends ReservedPredicateKey
+      ? never
+      : K]?: OuterValue<K & PluginPredicateKey>;
 };
 ```
 

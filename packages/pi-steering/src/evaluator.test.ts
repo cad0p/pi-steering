@@ -3390,6 +3390,30 @@ describe("buildEvaluator: empty-clause validation at config-resolve", () => {
 		);
 	});
 
+	it("throws on `when: { not: {} }` (zero-key inner block)", () => {
+		// Direct empty-inner case (no modifier keys at all). Validator
+		// recurses into the not-block and applies the same
+		// no-predicate-leaves check; an empty body trips the inner
+		// branch even before MODIFIER_KEYS stripping.
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git",
+			reason: "r",
+			when: { not: {} },
+		};
+		assert.throws(
+			() =>
+				buildEvaluator(
+					{ rules: [rule] },
+					resolve(),
+					makeHost(),
+				),
+			/\.not contains no predicate leaves/,
+		);
+	});
+
 	it("throws on not-block with only modifier keys (e.g. not: { onUnknown: 'block' })", () => {
 		const rule: Rule = {
 			name: "r",
@@ -6045,11 +6069,19 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
 		}
 	});
 
-	it("a throwing predicate does not prevent subsequent rules from evaluating", async () => {
-		// Rule A throws in its predicate; rule B is a normal rule that
-		// would block on the same command. S1 policy: A is skipped, B still
-		// fires. (If S1 instead poisoned the whole evaluate, B wouldn't
-		// fire and the test would fail.)
+	it("a throwing condition: fires the rule fail-CLOSED with no leaked error message", async () => {
+		// Rule A's `condition:` throws. Under the symmetric outer/inner
+		// `condition:` throw treatment, the throw is caught locally and
+		// projected via the leaf-level `onUnknown:` policy (default
+		// `"block"` — fail-CLOSED). Rule A fires; the secret in the
+		// thrown error message is NOT in the block reason (the warning
+		// log carries it for operators, but the LLM-facing reason uses
+		// the rule's static `reason:` text).
+		//
+		// Mirrors the plugin-handler exception contract in
+		// {@link evaluateLeafTrinary}; the inner not-block branch in
+		// {@link evaluateNotBlock} applies the same treatment for
+		// `condition:` inside `not:`.
 		const ruleA: Rule = {
 			name: "a-throws",
 			tool: "bash",
@@ -6062,17 +6094,10 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
 				},
 			},
 		};
-		const ruleB: Rule = {
-			name: "b-blocks",
-			tool: "bash",
-			field: "command",
-			pattern: /^git\s+push/,
-			reason: "b blocks",
-		};
 		const warnings = captureWarnings();
 		try {
 			const evaluator = buildEvaluator(
-				{ rules: [ruleA, ruleB] },
+				{ rules: [ruleA] },
 				resolve(),
 				makeHost(),
 			);
@@ -6081,22 +6106,22 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
 				makeCtx("/r"),
 				0,
 			);
-			// Rule B fires (A's throw did NOT poison the chain).
+			// Rule A fires fail-CLOSED.
 			assert.ok(result && result.block === true);
 			assert.ok(
-				/\[steering:b-blocks@user\]/.test(result.reason ?? ""),
-				`expected b-blocks reason; got: ${result.reason}`,
+				/\[steering:a-throws@user\]/.test(result.reason ?? ""),
+				`expected a-throws reason; got: ${result.reason}`,
 			);
-			// The secret from A's error message is NOT in B's block reason
-			// (the whole point of S1). The warning carries it for operators,
-			// but the LLM only sees B's reason.
+			// The secret from the error message is NOT in the block reason
+			// (rule's static `reason:` is what reaches the LLM). The warning
+			// log carries it for operators.
 			assert.ok(
 				!/hunter2/.test(result.reason ?? ""),
 				`block reason leaked the error message: ${result.reason}`,
 			);
 			assert.ok(
 				warnings.some((w) =>
-					/predicate threw for rule "a-throws"@user/.test(w),
+					/Rule "a-throws".*when\.condition threw.*hunter2/.test(w),
 				),
 				`no matching warning in:\n${warnings.join("\n")}`,
 			);
@@ -6106,8 +6131,12 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
 	});
 
 	it("surfaces the plugin source in the warning tag for plugin rules", async () => {
-		// Rule comes from a plugin; the warning's @source tag must read
-		// `@<plugin-name>` (not `@user`). Matches block-reason formatting.
+		// Plugin rule's `condition:` throws — caught locally,
+		// projected via the leaf `onUnknown:` policy (default `"block"`
+		// = fail-CLOSED), rule fires with the plugin's source tag in the
+		// block reason. Warning's @source tag also reads `@<plugin-name>`
+		// for parity (logged via the same channel as plugin-handler
+		// throws in {@link evaluateLeafTrinary}).
 		const pluginRule: Rule = {
 			name: "bad-plugin-rule",
 			tool: "bash",
@@ -6136,10 +6165,17 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
 				makeCtx("/r"),
 				0,
 			);
-			assert.equal(result, undefined);
+			// Rule fires fail-CLOSED with the plugin source tag.
+			assert.ok(result && result.block === true);
+			assert.ok(
+				/\[steering:bad-plugin-rule@my-plugin\]/.test(result.reason ?? ""),
+				`expected plugin-source tag; got: ${result.reason}`,
+			);
 			assert.ok(
 				warnings.some((w) =>
-					/predicate threw for rule "bad-plugin-rule"@my-plugin/.test(w),
+					/Rule "bad-plugin-rule".*when\.condition threw.*plugin predicate bug/.test(
+						w,
+					),
 				),
 				`no matching warning in:\n${warnings.join("\n")}`,
 			);

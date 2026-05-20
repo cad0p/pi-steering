@@ -20,6 +20,7 @@ import type {
 	WhenWalkerState,
 } from "../../index.ts";
 import {
+	_unwrapBooleanLeafArg,
 	branch,
 	commitsAhead,
 	hasStagedChanges,
@@ -541,10 +542,11 @@ describe("predicate: hasStagedChanges", () => {
 			},
 		]);
 		// onUnknown is read by readLeafOnUnknown at the engine layer;
-		// the handler itself just unwraps `value:`.
+		// the handler accepts the spread-with-modifier shape directly
+		// and unwraps `value:` only.
 		assert.equal(
 			await hasStagedChanges(
-				{ value: false, onUnknown: "allow" } as unknown as { value: boolean },
+				{ value: false, onUnknown: "allow" },
 				ctx,
 			),
 			true,
@@ -623,7 +625,7 @@ describe("predicate: isClean", () => {
 		]);
 		assert.equal(
 			await isClean(
-				{ value: false, onUnknown: "allow" } as unknown as { value: boolean },
+				{ value: false, onUnknown: "allow" },
 				ctx,
 			),
 			true,
@@ -1397,5 +1399,58 @@ describe("predicate: remote (array form)", () => {
 			),
 			true,
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// unwrapBooleanLeafArg (direct unit tests)
+//
+// `_unwrapBooleanLeafArg` is the test-only re-export of the
+// module-private helper used by `isClean` and `hasStagedChanges` to
+// accept the schema-advertised bare and spread shapes. End-to-end
+// coverage exists via the predicate handler tests above; the direct
+// tests pin malformed-input branches the engine has trouble driving.
+// ---------------------------------------------------------------------------
+
+describe("unwrapBooleanLeafArg: direct shape coverage", () => {
+	it("bare true passes through", () => {
+		assert.equal(_unwrapBooleanLeafArg(true), true);
+	});
+
+	it("bare false passes through", () => {
+		assert.equal(_unwrapBooleanLeafArg(false), false);
+	});
+
+	it("spread { value: true } unwraps to true (regardless of sibling onUnknown)", () => {
+		assert.equal(_unwrapBooleanLeafArg({ value: true }), true);
+		assert.equal(
+			_unwrapBooleanLeafArg({ value: true, onUnknown: "allow" }),
+			true,
+		);
+	});
+
+	it("spread { value: false } unwraps to false (regardless of sibling onUnknown)", () => {
+		assert.equal(_unwrapBooleanLeafArg({ value: false }), false);
+		assert.equal(
+			_unwrapBooleanLeafArg({ value: false, onUnknown: "block" }),
+			false,
+		);
+	});
+
+	it("malformed object without `value:` returns undefined", () => {
+		assert.equal(_unwrapBooleanLeafArg({ wrongKey: true }), undefined);
+		assert.equal(_unwrapBooleanLeafArg({}), undefined);
+	});
+
+	it("primitive non-boolean returns undefined", () => {
+		assert.equal(_unwrapBooleanLeafArg(42), undefined);
+		assert.equal(_unwrapBooleanLeafArg("true"), undefined);
+		assert.equal(_unwrapBooleanLeafArg(null), undefined);
+		assert.equal(_unwrapBooleanLeafArg(undefined), undefined);
+	});
+
+	it("array returns undefined (not a `{ value: boolean }` shape)", () => {
+		assert.equal(_unwrapBooleanLeafArg([true]), undefined);
+		assert.equal(_unwrapBooleanLeafArg([]), undefined);
 	});
 });

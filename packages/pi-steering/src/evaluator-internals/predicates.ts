@@ -906,7 +906,12 @@ async function evaluateNotBlock(
  *                    `onUnknown:` policy without the not-flip on unknown
  *                    leaves.
  *   - `condition`  — {@link PredicateFn}; call with ctx. Throws caught
- *                    and treated as fail-skip (boolean false).
+ *                    and treated as `"unknown"`; projected via
+ *                    leaf-level `onUnknown:` policy (default `"block"`
+ *                    — rule fires fail-CLOSED). Mirrors the inner
+ *                    not-block exception treatment + the
+ *                    plugin-handler contract in
+ *                    {@link evaluateLeafTrinary}.
  *   - anything else — `predicates[key]`; trinary handler with
  *                    leaf-level `onUnknown:` modifier projection. Throws
  *                    treated as `"unknown"` per spec.
@@ -968,10 +973,32 @@ export async function evaluateWhen(
 
 		// Built-in: condition (escape-hatch function). Boolean-only per
 		// spec — the callback owns its own walker-unknown handling.
+		//
+		// Throws are caught and treated as `"unknown"`, then projected
+		// via {@link readLeafOnUnknown} + {@link projectVerdict}. A bare
+		// `condition: fn` carries no `onUnknown:` sibling — default
+		// `"block"` fires the rule fail-CLOSED. This mirrors the inner
+		// not-block branch's exception treatment so a `condition:`
+		// callback exhibits identical behavior at outer-vs-inner
+		// placement, and matches the plugin-handler exception contract
+		// in {@link evaluateLeafTrinary}.
 		if (key === "condition") {
 			const fn = value as PredicateFn;
-			const result = await fn(ctx);
-			if (!result) return false;
+			let verdict: PredicateVerdict;
+			try {
+				verdict = Boolean(await fn(ctx));
+			} catch (err) {
+				const msg =
+					err instanceof Error
+						? `${err.message}\n${err.stack ?? ""}`
+						: String(err);
+				console.warn(
+					`[pi-steering] Rule "${ruleName}": when.condition threw: ${msg}`,
+				);
+				verdict = "unknown";
+			}
+			const onUnknown = readLeafOnUnknown(value);
+			if (!projectVerdict(verdict, onUnknown)) return false;
 			continue;
 		}
 

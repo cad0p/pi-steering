@@ -11,7 +11,7 @@
  *
  * Design references (see the accepted ADR, linked from PR #2's
  * description):
- *   - "Design → Rule schema"         → {@link Rule}, {@link WhenClause},
+ *   - "Design → Rule schema"         → {@link Rule}, {@link TopLevelWhenClause},
  *                                       {@link Pattern}, {@link PredicateFn},
  *                                       {@link PredicateHandler}.
  *   - "Design → Observer schema"     → {@link Observer},
@@ -49,7 +49,7 @@ export type Pattern = string | RegExp;
  * rule fires. Async OK - evaluator awaits it.
  *
  * Used as the value of `when.condition`, and as the fallback shape for
- * plugin-registered custom keys on a {@link WhenClause}.
+ * plugin-registered custom keys on a {@link TopLevelWhenClause}.
  *
  * See ADR "Design → Rule schema" → PredicateFn.
  */
@@ -352,7 +352,7 @@ export type InnerValue<K extends PluginPredicateKey> =
 
 /**
  * Built-in non-registry leaves attached to a {@link Rule.when}
- * clause.
+ * clause — outer flavor.
  *
  * These predicates ship with the engine itself (not via a plugin),
  * so they aren't in {@link PiSteeringPredicates} but DO need to
@@ -379,19 +379,17 @@ export type InnerValue<K extends PluginPredicateKey> =
  *   {@link InnerValue}). Walker-unknown cwd inside `not:` projects
  *   via the block-level `onUnknown:` modifier (default `"block"`).
  *
- * Two parallel interfaces formalize this split:
- * {@link BuiltInWhenLeavesOuter} and {@link BuiltInWhenLeavesInner}.
- * The legacy `BuiltInWhenLeaves` symbol is preserved as an alias to
- * `Outer` for backward compatibility.
- */
-/**
- * Outer-flavor non-registry built-in leaves. Lives on
- * {@link TopLevelWhenClause}. `cwd?:` accepts `Pattern | Pattern[] |
- * { pattern, onUnknown? }` (leaf-level `onUnknown:` honored at the
- * outer when-level via `evaluateCwd` / `projectVerdict`).
+ * Two parallel interfaces formalize this split: this type
+ * (`BuiltInWhenLeavesOuter`) and {@link BuiltInWhenLeavesInner}. The
+ * legacy `BuiltInWhenLeaves` symbol is preserved as a deprecated
+ * alias to `Outer` for backward compatibility — new code should
+ * import the explicit Outer / Inner flavor.
  *
- * @see BuiltInWhenLeaves for the design rationale and the
- *      Outer/Inner split.
+ * This is the outer-flavor interface. `cwd?:` accepts
+ * `Pattern | Pattern[] | { pattern, onUnknown? }` (leaf-level
+ * `onUnknown:` honored at the outer when-level via `evaluateCwd` /
+ * `projectVerdict`).
+ *
  * @see BuiltInWhenLeavesInner for the parallel inner-flavor type
  *      used inside `not:`.
  */
@@ -470,6 +468,15 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
 	 * Escape-hatch predicate for one-off logic. Prefer plugin-registered
 	 * predicates when the logic is reusable; use `condition` for
 	 * genuinely local checks that don't warrant a plugin.
+	 *
+	 * Throws (sync or rejected promise) are caught and treated as
+	 * `"unknown"`. Outer-level `condition:` is bare-`PredicateFn`-typed
+	 * (no spread shape), so the projection always uses the default
+	 * `"block"` policy: a throwing condition fires the rule fail-CLOSED.
+	 * Authors needing fail-OPEN wrap inside
+	 * `not: { condition: fn, onUnknown: "allow" }` (block-level
+	 * modifier) OR catch the throw inside the callback body. Mirrors
+	 * the plugin-handler exception contract.
 	 */
 	condition?: PredicateFn;
 
@@ -526,9 +533,8 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
  * surface (preventing the silent fail-OPEN class where leaf-level
  * `onUnknown:` looks meaningful but is ignored at runtime).
  *
- * @see BuiltInWhenLeaves for the design rationale and the
- *      Outer/Inner split.
- * @see BuiltInWhenLeavesOuter for the parallel outer-flavor type.
+ * @see BuiltInWhenLeavesOuter for the design rationale, the
+ *      Outer/Inner split, and the parallel outer-flavor type.
  */
 export interface BuiltInWhenLeavesInner<Writes extends string = string> {
 	/** Identical to {@link BuiltInWhenLeavesOuter.happened}. */
@@ -552,9 +558,12 @@ export interface BuiltInWhenLeavesInner<Writes extends string = string> {
  *
  * Retained so external code importing `BuiltInWhenLeaves` (and the
  * public-surface shape pin in `not-block-onunknown.test.ts`) keeps
- * working after the Outer/Inner split. New code should import
- * {@link BuiltInWhenLeavesOuter} or {@link BuiltInWhenLeavesInner}
- * explicitly.
+ * working after the Outer/Inner split.
+ *
+ * @deprecated Use {@link BuiltInWhenLeavesOuter} for outer-level
+ * authoring or {@link BuiltInWhenLeavesInner} for `not:` block
+ * bodies. This alias is retained for backward compatibility and may
+ * be removed in a future release.
  */
 export type BuiltInWhenLeaves<Writes extends string = string> =
 	BuiltInWhenLeavesOuter<Writes>;
@@ -902,7 +911,7 @@ export interface BaseRule<
 	 * **Compile-time effect (via {@link defineConfig}):** the union of
 	 * all `writes` literals declared across plugin rules, plugin
 	 * observers, user rules, and user observers constrains the `event`
-	 * field of every {@link WhenClause.happened} inside the same config.
+	 * field of every {@link BuiltInWhenLeavesOuter.happened} inside the same config.
 	 * Declaring a write here makes it referenceable from
 	 * `when.happened.event` anywhere in that config; omitting it leaves
 	 * the string out of the union and downstream references to it are
@@ -1156,7 +1165,7 @@ export interface Observer {
 	 * **Compile-time effect (via {@link defineConfig}):** the union of
 	 * all `writes` literals declared across plugin rules, plugin
 	 * observers, user rules, and user observers constrains the `event`
-	 * field of every {@link WhenClause.happened} inside the same config.
+	 * field of every {@link BuiltInWhenLeavesOuter.happened} inside the same config.
 	 * Declaring a write here makes it referenceable from
 	 * `when.happened.event` anywhere in that config; omitting it leaves
 	 * the string out of the union and downstream references to it are

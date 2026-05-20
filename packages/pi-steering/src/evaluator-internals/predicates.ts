@@ -9,11 +9,11 @@
  *   - {@link matchesPatternOrFn}  — resolves `pattern` / `requires` /
  *                                    `unless` values against a target
  *                                    string.
- *   - {@link evaluateWhen}        — walks a {@link WhenClause} tree,
+ *   - {@link evaluateWhen}        — walks a {@link TopLevelWhenClause} tree,
  *                                    dispatching built-in (`cwd`, `not`,
  *                                    `condition`) + plugin-registered
  *                                    predicates.
- *   - {@link UnknownPredicateError} — thrown when a WhenClause names a
+ *   - {@link UnknownPredicateError} — thrown when a {@link TopLevelWhenClause} names a
  *                                    predicate nobody registered. Kept as
  *                                    a named error so callers can catch
  *                                    it by type; the message includes the
@@ -35,7 +35,6 @@ import type {
 	ReservedPredicateKey,
 	TopLevelWhenClause,
 	TopLevelWhenClauseNoRecurse,
-	WhenClause,
 } from "../schema.ts";
 import { isPattern } from "../internal/pattern-utils.ts";
 import { AGENT_LOOP_INDEX_KEY } from "./context.ts";
@@ -266,17 +265,18 @@ export async function matchesPatternOrFn(
 }
 
 // ---------------------------------------------------------------------------
-// WhenClause dispatch
+// TopLevelWhenClause dispatch
 // ---------------------------------------------------------------------------
 
 /**
- * Thrown when a {@link WhenClause} references a predicate name that no
+ * Thrown when a {@link TopLevelWhenClause} references a predicate name that no
  * plugin has registered. The error message includes the offending key
  * so the source of the typo / missing plugin is clear at the site of
  * the rule.
  *
  * Schema-level typo detection doesn't cover this because the
- * `WhenClause` index signature is deliberately loose (`unknown`) — per
+ * `TopLevelWhenClause` mapped-type's index signature is deliberately
+ * loose (`unknown`) — per
  * the ADR, plugin predicates can accept arbitrary arg shapes. The
  * trade-off is that we surface the error at evaluation time instead of
  * load time; the key-scoped message keeps that tolerable.
@@ -893,7 +893,7 @@ async function evaluateNotBlock(
 }
 
 /**
- * Evaluate a {@link WhenClause}: returns true if every predicate in the
+ * Evaluate a {@link TopLevelWhenClause}: returns true if every predicate in the
  * clause "matches" for the given context. An empty / undefined clause
  * trivially matches (rule fires regardless of `when`).
  *

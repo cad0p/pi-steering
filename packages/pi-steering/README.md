@@ -285,23 +285,26 @@ Built-ins:
 - **`cwd`** — rule fires only when the command's effective cwd matches. For bash, this is the per-ref cwd from the walker (so `cd ~/personal && git commit` evaluates against `~/personal`). Dynamic targets — `cd "$WS_DIR/pkg"`, `cd ~/proj` — resolve through the walker's env tracker (seeded from `process.env.{HOME, USER, PWD}` plus any bare assignments, `export`s, or `unset`s in the same chain). Intractable targets (`cd $(pwd)`, `cd $UNDEFINED`) surface as the `"unknown"` sentinel; apply `onUnknown: "allow" | "block"` (default `"block"`, fail-closed) to choose. For write/edit, it's the session cwd.
 - **`happened`** — fires when an entry of `event` has NOT occurred in `in` scope. `"agent_loop"` filters by `_agentLoopIndex === ctx.agentLoopIndex` (one user prompt + its tool calls); `"session"` scans the whole session JSONL; `"tool_call"` considers only speculative entries synthesized for THIS tool_call's `&&`-chain. Optional `since` acts as an invalidation sentinel — see "Temporal ordering with `happened.since`" below. Optional `notIn` subtracts a narrower scope from `in` (e.g. `{ in: "agent_loop", notIn: "tool_call" }` means "happened in a prior tool_call in this loop", blocking the same-tool_call speculative bypass). `notIn` is set subtraction, distinct from the clause-level `not` (boolean negation). Synthesizes speculative entries across `&&` bash chains — see "`&&`-chain speculative allow" below.
 - **`not`** — boolean NOT over an inner predicate block. One level only (no `not: not: ...` recursion). Inside `not:`, leaf-level `onUnknown:` is forbidden; the block-level `onUnknown:` modifier projects walker-unknown verdicts (default `"block"` = fail-CLOSED, rule fires).
-- **`condition`** — escape hatch for one-off logic. Prefer plugin predicates when the logic is reusable.
+- **`condition`** — escape hatch for one-off logic. Prefer plugin predicates when the logic is reusable. Throws (sync or rejected promise) are caught and treated as `"unknown"` → default `"block"` policy fires the rule fail-CLOSED. Authors needing fail-OPEN wrap inside `not: { condition: fn, onUnknown: "allow" }` OR catch the throw inside the callback body.
 
 Plugin-registered predicate leaves come from the `PiSteeringPredicates` registry, populated by each plugin's `declare global` block:
 
 ```ts
 // inside a plugin's index.ts
+type Patterns = Pattern | Pattern[];
 declare global {
   interface PiSteeringPredicates {
-    branch: PredicateShape<{
-      bare: Pattern;
-      spreadBase: { pattern: Pattern };
-    }>;
+    // Auto-detected spreadBase form: `Bare` is the bare leaf type;
+    // SpreadBase auto-detects to `{ pattern: Bare }` via
+    // `DefaultSpreadBase<Bare>`.
+    branch: PredicateShape<Patterns>;
+    // Or explicit when the auto-detect doesn't fit:
+    // commitsAhead: PredicateShape<number, { gt?: number; eq?: number; lt?: number }>;
   }
 }
 ```
 
-Each key contributes a leaf-level field on `TopLevelWhenClause` accepting the bare or spread form. `when.branch: /^main$/` is valid only when a plugin has augmented `PiSteeringPredicates` with a `branch` key. See `plugins/git/index.ts` for a worked example.
+`PredicateShape<Bare, SpreadBase = DefaultSpreadBase<Bare>>` takes two type parameters. Each registry key contributes a leaf-level field on `TopLevelWhenClause` accepting the bare or spread form. `when.branch: /^main$/` is valid only when a plugin has augmented `PiSteeringPredicates` with a `branch` key. See `plugins/git/index.ts` for a worked example with all six gitPlugin predicates.
 
 The legacy `WhenClause` interface is `@deprecated` for the JSON-v1 compatibility path (`compat.ts`); new code authors against `TopLevelWhenClause`.
 

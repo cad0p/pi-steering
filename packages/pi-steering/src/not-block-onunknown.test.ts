@@ -39,6 +39,8 @@ import { buildEvaluator } from "./evaluator.ts";
 import { makeTrackedHost } from "./__test-helpers__.ts";
 import type {
 	BuiltInWhenLeaves,
+	BuiltInWhenLeavesInner,
+	BuiltInWhenLeavesOuter,
 	Plugin,
 	PredicateModifiers,
 	ReservedPredicateKey,
@@ -394,6 +396,97 @@ describe("BuiltInWhenLeaves: shape pin", () => {
 			: false;
 		const _b: _BuiltInShape = true;
 		void _b;
+		assert.ok(true);
+	});
+
+	it("BuiltInWhenLeavesOuter and BuiltInWhenLeavesInner share the same key set", () => {
+		// Outer/Inner split formalizes the leaf-level `onUnknown:` ban
+		// inside `not:` (parity with registry-driven inner predicates).
+		// Both flavors carry `happened?:`, `condition?:`, `cwd?:`; only
+		// `cwd:`'s spread shape differs.
+		type _OuterKeys = keyof BuiltInWhenLeavesOuter extends
+			"happened" | "condition" | "cwd"
+			? true
+			: false;
+		type _InnerKeys = keyof BuiltInWhenLeavesInner extends
+			"happened" | "condition" | "cwd"
+			? true
+			: false;
+		const _outer: _OuterKeys = true;
+		const _inner: _InnerKeys = true;
+		void _outer;
+		void _inner;
+		assert.ok(true);
+	});
+
+	it("BuiltInWhenLeavesInner.cwd spread shape forbids leaf-level onUnknown", () => {
+		// The asymmetry: outer `cwd:` allows `{ pattern, onUnknown? }`;
+		// inner `cwd:` (inside `not:`) drops `onUnknown?:` because the
+		// engine reads the block-level modifier inside `not:` (default
+		// `"block"` = fail-CLOSED). A leaf-level `onUnknown:` inside
+		// `not:` would silently lose, masking a fail-OPEN authoring
+		// error. Pin the constraint with a positive Inner spread (no
+		// `onUnknown:`) and an Outer spread (with `onUnknown:`).
+		const innerSpread: NonNullable<BuiltInWhenLeavesInner["cwd"]> = {
+			pattern: /work/,
+		};
+		const outerSpread: NonNullable<BuiltInWhenLeavesOuter["cwd"]> = {
+			pattern: /work/,
+			onUnknown: "allow",
+		};
+		assert.ok(innerSpread !== undefined);
+		assert.ok(outerSpread !== undefined);
+	});
+
+	it("Rule.when rejects leaf-level onUnknown on cwd inside not:", () => {
+		// Empirical type-pin: the silent fail-OPEN shape
+		// `not: { cwd: { pattern, onUnknown: "allow" } }` must NOT
+		// typecheck under the new Outer/Inner split. The `not:` body
+		// resolves to `TopLevelWhenClauseNoRecurse` which intersects with
+		// `BuiltInWhenLeavesInner` (where `cwd:`'s spread drops the
+		// `onUnknown?:` field). Block-level `onUnknown:` lives on the
+		// outer `not:` block via `& PredicateModifiers` and is the
+		// canonical placement.
+		const _ban: Rule = {
+			name: "x",
+			tool: "bash",
+			field: "command",
+			pattern: "^x",
+			reason: "x",
+			when: {
+				not: {
+					cwd: {
+						pattern: /work/,
+						// @ts-expect-error: leaf-level onUnknown forbidden inside not: (parity with registry predicates)
+						onUnknown: "allow",
+					},
+				},
+			},
+		};
+		void _ban;
+
+		// Sibling positive cases: bare cwd inside not:, and block-level
+		// onUnknown on the not: block, both must typecheck cleanly.
+		const _bareInsideNot: Rule = {
+			name: "x",
+			tool: "bash",
+			field: "command",
+			pattern: "^x",
+			reason: "x",
+			when: { not: { cwd: /work/ } },
+		};
+		void _bareInsideNot;
+
+		const _blockLevel: Rule = {
+			name: "x",
+			tool: "bash",
+			field: "command",
+			pattern: "^x",
+			reason: "x",
+			when: { not: { cwd: /work/, onUnknown: "block" } },
+		};
+		void _blockLevel;
+
 		assert.ok(true);
 	});
 });

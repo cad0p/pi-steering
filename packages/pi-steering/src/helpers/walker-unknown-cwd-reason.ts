@@ -62,18 +62,19 @@ import type { PredicateContext } from "../schema.ts";
  * };
  * ```
  *
- * @warning Avoid `when: { not: { someRuntimeCwdPredicate: true } }`
- *          over a runtime-cwd predicate at the leaf level without an
- *          explicit block-level `onUnknown:` modifier on the not-block.
- *          The runtime-cwd predicate surfaces `"unknown"` on the
- *          walker-unknown branch; inside a `not:` block, the
- *          block-level `onUnknown:` (default `"block"` = fail-CLOSED)
- *          decides the not-clause's contribution — the not-flip is
- *          skipped on the unknown-leaf case so authors who write
- *          `onUnknown: "block"` directly mean "rule fires" without
- *          double inversion. For `isClean`, the simpler form is
- *          usually `{ isClean: false }` (gitPlugin's `predicates.ts`
- *          JSDoc documents both polarities).
+ * @remarks `not:` over a runtime-cwd predicate is safe by default
+ *          under the new engine. The runtime-cwd predicate surfaces
+ *          `"unknown"` on the walker-unknown branch; inside a `not:`
+ *          block, the block-level `onUnknown:` (default `"block"` =
+ *          fail-CLOSED) decides the not-clause's contribution — the
+ *          not-flip is skipped on the unknown-leaf case so authors
+ *          who write `onUnknown: "block"` directly mean "rule fires"
+ *          without double inversion. The simpler `{ isClean: false }`
+ *          form sidesteps the choice; if you set
+ *          `onUnknown: "allow"` on a not-block over a runtime-cwd
+ *          predicate, you opt back into fail-OPEN, which is rarely
+ *          what you want. gitPlugin's `predicates.ts` JSDoc documents
+ *          both polarities.
  */
 export function walkerUnknownCwdReason(
 	ctx: PredicateContext,

@@ -27,7 +27,6 @@
  */
 
 import type { Rule } from "../../schema.ts";
-import { walkerUnknownCwdReason } from "../../helpers/walker-unknown-cwd-reason.ts";
 import { NO_CHECKOUT_IN_CHAIN } from "./branch-tracker.ts";
 import { walkerString } from "./predicates.ts";
 
@@ -184,21 +183,17 @@ export const noMainCommit = {
  *          The branch predicate stays at default `onUnknown: "block"`
  *          (fail-closed) so protected-branch detection isn't weakened.
  *
- * Walker-unknown cwd: separate from the `onUnknown: "allow"` path
- * above. The `remote:` predicate handler inlines a walker-unknown-cwd
- * guard at the top of its body and surfaces trinary `"unknown"`
- * BEFORE the inner exec runs whenever `walkerState.cwd === "unknown"`.
- * The engine's leaf-level `onUnknown:` policy then projects — the
- * default `"block"` (rather than the leaf's inner `"allow"`) is what
- * matters here because the leaf surfaces unknown unconditionally for
- * the walker-unknown branch; combined with the branch predicate (also
- * surfacing trinary unknown via its `onUnknown: "block"` default), the
- * rule fires. The reason fn detects `walkerState.cwd === "unknown"`
- * and routes to {@link walkerUnknownCwdReason} with a neutral topic
- * so the agent doesn't see an unverified positive claim about github
- * context. The walker-unknown branch in the reason fn is the
- * load-bearing primary path under walker-unknown cwd, not a
- * defense-in-depth fallback.
+ * Walker-unknown cwd: the `remote:` leaf surfaces trinary
+ * `"unknown"` (via the inline walker-unknown-cwd guard at the top of
+ * the handler) before the inner exec runs whenever
+ * `walkerState.cwd === "unknown"`. The engine's leaf-level
+ * `onUnknown:` policy reads the `"allow"` set on the leaf, projects
+ * `"unknown" → false`, and the github rule SKIPS. The engine then
+ * falls through to the generic {@link noMainCommit} (only `branch:`
+ * leaf), which fires fail-CLOSED and emits the generic
+ * protected-branch reason. The github-specific rule deliberately
+ * does NOT fire under walker-unknown cwd — a github-flavored reason
+ * would overstate what the engine has confirmed.
  *
  * Walker-unknown branch state: when `walkerState.cwd` is known but
  * the branch tracker collapses to its `"unknown"` sentinel (dynamic
@@ -211,7 +206,6 @@ export const noMainCommit = {
  * {@link GIT_COMMIT_PATTERN} constant so the two rules' bash-
  * command applicability stays byte-equal as the family evolves.
  *
- * @see {@link walkerUnknownCwdReason}
  * @see {@link noMainCommit}
  */
 export const noMainCommitGithub = {
@@ -221,39 +215,37 @@ export const noMainCommitGithub = {
 	pattern: GIT_COMMIT_PATTERN,
 	when: {
 		branch: PROTECTED_BRANCH_PATTERN,
+		// Intentional fail-OPEN — falls through to the generic
+		// `noMainCommit` rule when origin can't be resolved.
+		//
 		// `onUnknown: "allow"` posture: a github-specialized rule
-		// should only fire when github context is confirmed. Governs
-		// the known-cwd no-`origin` case (fresh-init repo, repo with
-		// `upstream` but no `origin`, or other exec failure): the
-		// predicate allows so the engine falls through to the generic
-		// `noMainCommit` and the user gets the correct generic message
-		// rather than PR-flow guidance for a repo where there's no PR
-		// to open. Walker-unknown cwd is governed separately by the
-		// inline walker-unknown-cwd guard at the top of the predicate
-		// handler body, which surfaces trinary `"unknown"` BEFORE
-		// consulting `onUnknown`; see the JSDoc `Walker-unknown cwd:`
-		// paragraph for the full interaction.
+		// should only fire when github context is confirmed. The
+		// `"allow"` covers two opt-out paths:
+		//   1. Known-cwd no-`origin` case (fresh-init repo, repo with
+		//      `upstream` but no `origin`, or other exec failure):
+		//      handler returns `false`, leaf projects to false, github
+		//      rule skips. Generic `noMainCommit` fires next — user
+		//      gets the correct generic message rather than PR-flow
+		//      guidance for a repo where there's no PR to open.
+		//   2. Walker-unknown cwd (`cd "$VAR" && git commit`): the
+		//      handler's inline guard surfaces trinary `"unknown"`,
+		//      the leaf-level `"allow"` projects to false, github rule
+		//      skips. Generic `noMainCommit` fires fail-CLOSED via the
+		//      branch predicate's default `onUnknown: "block"`.
+		// Both paths land on the same generic protected-branch reason,
+		// avoiding overstated github-specific claims when context is
+		// unverified.
 		remote: { pattern: /github\.com[/:]/, onUnknown: "allow" },
 	},
 	reason: (ctx) => {
-		// Walker-unknown cwd: don't claim github-specific context when
-		// the walker couldn't verify it. Use a neutral topic — neither
-		// "github clone status" nor "main branch" overstate what's
-		// been verified, since under walker-unknown the engine hasn't
-		// confirmed either dimension. Same compositional pattern as
-		// the dynamic-reason-runtime-cwd example.
-		if (ctx.walkerState?.["cwd"] === "unknown") {
-			return walkerUnknownCwdReason(
-				ctx,
-				"the repo's branch + remote configuration",
-			);
-		}
 		// Walker-unknown branch: the engine fired fail-closed via the
 		// branch predicate's default `onUnknown: "block"`, but we
 		// haven't confirmed which protected branch (main / master /
 		// mainline / trunk) is involved — don't make an unverified
-		// positive claim. Sibling early-return symmetric with the
-		// walker-unknown-cwd branch above.
+		// positive claim. Note: walker-unknown CWD is unreachable here
+		// because `remote:` opts into `onUnknown: "allow"` and projects
+		// the trinary unknown to false BEFORE this reason fn runs (the
+		// rule skips, deferring to the generic noMainCommit).
 		const branchRes = walkerString(ctx, "branch", NO_CHECKOUT_IN_CHAIN);
 		if (branchRes.kind === "unknown") {
 			return (

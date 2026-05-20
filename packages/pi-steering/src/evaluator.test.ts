@@ -44,7 +44,6 @@ import type {
 	PredicateHandler,
 	Rule,
 	SteeringConfig,
-	WhenClause,
 } from "./schema.ts";
 
 // ---------------------------------------------------------------------------
@@ -2769,7 +2768,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 	}
 
 	function makeRule(
-		when: WhenClause,
+		when: NonNullable<Rule["when"]>,
 		name: string = "r",
 	): Rule {
 		return {
@@ -2778,12 +2777,12 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			field: "command",
 			pattern: "^git\\s+push",
 			reason: name,
-			when: when as NonNullable<Rule["when"]>,
+			when,
 		};
 	}
 
 	function buildWith(
-		when: WhenClause,
+		when: NonNullable<Rule["when"]>,
 		plugin: Plugin,
 		name: string = "r",
 	) {
@@ -2800,7 +2799,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			() => true,
 		);
 		const ev = buildWith(
-			{ not: { triA: "x", triB: "y" } },
+			{ not: { triA: "x", triB: "y" } } as unknown as NonNullable<Rule["when"]>,
 			plugin,
 		);
 		const r = await ev.evaluate(
@@ -2821,7 +2820,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			() => false,
 		);
 		const ev = buildWith(
-			{ not: { triA: "x", triB: "y" } },
+			{ not: { triA: "x", triB: "y" } } as unknown as NonNullable<Rule["when"]>,
 			plugin,
 		);
 		const r = await ev.evaluate(
@@ -2841,7 +2840,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			() => false,
 		);
 		const ev = buildWith(
-			{ not: { triA: "x", triB: "y" } },
+			{ not: { triA: "x", triB: "y" } } as unknown as NonNullable<Rule["when"]>,
 			plugin,
 		);
 		const r = await ev.evaluate(
@@ -2858,7 +2857,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			() => false,
 		);
 		const ev = buildWith(
-			{ not: { triA: "x", triB: "y" } },
+			{ not: { triA: "x", triB: "y" } } as unknown as NonNullable<Rule["when"]>,
 			plugin,
 		);
 		const r = await ev.evaluate(
@@ -2876,7 +2875,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 		);
 		// No explicit onUnknown: — defaults to "block" (fail-CLOSED).
 		const ev = buildWith(
-			{ not: { triA: "x", triB: "y" } },
+			{ not: { triA: "x", triB: "y" } } as unknown as NonNullable<Rule["when"]>,
 			plugin,
 		);
 		const r = await ev.evaluate(
@@ -2896,7 +2895,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			() => "unknown",
 		);
 		const ev = buildWith(
-			{ not: { triA: "x", triB: "y", onUnknown: "allow" } },
+			{ not: { triA: "x", triB: "y", onUnknown: "allow" } } as unknown as NonNullable<Rule["when"]>,
 			plugin,
 		);
 		const r = await ev.evaluate(
@@ -2917,7 +2916,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			() => "unknown",
 		);
 		const ev = buildWith(
-			{ not: { triA: "x", triB: "y" } },
+			{ not: { triA: "x", triB: "y" } } as unknown as NonNullable<Rule["when"]>,
 			plugin,
 		);
 		const r = await ev.evaluate(
@@ -2937,7 +2936,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			() => "unknown",
 		);
 		const ev = buildWith(
-			{ not: { triA: "x", triB: "y", onUnknown: "allow" } },
+			{ not: { triA: "x", triB: "y", onUnknown: "allow" } } as unknown as NonNullable<Rule["when"]>,
 			plugin,
 		);
 		const r = await ev.evaluate(
@@ -2958,7 +2957,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			() => "unknown",
 		);
 		const ev = buildWith(
-			{ not: { triA: "x", triB: "y", onUnknown: "allow" } },
+			{ not: { triA: "x", triB: "y", onUnknown: "allow" } } as unknown as NonNullable<Rule["when"]>,
 			plugin,
 		);
 		const r = await ev.evaluate(
@@ -2982,15 +2981,15 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 		// stays `"unknown"`; the block-level `onUnknown:` policy then
 		// projects to a definite verdict. Default `"block"` fires the
 		// rule fail-CLOSED. Pins the not-block evaluator's
-		// readBlockLevelOnUnknown → verdictAfterPolicy path on the
-		// no-false-absorb branch, which the F+U cell can't exercise
-		// (false absorbs to false BEFORE the modifier is consulted).
+		// `block.onUnknown` read + Kleene-AND no-false-absorb path,
+		// which the F+U cell can't exercise (false absorbs to false
+		// BEFORE the modifier is consulted).
 		const plugin = trinaryPlugin(
 			() => "unknown",
 			() => "unknown",
 		);
 		const ev = buildWith(
-			{ not: { triA: "x", triB: "y" } }, // no onUnknown: → default block
+			{ not: { triA: "x", triB: "y" } } as unknown as NonNullable<Rule["when"]>, // no onUnknown: → default block
 			plugin,
 		);
 		const r = await ev.evaluate(

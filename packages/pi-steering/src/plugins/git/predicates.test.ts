@@ -756,7 +756,7 @@ describe("walkerString: rejects initialSentinel === \"unknown\"", () => {
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// Walker-unknown cwd inline guard (replaces the deleted requireKnownCwd wrap)
+// Walker-unknown cwd inline guard
 //
 // `isClean`, `hasStagedChanges`, `remote`, `upstream`, `commitsAhead` all
 // call `ctx.exec("git", [...], { cwd: ctx.cwd })` at runtime. When the
@@ -767,9 +767,9 @@ describe("walkerString: rejects initialSentinel === \"unknown\"", () => {
 // `isClean: true` would miss the state that matters.
 //
 // The runtime-cwd predicates inline a `cwdIsWalkerUnknown(ctx)` check at
-// the top of each handler (replacing the deleted `requireKnownCwd` wrap)
-// and surface trinary `"unknown"` instead of fail-CLOSED `true`. The
-// engine projects `"unknown"` to a definite verdict via the leaf-level
+// the top of each handler and surface trinary `"unknown"` instead of
+// fail-CLOSED `true`. The engine projects `"unknown"` to a definite
+// verdict via the leaf-level
 // (or, inside `not:`, the block-level) `onUnknown:` policy — default
 // `"block"` keeps the fail-CLOSED behavior the wrap provided, while
 // `onUnknown: "allow"` opts into fail-OPEN handling.

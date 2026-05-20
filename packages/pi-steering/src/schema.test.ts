@@ -79,18 +79,6 @@ describe("schema: shape smoke tests", () => {
 		assert.ok(w3.cwd !== undefined);
 	});
 
-	it("WhenClause.not composes recursively", () => {
-		const w: WhenClause = {
-			not: {
-				cwd: /^\/home/,
-				not: {
-					cwd: /^\/home\/guest/,
-				},
-			},
-		};
-		assert.ok(w.not?.not?.cwd !== undefined);
-	});
-
 	it("WhenClause.condition accepts a PredicateFn", () => {
 		const w: WhenClause = {
 			condition: (ctx) => ctx.tool === "bash",

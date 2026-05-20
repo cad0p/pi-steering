@@ -82,19 +82,17 @@ import {
  * which signals to the caller that the handler should bail with
  * `"unknown"` instead of querying the wrong repo.
  *
- * Replaces the deleted `requireKnownCwd` wrapper. Each runtime-cwd
- * handler in this module starts with:
+ * Each runtime-cwd handler in this module starts with:
  *
  *   ```ts
  *   if (cwdIsWalkerUnknown(ctx)) return "unknown";
  *   ```
  *
- * The guard surfaces walker-unknown as trinary `"unknown"` instead of
- * the wrap's old fail-CLOSED `true` collapse. The engine then applies
- * the leaf-level (or block-level, inside `not:`) `onUnknown:` policy
- * — default `"block"` keeps the fail-CLOSED behavior the wrap
- * provided, while a user with `onUnknown: "allow"` opts into
- * fail-OPEN handling. Self-documenting + composable.
+ * Surfacing walker-unknown as trinary `"unknown"` lets the engine
+ * apply the leaf-level (or block-level, inside `not:`) `onUnknown:`
+ * policy. Default `"block"` is fail-CLOSED (the rule fires); a user
+ * with `onUnknown: "allow"` opts into fail-OPEN handling.
+ * Self-documenting + composable.
  */
 function cwdIsWalkerUnknown(ctx: PredicateContext): boolean {
 	return ctx.walkerState?.cwd === "unknown";
@@ -184,10 +182,12 @@ function unknownVerdict(onUnknown: "allow" | "block"): boolean {
 /**
  * Unwrap the boolean payload from a {@link PredicateShape}<boolean>
  * argument. Accepts the bare form (`true` / `false`) and the
- * spread form (`{ value: true }` / `{ value: false }`); modifiers
- * (currently `onUnknown:`) are stripped before the handler is
- * called by the engine's `readLeafOnUnknown`, so the spread shape
- * the handler sees is `{ value: boolean }` only.
+ * spread form (`{ value: true, onUnknown? }` /
+ * `{ value: false, onUnknown? }`); the engine's `readLeafOnUnknown`
+ * reads any `onUnknown:` sibling and `projectVerdict` applies the
+ * policy to the handler's `"unknown"` returns. The handler itself
+ * treats `onUnknown:` as an opaque sibling field and only consumes
+ * `value:`.
  *
  * Returns `undefined` on malformed input — the caller decides what
  * to do with that (typically `return false`, mirroring the existing
@@ -555,9 +555,11 @@ export const hasStagedChanges: PredicateHandler<
 > = async (args, ctx) => {
 	if (cwdIsWalkerUnknown(ctx)) return "unknown";
 	// Schema's `PredicateShape<boolean>` auto-detects spreadBase to
-	// `{ value: boolean }`; unwrap so authors can attach modifiers via
-	// `{ value: true, onUnknown: "allow" }` (modifiers stripped before
-	// the handler is called by readLeafOnUnknown).
+	// `{ value: boolean; onUnknown? }`; unwrap consumes `value:` only.
+	// Authors attach modifiers via `{ value: true, onUnknown: "allow" }`;
+	// the engine reads any `onUnknown:` sibling via readLeafOnUnknown
+	// and projects the handler's `"unknown"` returns under that policy
+	// (the handler itself treats `onUnknown:` as an opaque sibling field).
 	const expected = unwrapBooleanLeafArg(args);
 	if (expected === undefined) return false;
 	const state = await getStagedChanges(ctx);
@@ -600,9 +602,11 @@ export const isClean: PredicateHandler<
 > = async (args, ctx) => {
 	if (cwdIsWalkerUnknown(ctx)) return "unknown";
 	// Schema's `PredicateShape<boolean>` auto-detects spreadBase to
-	// `{ value: boolean }`; unwrap so authors can attach modifiers via
-	// `{ value: true, onUnknown: "allow" }` (modifiers stripped before
-	// the handler is called by readLeafOnUnknown).
+	// `{ value: boolean; onUnknown? }`; unwrap consumes `value:` only.
+	// Authors attach modifiers via `{ value: true, onUnknown: "allow" }`;
+	// the engine reads any `onUnknown:` sibling via readLeafOnUnknown
+	// and projects the handler's `"unknown"` returns under that policy
+	// (the handler itself treats `onUnknown:` as an opaque sibling field).
 	const expected = unwrapBooleanLeafArg(args);
 	if (expected === undefined) return false;
 	const clean = await getWorkingTreeClean(ctx);

@@ -452,13 +452,27 @@ export interface CommitsAheadArgs {
  *      for the walker-unknown-cwd fail-closed branch in your rule's
  *      ReasonFn.
  */
-export const commitsAhead: PredicateHandler<CommitsAheadArgs> = async (
-	args,
-	ctx,
-) => {
+export const commitsAhead: PredicateHandler<
+	number | CommitsAheadArgs
+> = async (args, ctx) => {
 	if (cwdIsWalkerUnknown(ctx)) return "unknown";
-	if (args === null || typeof args !== "object") return false;
-	const { wrt = "@{upstream}", eq, gt, lt } = args;
+	// Schema advertises `PredicateShape<number, { eq?, gt?, lt?, wrt? }>`
+	// — bare-number `commitsAhead: N` is sugar for `{ eq: N }`.
+	let eq: number | undefined;
+	let gt: number | undefined;
+	let lt: number | undefined;
+	let wrt: string = "@{upstream}";
+	if (typeof args === "number") {
+		eq = args;
+	} else if (args !== null && typeof args === "object") {
+		const shape = args as CommitsAheadArgs;
+		eq = shape.eq;
+		gt = shape.gt;
+		lt = shape.lt;
+		wrt = shape.wrt ?? "@{upstream}";
+	} else {
+		return false;
+	}
 	if (eq === undefined && gt === undefined && lt === undefined) {
 		return false;
 	}
@@ -502,12 +516,29 @@ export const commitsAhead: PredicateHandler<CommitsAheadArgs> = async (
  *      for the walker-unknown-cwd fail-closed branch in your rule's
  *      ReasonFn.
  */
-export const hasStagedChanges: PredicateHandler<boolean> = async (args, ctx) => {
+export const hasStagedChanges: PredicateHandler<
+	boolean | { value: boolean }
+> = async (args, ctx) => {
 	if (cwdIsWalkerUnknown(ctx)) return "unknown";
-	if (typeof args !== "boolean") return false;
+	// Schema's `PredicateShape<boolean>` auto-detects spreadBase to
+	// `{ value: boolean }`; unwrap so authors can attach modifiers via
+	// `{ value: true, onUnknown: "allow" }` (modifiers stripped before
+	// the handler is called by readLeafOnUnknown).
+	let expected: boolean;
+	if (typeof args === "boolean") {
+		expected = args;
+	} else if (
+		args !== null
+		&& typeof args === "object"
+		&& typeof (args as { value?: unknown }).value === "boolean"
+	) {
+		expected = (args as { value: boolean }).value;
+	} else {
+		return false;
+	}
 	const state = await getStagedChanges(ctx);
 	if (state === null) return false; // unknown — don't fire
-	return args === state;
+	return expected === state;
 };
 
 // ---------------------------------------------------------------------------
@@ -537,12 +568,29 @@ export const hasStagedChanges: PredicateHandler<boolean> = async (args, ctx) => 
  *      for the walker-unknown-cwd fail-closed branch in your rule's
  *      ReasonFn.
  */
-export const isClean: PredicateHandler<boolean> = async (args, ctx) => {
+export const isClean: PredicateHandler<
+	boolean | { value: boolean }
+> = async (args, ctx) => {
 	if (cwdIsWalkerUnknown(ctx)) return "unknown";
-	if (typeof args !== "boolean") return false;
+	// Schema's `PredicateShape<boolean>` auto-detects spreadBase to
+	// `{ value: boolean }`; unwrap so authors can attach modifiers via
+	// `{ value: true, onUnknown: "allow" }` (modifiers stripped before
+	// the handler is called by readLeafOnUnknown).
+	let expected: boolean;
+	if (typeof args === "boolean") {
+		expected = args;
+	} else if (
+		args !== null
+		&& typeof args === "object"
+		&& typeof (args as { value?: unknown }).value === "boolean"
+	) {
+		expected = (args as { value: boolean }).value;
+	} else {
+		return false;
+	}
 	const clean = await getWorkingTreeClean(ctx);
 	if (clean === null) return false;
-	return args === clean;
+	return expected === clean;
 };
 
 // ---------------------------------------------------------------------------

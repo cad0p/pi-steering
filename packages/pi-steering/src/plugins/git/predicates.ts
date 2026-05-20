@@ -196,6 +196,8 @@ function unknownVerdict(onUnknown: "allow" | "block"): boolean {
  * Used by {@link isClean} and {@link hasStagedChanges}; both ship
  * with `PredicateShape<boolean>` in the registry so the bare/spread
  * shape is identical at the type level too.
+ *
+ * @internal
  */
 function unwrapBooleanLeafArg(args: unknown): boolean | undefined {
 	if (typeof args === "boolean") return args;
@@ -211,10 +213,13 @@ function unwrapBooleanLeafArg(args: unknown): boolean | undefined {
 
 /**
  * Test-internal export of {@link unwrapBooleanLeafArg}. Module-private
- * by intent; the underscore prefix flags "not part of the public
- * surface" so external consumers can grep-discover the test
- * convention. Direct unit tests pin malformed-input branches that
- * are hard to drive via the engine end-to-end.
+ * by intent; the `@internal` JSDoc tag (TypeScript ecosystem-standard)
+ * flags "not part of the public surface" and the underscore prefix
+ * mirrors the convention so external consumers can grep-discover it
+ * too. Direct unit tests pin malformed-input branches that are hard
+ * to drive via the engine end-to-end.
+ *
+ * @internal
  */
 export const _unwrapBooleanLeafArg = unwrapBooleanLeafArg;
 

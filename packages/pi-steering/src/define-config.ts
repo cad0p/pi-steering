@@ -171,7 +171,7 @@ export type AllRuleNames<
  *   - the top-level inline `rules`, AND
  *   - the top-level inline `observers`.
  *
- * Used to constrain {@link WhenClause.happened} `event` so typos
+ * Used to constrain {@link BuiltInWhenLeavesOuter.happened} `event` so typos
  * (e.g., `happened: { event: "sync-don" }` when the observer writes
  * `"sync-done"`) surface as compile errors.
  *

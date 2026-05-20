@@ -313,12 +313,16 @@ export interface DefineConfigInput<
  * contextual type of inline rule literals to their `const`-inferred
  * shape, bypassing the homomorphic mapped-type linkage that surfaces
  * source-declared JSDoc on hover (e.g. on `when.isClean:`). Factor
- * rules out into `as const satisfies Rule` (or `: Rule`) bindings
- * before passing them to `defineConfig` to keep the hover-rich shape;
- * see the `examples/dynamic-reason-runtime-cwd/steering.ts` example.
- * The `const` modifier on `R` is load-bearing for `disabledRules`
- * typo detection and for `when.happened.event` narrowing across
- * declared `writes`, so removing it isn't an option.
+ * rules out into `const myRule = { ... } as const satisfies Rule`
+ * bindings before passing them to `defineConfig` to keep the
+ * hover-rich shape; see the
+ * `examples/dynamic-reason-runtime-cwd/steering.ts` example. The
+ * `as const` modifier on the binding (and the `const R` modifier on
+ * the signature) preserves each rule's literal `name` so
+ * `disabledRules` typo detection fires — the alternatives `: Rule`
+ * and bare `satisfies Rule` restore hover but widen the inferred
+ * type and collapse typo detection (and `when.happened.event`
+ * narrowing across declared `writes`).
  *
  * @example
  *   export default defineConfig({

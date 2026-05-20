@@ -110,7 +110,8 @@ function hoverDocsAt(
 	const propIdx = source.indexOf(`${propName}:`, anchorIdx);
 	assert(propIdx >= 0, `prop ${JSON.stringify(propName)} not found after anchor`);
 	const qi = ls.getQuickInfoAtPosition(scratchFile, propIdx + 1);
-	return ts.displayPartsToString(qi?.documentation ?? []);
+	assert(qi, "expected quickInfo to resolve at probe position");
+	return ts.displayPartsToString(qi.documentation ?? []);
 }
 
 function withScratch(suffix: string, fn: (scratchDir: string) => void): void {
@@ -231,7 +232,7 @@ describe("JSDoc propagation through TopLevelWhenClause mapped type", () => {
 			assert.equal(
 				docs,
 				"",
-				`inline defineConfig is the documented broken path; if this passes, the schema fix has reached this codepath and the docs (defineConfig JSDoc + examples README) should be updated. Got: ${JSON.stringify(docs)}`,
+				`inline-defineConfig path now SURFACES JSDoc — gap closed, update the docs (defineConfig JSDoc + examples README) to remove the factor-out recommendation. Got: ${JSON.stringify(docs)}`,
 			);
 		});
 	});

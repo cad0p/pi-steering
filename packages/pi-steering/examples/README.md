@@ -31,15 +31,17 @@ every wrapper form) lives in the engine's own test suite.
 3. **Verify** the rule is active by running `pi` in the target
    directory; the rules load on `session_start`.
 
-**Hover-rich authoring:** factor each rule out into an
-`as const satisfies Rule` (or `: Rule`) binding before passing it to
-`defineConfig`, as `dynamic-reason-runtime-cwd/steering.ts` does.
-Inline rule literals inside `defineConfig({ rules: [{ ... }] })` get
-their contextual type narrowed to the `const`-inferred shape and
+**Hover-rich authoring:** factor each rule out into a
+`const myRule = { ... } as const satisfies Rule` binding before
+passing it to `defineConfig`, as `dynamic-reason-runtime-cwd/steering.ts`
+does. Inline rule literals inside `defineConfig({ rules: [{ ... }] })`
+get their contextual type narrowed to the `const`-inferred shape and
 bypass the homomorphic mapped-type linkage that surfaces source-
 declared JSDoc on hover for plugin predicates (`when.isClean`, etc.).
-The factor-out form keeps both compile-time `defineConfig` checks AND
-IDE hover ergonomics.
+The `as const` modifier on the binding preserves each rule's literal
+`name` so `disabledRules` typo detection fires; the alternatives
+(`: Rule` or bare `satisfies Rule`) restore hover but widen the
+inferred type and collapse typo detection.
 
 ### JSON
 

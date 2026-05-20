@@ -101,11 +101,16 @@ export function isReservedPredicateKey(
  * Throws if a `when:` or `not:` block contains no predicate-leaf keys
  * after stripping modifier keys.
  *
- * Catches two foot-guns at config-resolve time so the engine never has
- * to silently skip a malformed clause:
+ * Catches three foot-guns at config-resolve time so the engine never
+ * has to silently skip a malformed clause:
  *   - `when: {}` — zero keys.
  *   - `not: { onUnknown: "block" }` — one key, but it's a modifier; no
  *     leaves means the block has nothing to evaluate.
+ *   - `when: { not: { not: ... } }` — nested `not:` inside a not-block,
+ *     authored via JSON load or `as any` escape hatch (the type-level
+ *     ban via {@link TopLevelWhenClauseNoRecurse} catches authoring-
+ *     time mistakes; the same recursion catches the JSON / `as any`
+ *     escape hatch).
  *
  * The `not:` operator field itself counts as a leaf at the outer
  * `when:` level (it produces a verdict via Kleene composition of the
@@ -115,8 +120,7 @@ export function isReservedPredicateKey(
  * the plugin is currently loaded — the unknown-predicate check fires
  * later via {@link UnknownPredicateError}.
  *
- * Recurses into the `not:` block to enforce the same shape there
- * (type-level banning of `not: not:` recursion is a separate guard).
+ * Recurses into the `not:` block to enforce the same shape there.
  *
  * `path` describes the call site for error messages, e.g.
  * `'rule "no-main-commit".when'` or `'rule "no-git-worktree".when.not'`.
@@ -157,8 +161,7 @@ export function validateWhenClauseShape(
 		// `as any` escape hatches can author the shape; without this
 		// guard the engine's reserved-key skip would silently drop the
 		// inner `not:` (zero verdicts → vacuous true → outer not-flip =
-		// false → rule never fires). See not-block onUnknown design,
-		// open question 8.
+		// false → rule never fires).
 		if ("not" in notBlock && (notBlock as { not?: unknown }).not !== undefined) {
 			throw new Error(
 				`[pi-steering] '${path}.not' contains a nested 'not:' key. ` +
@@ -735,7 +738,8 @@ async function evaluateLeafTrinary(
 		console.warn(
 			`[pi-steering] Rule "${ruleName}": when.${key} handler returned ` +
 				`${JSON.stringify(result)}; expected boolean | "unknown". ` +
-				`Treating as "unknown" (treated via leaf-level onUnknown policy).`,
+				`Treating as "unknown"; the configured onUnknown policy will ` +
+				`project this to a definite verdict.`,
 		);
 		return "unknown";
 	} catch (err) {

@@ -213,7 +213,21 @@ export type DefaultSpreadBase<Bare> =
  * @see DefaultSpreadBase for how the SpreadBase auto-detects from Bare.
  */
 export interface PredicateShape<Bare, SpreadBase = DefaultSpreadBase<Bare>> {
-	/** The bare value users write at the leaf (no wrapper, no modifiers). */
+	/**
+	 * The bare value users write at the leaf (no wrapper, no modifiers).
+	 *
+	 * For primitive {@link Bare} types (Pattern, boolean, number) this
+	 * is the shorthand authors reach for first — `cwd: /work/`,
+	 * `isClean: true`, `commitsAhead: 2`. The {@link spreadBase} form
+	 * mirrors the bare value as `{ value: Bare }` (or an explicit
+	 * `SpreadBase` shape for mixed-bare predicates like `commitsAhead`'s
+	 * comparator bag) when authors need to attach leaf-level modifiers
+	 * via `& PredicateModifiers`.
+	 *
+	 * For object {@link Bare} types the bare form IS the object shape
+	 * directly (no `value:` wrapper); the {@link spreadBase} adds
+	 * modifier slots without changing the structural shape.
+	 */
 	bare: Bare;
 	/**
 	 * The object form WITHOUT modifiers. Modifiers are added at use site
@@ -311,6 +325,9 @@ export type PluginPredicateKey = Exclude<
  * Outer leaf value: the bare form OR the spreadBase intersected with
  * {@link PredicateModifiers}. Used at the top-level `when:` clause
  * where each plugin-registered predicate accepts modifiers per-leaf.
+ *
+ * @see TopLevelWhenClause for the surface that consumes this mapped
+ *      type.
  */
 export type OuterValue<K extends PluginPredicateKey> =
 	| PiSteeringPredicates[K]["bare"]
@@ -322,6 +339,9 @@ export type OuterValue<K extends PluginPredicateKey> =
  * modifiers inside `not:` are forbidden so the silent fail-OPEN
  * `not: { cwd: P }` shape can't be reproduced via leaf-level
  * `onUnknown:` placement.
+ *
+ * @see TopLevelWhenClauseNoRecurse for the surface that consumes this
+ *      mapped type.
  */
 export type InnerValue<K extends PluginPredicateKey> =
 	| PiSteeringPredicates[K]["bare"]
@@ -338,16 +358,74 @@ export type InnerValue<K extends PluginPredicateKey> =
  * compile-time-checked against the union of declared `writes` arrays
  * across plugins + observers.
  *
- * @see WhenClause.happened for the `happened:` shape's full semantics.
- * @see WhenClause.condition for the escape-hatch callback.
+ * Currently three non-registry leaves: `happened?:`, `condition?:`,
+ * `cwd?:`. The shape is pinned in tests (a future widening — e.g.,
+ * adding a new built-in `tool?:` leaf — fails the type-pin and forces
+ * a deliberate decision).
  */
 export interface BuiltInWhenLeaves<Writes extends string = string> {
 	/**
 	 * Rule fires when the given `event` has NOT happened in the given
-	 * scope. Mirrors {@link WhenClause.happened}; lifted onto
-	 * {@link TopLevelWhenClause} so the `Writes` cross-reference check
-	 * still flows through after the migration to the registry-driven
-	 * mapped type.
+	 * scope. Typical usage: "block `cr` unless sync has happened" -
+	 * `happened: { event: "rds-ws-sync-done", in: "agent_loop" }`.
+	 *
+	 * Scopes:
+	 *   - `"agent_loop"` - filter session entries by
+	 *     `entry.data._agentLoopIndex === ctx.agentLoopIndex`. The engine
+	 *     auto-injects that tag on every `appendEntry` write, so plugin
+	 *     authors don't have to remember to tag manually.
+	 *   - `"session"`    - no scope filter. Any entry of `event` present
+	 *     in the session JSONL satisfies.
+	 *   - `"tool_call"`  - only consider speculative entries synthesized
+	 *     for THIS tool_call's `&&`-chain. Real (persisted) entries are
+	 *     ignored entirely. Use when the rule requires the event to be
+	 *     CHAINED directly before the guarded command (e.g. `sync && cr`)
+	 *     rather than merely "somewhere this agent loop". Pairs naturally
+	 *     with observer `writes:` declarations on observers whose
+	 *     watch-matched refs produce speculative entries; no-op when no
+	 *     observer writes the event.
+	 *
+	 * Inversion: place inside `not` to flip the clause-level boolean -
+	 * `not: { happened: { event, in } }` fires when the event HAS
+	 * happened. See ADR §5.
+	 *
+	 * Optional `since` sentinel (temporal ordering): when present,
+	 * `event` is considered "happened" only if its most-recent entry
+	 * in scope is newer than the most-recent `since` entry in scope.
+	 * If `since` has never been written, the clause behaves as if
+	 * `since` were absent (simple presence check on `event`).
+	 *
+	 * Use for invalidation semantics: "rule fires when sync has not
+	 * happened in this agent_loop, OR the last sync is older than the
+	 * last upstream-fail." Pattern:
+	 *   `happened: { event: SYNC_DONE_EVENT, in: "agent_loop",
+	 *                since: UPSTREAM_FAILED_EVENT }`.
+	 *
+	 * Optional `notIn` (set subtraction over scopes): when present,
+	 * entries in `notIn` scope are excluded from the `in`-scoped entry
+	 * stream BEFORE the `ts_max` comparison runs. Typical use:
+	 * `happened: { event, in: "agent_loop", notIn: "tool_call" }` -
+	 * "happened in a prior tool_call in this agent loop". Excludes
+	 * same-tool_call speculative entries so `someCmd && guardedCmd`
+	 * can't bypass the rule via tool_call-scope speculative synthesis.
+	 *
+	 * Distinct from the clause-level {@link TopLevelWhenClause.not},
+	 * which is boolean negation of a sub-clause. `notIn` is set
+	 * subtraction; separate keyword so the two operators can't be
+	 * confused.
+	 *
+	 * Invalid scope combinations throw at evaluation time with the
+	 * rule name prefixed:
+	 *   - Supersets (e.g. `in: "agent_loop", notIn: "session"`) - the
+	 *     subtraction is always empty.
+	 *   - Identicals (`notIn === in`) - the subtraction is always empty.
+	 *
+	 * Compile-time constraint: inside {@link defineConfig}, both the
+	 * `event` and `since` fields are narrowed to the union of all
+	 * `writes` declared across plugin rules, plugin observers, user
+	 * rules, and user observers. Typos become compile errors. Outside
+	 * `defineConfig` the `Writes` parameter defaults to `string` so the
+	 * check is skipped.
 	 */
 	happened?: {
 		event: Writes;
@@ -357,12 +435,48 @@ export interface BuiltInWhenLeaves<Writes extends string = string> {
 	};
 
 	/**
-	 * Escape-hatch predicate for one-off logic. Mirrors
-	 * {@link WhenClause.condition}; lifted onto
-	 * {@link TopLevelWhenClause} so authors can still reach for the
-	 * inline-callback form without having to register a plugin.
+	 * Escape-hatch predicate for one-off logic. Prefer plugin-registered
+	 * predicates when the logic is reusable; use `condition` for
+	 * genuinely local checks that don't warrant a plugin.
 	 */
 	condition?: PredicateFn;
+
+	/**
+	 * Constrain the rule to commands whose *effective* cwd matches
+	 * the given pattern. For bash, the walker's `cwdTracker` resolves
+	 * the effective cwd per extracted command (so
+	 * `cd ~/personal && git commit --amend` evaluates against
+	 * `~/personal`). For write / edit, the session cwd is used directly.
+	 *
+	 * Bare form: a single {@link Pattern} or an OR-of-patterns array.
+	 * Spread form: `{ pattern, onUnknown? }` — the object lets authors
+	 * opt into `onUnknown: "allow"` when a command's cwd can't be
+	 * statically resolved (e.g. `cd $VAR && ...`). Default is `"block"`
+	 * — fail-closed.
+	 *
+	 * Array form (`Pattern[]` or `{ pattern: Pattern[]; onUnknown? }`)
+	 * matches OR-of-patterns: the predicate fires when the resolved cwd
+	 * matches ANY of the listed patterns. Empty arrays are invalid (rule
+	 * skips); arrays containing non-Pattern values are invalid (rule
+	 * skips). Array form sugars vault-path or workspace-tree exemptions:
+	 *
+	 *   ```ts
+	 *   when: { cwd: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//] }
+	 *   when: { cwd: { pattern: [/\.test$/, /\.spec$/], onUnknown: "allow" } }
+	 *   ```
+	 *
+	 * `cwd:` is the sole walker-tied built-in leaf; all other dimensions
+	 * (`branch`, `upstream`, ...) come from plugins. It lives on
+	 * {@link BuiltInWhenLeaves} (not the registry) so authors can write
+	 * `when: { cwd: /work/ }` against pi-steering core without needing
+	 * gitPlugin's module augmentation in scope.
+	 *
+	 * See ADR "Design → Override default and `onUnknown`".
+	 */
+	cwd?:
+		| Pattern
+		| Pattern[]
+		| { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };
 }
 
 /**
@@ -473,49 +587,29 @@ export type AnyPredicateHandler = PredicateHandler<any>;
 // ---------------------------------------------------------------------------
 
 /**
- * Recursively-composable predicate block attached to a {@link Rule}.
+ * Legacy v0.0.x predicate block; see {@link TopLevelWhenClause} for
+ * the authoring surface attached to {@link Rule.when}.
  *
- * Built-in keys:
- *   - {@link cwd}        - the sole walker-tied predicate the engine ships.
- *                          All other dimensions (`branch`, `upstream`, ...)
- *                          come from plugins.
- *   - {@link not}        - boolean NOT over a nested clause; all nested
- *                          predicates must FAIL for `not` to "succeed".
- *   - {@link condition}  - escape hatch for one-off logic that doesn't
- *                          warrant a plugin.
+ * The legacy interface is retained as an internal type for the JSON
+ * v1→v2 path in `compat.ts`, where the loose `[customKey: string]:
+ * unknown` index signature is needed to accept arbitrary plugin keys
+ * during deserialization. Plugin authors should NOT type their
+ * helpers against `WhenClause` — use {@link TopLevelWhenClause} for
+ * outer when-clauses or {@link TopLevelWhenClauseNoRecurse} for
+ * not-block bodies (both are registry-driven and enforce the
+ * five compile-time constraints documented on {@link BaseRule.when}).
  *
- * Plugin keys: anything else. A plugin registering
- * `predicates: { branch: <handler> }` teaches the engine that `when.branch`
- * is valid; the handler receives whatever value the user put there. Types
- * for plugin-registered predicates aren't inferred at this schema level -
- * they're enforced at config-build time via plugin registration (Phase 3).
- *
- * See ADR "Design → Rule schema" → WhenClause.
+ * @deprecated Internal v1-compat type. Use {@link TopLevelWhenClause}
+ *             at authoring sites; this interface is preserved only
+ *             for the JSON v1→v2 conversion path in `compat.ts`.
  */
+// eslint-disable-next-line @typescript-eslint/no-deprecated
 export interface WhenClause<Writes extends string = string> {
 	/**
-	 * Constrain the rule to commands whose *effective* cwd matches
-	 * the given pattern. For bash, the walker's `cwdTracker` resolves
-	 * the effective cwd per extracted command (so
-	 * `cd ~/personal && git commit --amend` evaluates against
-	 * `~/personal`). For write / edit, the session cwd is used directly.
-	 *
-	 * The object form lets authors opt into `onUnknown: "allow"` when a
-	 * command's cwd can't be statically resolved (e.g. `cd $VAR && ...`).
-	 * Default is `"block"` - fail-closed.
-	 *
-	 * Array form (`Pattern[]` or `{ pattern: Pattern[]; onUnknown? }`)
-	 * matches OR-of-patterns: the predicate fires when the resolved cwd
-	 * matches ANY of the listed patterns. Empty arrays are invalid (rule
-	 * skips); arrays containing non-Pattern values are invalid (rule
-	 * skips). Array form sugars vault-path or workspace-tree exemptions:
-	 *
-	 *   ```ts
-	 *   when: { cwd: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//] }
-	 *   when: { cwd: { pattern: [/\.test$/, /\.spec$/], onUnknown: "allow" } }
-	 *   ```
-	 *
-	 * See ADR "Design → Override default and `onUnknown`".
+	 * @deprecated Use {@link TopLevelWhenClause}'s `cwd?:` leaf (lifted
+	 *             onto {@link BuiltInWhenLeaves}). Retained for v1
+	 *             JSON→v2 conversion compatibility only.
+	 * @see BuiltInWhenLeaves.cwd
 	 */
 	cwd?:
 		| Pattern
@@ -523,72 +617,11 @@ export interface WhenClause<Writes extends string = string> {
 		| { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };
 
 	/**
-	 * Rule fires when the given `event` has NOT happened in the given
-	 * scope. Typical usage: "block `cr` unless sync has happened" -
-	 * `happened: { event: "rds-ws-sync-done", in: "agent_loop" }`.
-	 *
-	 * Scopes:
-	 *   - `"agent_loop"` - filter session entries by
-	 *     `entry.data._agentLoopIndex === ctx.agentLoopIndex`. The engine
-	 *     auto-injects that tag on every `appendEntry` write, so plugin
-	 *     authors don't have to remember to tag manually.
-	 *   - `"session"`    - no scope filter. Any entry of `event` present
-	 *     in the session JSONL satisfies.
-	 *   - `"tool_call"`  - only consider speculative entries synthesized
-	 *     for THIS tool_call's `&&`-chain. Real (persisted) entries are
-	 *     ignored entirely. Use when the rule requires the event to be
-	 *     CHAINED directly before the guarded command (e.g. `sync && cr`)
-	 *     rather than merely "somewhere this agent loop". Pairs naturally
-	 *     with observer `writes:` declarations on observers whose
-	 *     watch-matched refs produce speculative entries; no-op when no
-	 *     observer writes the event.
-	 *
-	 * Inversion: place inside `not` to flip the clause-level boolean -
-	 * `not: { happened: { event, in } }` fires when the event HAS
-	 * happened. See ADR §5.
-	 *
-	 * Optional `since` sentinel (temporal ordering): when present,
-	 * `event` is considered "happened" only if its most-recent entry
-	 * in scope is newer than the most-recent `since` entry in scope.
-	 * If `since` has never been written, the clause behaves as if
-	 * `since` were absent (simple presence check on `event`).
-	 *
-	 * Use for invalidation semantics: "rule fires when sync has not
-	 * happened in this agent_loop, OR the last sync is older than the
-	 * last upstream-fail." Pattern:
-	 *   `happened: { event: SYNC_DONE_EVENT, in: "agent_loop",
-	 *                since: UPSTREAM_FAILED_EVENT }`.
-	 *
-	 * Optional `notIn` (set subtraction over scopes): when present,
-	 * entries in `notIn` scope are excluded from the `in`-scoped entry
-	 * stream BEFORE the `ts_max` comparison runs. Typical use:
-	 * `happened: { event, in: "agent_loop", notIn: "tool_call" }` -
-	 * "happened in a prior tool_call in this agent loop". Excludes
-	 * same-tool_call speculative entries so `someCmd && guardedCmd`
-	 * can't bypass the rule via tool_call-scope speculative synthesis.
-	 *
-	 * Distinct from the clause-level {@link WhenClause.not}, which is
-	 * boolean negation of a sub-clause. `notIn` is set subtraction;
-	 * separate keyword so the two operators can't be confused.
-	 *
-	 * Invalid scope combinations throw at evaluation time with the
-	 * rule name prefixed:
-	 *   - Supersets (e.g. `in: "agent_loop", notIn: "session"`) - the
-	 *     subtraction is always empty.
-	 *   - Identicals (`notIn === in`) - the subtraction is always empty.
-	 *
-	 * The nested-object form (`not: { in, since }`) from earlier drafts
-	 * was dropped pre-publish: no motivating use case needed a `since`
-	 * override on the inner block, and the flat string reads cleaner.
-	 * If a future use case emerges, `notIn` can be widened additively
-	 * to `string | { in, since }` without breaking existing configs.
-	 *
-	 * Compile-time constraint: inside {@link defineConfig}, both the
-	 * `event` and `since` fields are narrowed to the union of all
-	 * `writes` declared across plugin rules, plugin observers, user
-	 * rules, and user observers. Typos become compile errors. Outside
-	 * `defineConfig` the `Writes` parameter defaults to `string` so the
-	 * check is skipped.
+	 * @deprecated Use {@link TopLevelWhenClause}'s `happened?:` leaf
+	 *             (lifted onto {@link BuiltInWhenLeaves}). Retained for
+	 *             v1 JSON→v2 conversion compatibility only.
+	 * @see BuiltInWhenLeaves.happened for the canonical semantics
+	 *      (scopes, `since`, `notIn`, runtime errors).
 	 */
 	happened?: {
 		event: Writes;
@@ -598,29 +631,24 @@ export interface WhenClause<Writes extends string = string> {
 	};
 
 	/**
-	 * Boolean NOT: the rule fires only when every nested predicate
-	 * fails. Useful for "mostly block, but allow the safe variant":
-	 * `when: { not: { upstream: /origin\/main/ } }` - block unless the
-	 * upstream is origin/main.
+	 * @deprecated Use {@link TopLevelWhenClause}'s `not?:` operator field.
 	 */
 	not?: WhenClause<Writes>;
 
 	/**
-	 * Escape-hatch predicate for one-off logic. Prefer plugin-registered
-	 * predicates when the logic is reusable; use `condition` for
-	 * genuinely local checks that don't warrant a plugin.
+	 * @deprecated Use {@link TopLevelWhenClause}'s `condition?:` leaf
+	 *             (lifted onto {@link BuiltInWhenLeaves}). Retained for
+	 *             v1 JSON→v2 conversion compatibility only.
+	 * @see BuiltInWhenLeaves.condition
 	 */
 	condition?: PredicateFn;
 
 	/**
-	 * Plugin-registered predicates. Keys are free-form; values must match
-	 * what the registering plugin expects (a {@link Pattern}, an object
-	 * with a `pattern` field, a {@link PredicateFn}, or a plugin-specific
-	 * argument shape validated by the plugin's {@link PredicateHandler}).
-	 *
-	 * The index signature is deliberately loose (`unknown`) - compile-
-	 * time argument checking per-predicate is a plugin-level concern,
-	 * not a schema-level one.
+	 * @deprecated v1-compat loose index signature — plugin-registered
+	 *             predicates now live on {@link PiSteeringPredicates}
+	 *             with per-key compile-time typing via
+	 *             {@link OuterValue} / {@link InnerValue}. Retained for
+	 *             v1 JSON→v2 conversion compatibility only.
 	 */
 	[customKey: string]:
 		| Pattern
@@ -705,6 +733,9 @@ export interface BaseRule<
 	 *      modifiers — those live at the not-block top level).
 	 *   4. `not: not:` recursion is forbidden
 	 *      ({@link TopLevelWhenClauseNoRecurse} has no `not?:` field).
+	 *      Belt-and-suspenders runtime guard in
+	 *      {@link validateWhenClauseShape} catches JSON / `as any`
+	 *      escape hatches.
 	 *   5. Rule-level `onUnknown:` is forbidden
 	 *      ({@link TopLevelWhenClause} doesn't intersect with
 	 *      {@link PredicateModifiers}; only the inner `not:` body does).

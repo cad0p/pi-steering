@@ -14,10 +14,13 @@
  * directives here surface the regression at typecheck time.
  *
  * Plugin-author registry shape: the `gitPlugin` module augments
- * `PiSteeringPredicates` with `cwd:`, `branch:`, `upstream:`,
- * `remote:`, `isClean:`, `hasStagedChanges:`, `commitsAhead:` (see
- * `plugins/git/index.ts`). This test file imports gitPlugin so the
- * augmentation is in scope before the type-level pins below.
+ * `PiSteeringPredicates` with `branch:`, `upstream:`, `remote:`,
+ * `isClean:`, `hasStagedChanges:`, `commitsAhead:` (see
+ * `plugins/git/index.ts`). `cwd:` is a built-in non-registry leaf on
+ * {@link BuiltInWhenLeaves} and is tested via
+ * {@link TopLevelWhenClause} directly. This test file imports
+ * gitPlugin so the augmentation is in scope before the type-level
+ * pins below.
  */
 
 import assert from "node:assert/strict";
@@ -30,6 +33,7 @@ import { describe, it } from "node:test";
 // type-system without triggering unused-import diagnostics.
 import gitPlugin from "./plugins/git/index.ts";
 import type {
+	BuiltInWhenLeaves,
 	InnerValue,
 	OuterValue,
 	PluginPredicateKey,
@@ -44,12 +48,14 @@ void _gitPluginRegistered;
 // ---------------------------------------------------------------------------
 
 describe("per-predicate typing: positive cases", () => {
-	it("registry pins gitPlugin's 7 predicate keys after `declare global`", () => {
+	it("registry pins gitPlugin's 6 predicate keys after `declare global`", () => {
 		// Type-level assertion: every gitPlugin predicate key is a
 		// member of `PluginPredicateKey`. A regression that drops one
 		// of the augmented entries surfaces here as a type error.
+		// `cwd` is NOT in this set — it's a built-in non-registry leaf
+		// on BuiltInWhenLeaves (covered by the `BuiltInWhenLeaves`
+		// shape pin in not-block-onunknown.test.ts).
 		const keys: PluginPredicateKey[] = [
-			"cwd",
 			"branch",
 			"upstream",
 			"remote",
@@ -57,7 +63,7 @@ describe("per-predicate typing: positive cases", () => {
 			"hasStagedChanges",
 			"commitsAhead",
 		];
-		assert.equal(keys.length, 7);
+		assert.equal(keys.length, 6);
 	});
 
 	it("TopLevelWhenClause: bare leaf forms (Pattern, boolean, number)", () => {
@@ -100,21 +106,38 @@ describe("per-predicate typing: positive cases", () => {
 		assert.ok(w.not?.commitsAhead !== undefined);
 	});
 
-	it("OuterValue<K>: bare OR (spreadBase + modifiers)", () => {
-		const bare: OuterValue<"cwd"> = /pattern/;
-		const spread: OuterValue<"cwd"> = {
+	it("OuterValue<K>: bare OR (spreadBase + modifiers) (built-in cwd via BuiltInWhenLeaves)", () => {
+		// `cwd:` is a built-in leaf on {@link BuiltInWhenLeaves}, not a
+		// registry-driven key, so its type pin uses the interface field
+		// directly rather than `OuterValue<"cwd">`. Registry-key version
+		// uses `branch:` (gitPlugin-augmented), with the same
+		// bare-or-spread+modifiers shape contract.
+		const bareCwd: NonNullable<BuiltInWhenLeaves["cwd"]> = /pattern/;
+		const spreadCwd: NonNullable<BuiltInWhenLeaves["cwd"]> = {
 			pattern: /pattern/,
 			onUnknown: "allow",
 		};
-		assert.ok(bare !== undefined);
-		assert.ok(spread !== undefined);
+		const bareBranch: OuterValue<"branch"> = /pattern/;
+		const spreadBranch: OuterValue<"branch"> = {
+			pattern: /pattern/,
+			onUnknown: "allow",
+		};
+		assert.ok(bareCwd !== undefined);
+		assert.ok(spreadCwd !== undefined);
+		assert.ok(bareBranch !== undefined);
+		assert.ok(spreadBranch !== undefined);
 	});
 
-	it("InnerValue<K>: bare OR spreadBase (NO modifiers)", () => {
-		const bare: InnerValue<"cwd"> = /pattern/;
-		const spread: InnerValue<"cwd"> = { pattern: /pattern/ };
-		assert.ok(bare !== undefined);
-		assert.ok(spread !== undefined);
+	it("InnerValue<K>: bare OR spreadBase (NO modifiers) (built-in cwd inside not: via BuiltInWhenLeaves)", () => {
+		// Inside `not:`, `cwd:` retains its built-in shape (Pattern |
+		// Pattern[] | { pattern, onUnknown? }) —
+		// {@link TopLevelWhenClauseNoRecurse} intersects
+		// {@link BuiltInWhenLeaves} verbatim. Registry-key version uses
+		// `branch:` to pin the bare-or-spreadBase (no modifiers) contract.
+		const bareBranch: InnerValue<"branch"> = /pattern/;
+		const spreadBranch: InnerValue<"branch"> = { pattern: /pattern/ };
+		assert.ok(bareBranch !== undefined);
+		assert.ok(spreadBranch !== undefined);
 	});
 
 	it("upstream: bare + spread + leaf-level onUnknown:", () => {
@@ -211,9 +234,11 @@ describe("PredicateShape: DefaultSpreadBase auto-detection", () => {
 	it("PredicateShape<Patterns> auto-detects spreadBase to { pattern: Patterns }", () => {
 		// Type-only assertion via assignability. If the auto-detect
 		// breaks (e.g. tuple-wrap removed and union distributes), this
-		// fails to typecheck.
-		type CwdShape = PiSteeringPredicates["cwd"];
-		const _spread: CwdShape["spreadBase"] = { pattern: /work/ };
+		// fails to typecheck. `branch:` carries the same Patterns-bare
+		// shape as the built-in `cwd:` leaf and lives in the registry,
+		// so it's the right registry-side anchor for this pin.
+		type BranchShape = PiSteeringPredicates["branch"];
+		const _spread: BranchShape["spreadBase"] = { pattern: /work/ };
 		void _spread;
 		assert.ok(true);
 	});

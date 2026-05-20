@@ -37,6 +37,7 @@ import { resolvePlugins } from "./plugin-merger.ts";
 import { buildEvaluator } from "./evaluator.ts";
 import { makeCtx, makeTrackedHost } from "./__test-helpers__.ts";
 import type {
+	BuiltInWhenLeaves,
 	Plugin,
 	PredicateModifiers,
 	ReservedPredicateKey,
@@ -231,8 +232,8 @@ describe("Rule.when: registry-driven mapped type wireup", () => {
 			reason: "r",
 			when: {
 				not: {
-					// @ts-expect-error — InnerValue<"cwd"> excludes leaf-level modifiers.
-					cwd: { pattern: /work/, onUnknown: "allow" },
+					// @ts-expect-error — InnerValue<"branch"> excludes leaf-level modifiers.
+					branch: { pattern: /main/, onUnknown: "allow" },
 				},
 			},
 		};
@@ -317,3 +318,23 @@ describe("validateWhenClauseShape: nested-not: rejection", () => {
 
 // Keep makeCtx referenced so its import is not dropped on tree-shake passes.
 void makeCtx;
+
+// ---------------------------------------------------------------------------
+// BuiltInWhenLeaves shape pin
+// ---------------------------------------------------------------------------
+
+describe("BuiltInWhenLeaves: shape pin", () => {
+	it("BuiltInWhenLeaves contains exactly { happened, condition, cwd }", () => {
+		// Compile-only assertion. If a future change adds a new built-in
+		// non-registry leaf (e.g., `tool?:`) without updating the pin, this
+		// fails to typecheck — forces a deliberate decision rather than
+		// silently widening the surface that ships with the engine itself.
+		type _BuiltInShape = keyof BuiltInWhenLeaves extends
+			"happened" | "condition" | "cwd"
+			? true
+			: false;
+		const _b: _BuiltInShape = true;
+		void _b;
+		assert.ok(true);
+	});
+});

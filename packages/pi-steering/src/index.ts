@@ -161,6 +161,8 @@ export type {
 	TopLevelWhenClause,
 	TopLevelWhenClauseNoRecurse,
 	BuiltInWhenLeaves,
+	BuiltInWhenLeavesInner,
+	BuiltInWhenLeavesOuter,
 	WhenClause,
 	WhenWalkerState,
 	WriteRule,

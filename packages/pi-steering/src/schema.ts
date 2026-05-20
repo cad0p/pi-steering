@@ -351,22 +351,51 @@ export type InnerValue<K extends PluginPredicateKey> =
 	| PiSteeringPredicates[K]["spreadBase"];
 
 /**
- * Built-in non-registry leaves attached to a {@link Rule.when} clause.
- * These predicates ship with the engine itself (not via a plugin), so
- * they aren't in {@link PiSteeringPredicates} but DO need to surface
- * on {@link TopLevelWhenClause} as typed fields.
+ * Built-in non-registry leaves attached to a {@link Rule.when}
+ * clause.
+ *
+ * These predicates ship with the engine itself (not via a plugin),
+ * so they aren't in {@link PiSteeringPredicates} but DO need to
+ * surface on {@link TopLevelWhenClause} as typed fields.
  *
  * The `Writes` generic threads through {@link defineConfig} so that
  * `when.happened.event` / `when.happened.since` references are
- * compile-time-checked against the union of declared `writes` arrays
- * across plugins + observers.
+ * compile-time-checked against the union of declared `writes`
+ * arrays across plugins + observers.
  *
  * Currently three non-registry leaves: `happened?:`, `condition?:`,
  * `cwd?:`. The shape is pinned in tests (a future widening — e.g.,
- * adding a new built-in `tool?:` leaf — fails the type-pin and forces
- * a deliberate decision).
+ * adding a new built-in `tool?:` leaf — fails the type-pin and
+ * forces a deliberate decision).
+ *
+ * ## Outer / Inner split
+ *
+ * `cwd:`'s spread form differs depending on placement:
+ *
+ * - Outer (rule-level `when:`) — leaf-level `onUnknown?:` allowed,
+ *   honored by the engine's `evaluateCwd` + `projectVerdict` flow.
+ * - Inner (inside `not:`) — leaf-level `onUnknown?:` forbidden
+ *   (parity with registry-driven inner predicates per
+ *   {@link InnerValue}). Walker-unknown cwd inside `not:` projects
+ *   via the block-level `onUnknown:` modifier (default `"block"`).
+ *
+ * Two parallel interfaces formalize this split:
+ * {@link BuiltInWhenLeavesOuter} and {@link BuiltInWhenLeavesInner}.
+ * The legacy `BuiltInWhenLeaves` symbol is preserved as an alias to
+ * `Outer` for backward compatibility.
  */
-export interface BuiltInWhenLeaves<Writes extends string = string> {
+/**
+ * Outer-flavor non-registry built-in leaves. Lives on
+ * {@link TopLevelWhenClause}. `cwd?:` accepts `Pattern | Pattern[] |
+ * { pattern, onUnknown? }` (leaf-level `onUnknown:` honored at the
+ * outer when-level via `evaluateCwd` / `projectVerdict`).
+ *
+ * @see BuiltInWhenLeaves for the design rationale and the
+ *      Outer/Inner split.
+ * @see BuiltInWhenLeavesInner for the parallel inner-flavor type
+ *      used inside `not:`.
+ */
+export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
 	/**
 	 * Rule fires when the given `event` has NOT happened in the given
 	 * scope. Typical usage: "block `cr` unless sync has happened" -
@@ -483,6 +512,54 @@ export interface BuiltInWhenLeaves<Writes extends string = string> {
 }
 
 /**
+ * Inner-flavor non-registry built-in leaves. Lives on
+ * {@link TopLevelWhenClauseNoRecurse} (the body of `not:`). `cwd?:`
+ * accepts `Pattern | Pattern[] | { pattern }` — NO leaf-level
+ * `onUnknown?:`. Modifiers live at the not-block level via
+ * `& PredicateModifiers`, matching the constraint registry-driven
+ * inner predicates already enforce via `InnerValue<K>`.
+ *
+ * `happened?:` and `condition?:` are identical to
+ * {@link BuiltInWhenLeavesOuter}; only `cwd:` differs. The engine
+ * reads block-level `onUnknown:` inside `not:` regardless of leaf
+ * shape, so this type formalizes that constraint at the authoring
+ * surface (preventing the silent fail-OPEN class where leaf-level
+ * `onUnknown:` looks meaningful but is ignored at runtime).
+ *
+ * @see BuiltInWhenLeaves for the design rationale and the
+ *      Outer/Inner split.
+ * @see BuiltInWhenLeavesOuter for the parallel outer-flavor type.
+ */
+export interface BuiltInWhenLeavesInner<Writes extends string = string> {
+	/** Identical to {@link BuiltInWhenLeavesOuter.happened}. */
+	happened?: BuiltInWhenLeavesOuter<Writes>["happened"];
+
+	/** Identical to {@link BuiltInWhenLeavesOuter.condition}. */
+	condition?: BuiltInWhenLeavesOuter<Writes>["condition"];
+
+	/**
+	 * Same `cwd:` semantics as {@link BuiltInWhenLeavesOuter.cwd} but
+	 * the spread form's `onUnknown?:` is dropped — modifiers live at
+	 * the not-block level via `& PredicateModifiers`. Walker-unknown
+	 * cwd inside `not:` projects via the block-level `onUnknown:`
+	 * (default `"block"` = fail-CLOSED, rule fires).
+	 */
+	cwd?: Pattern | Pattern[] | { pattern: Pattern | Pattern[] };
+}
+
+/**
+ * Backward-compatible alias for {@link BuiltInWhenLeavesOuter}.
+ *
+ * Retained so external code importing `BuiltInWhenLeaves` (and the
+ * public-surface shape pin in `not-block-onunknown.test.ts`) keeps
+ * working after the Outer/Inner split. New code should import
+ * {@link BuiltInWhenLeavesOuter} or {@link BuiltInWhenLeavesInner}
+ * explicitly.
+ */
+export type BuiltInWhenLeaves<Writes extends string = string> =
+	BuiltInWhenLeavesOuter<Writes>;
+
+/**
  * Top-level when-clause attached to a {@link Rule}. Each
  * plugin-registered predicate (filtered for reserved keys) gets a
  * leaf-level field accepting the bare or spread form. The `not?:`
@@ -498,7 +575,7 @@ export interface BuiltInWhenLeaves<Writes extends string = string> {
  */
 export type TopLevelWhenClause<Writes extends string = string> = {
 	[K in PluginPredicateKey]?: OuterValue<K>;
-} & BuiltInWhenLeaves<Writes> & {
+} & BuiltInWhenLeavesOuter<Writes> & {
 	/**
 	 * Logical NOT: rule fires when the inner predicates' AND is false.
 	 *
@@ -532,7 +609,7 @@ export type TopLevelWhenClause<Writes extends string = string> = {
  */
 export type TopLevelWhenClauseNoRecurse<Writes extends string = string> = {
 	[K in PluginPredicateKey]?: InnerValue<K>;
-} & BuiltInWhenLeaves<Writes> & PredicateModifiers;
+} & BuiltInWhenLeavesInner<Writes> & PredicateModifiers;
 
 /**
  * Type-erased alias for {@link PredicateHandler} used at registry

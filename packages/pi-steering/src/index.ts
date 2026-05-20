@@ -160,6 +160,7 @@ export type {
 	ToolResultEvent,
 	TopLevelWhenClause,
 	TopLevelWhenClauseNoRecurse,
+	BuiltInWhenLeaves,
 	WhenClause,
 	WhenWalkerState,
 	WriteRule,

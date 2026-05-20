@@ -49,8 +49,9 @@
  * ```
  */
 
-import type { Plugin } from "pi-steering";
+import type { Plugin, PredicateShape } from "pi-steering";
 import { workItemFormat } from "./predicates/work-item-format.ts";
+import type { WorkItemFormatArgs } from "./predicates/work-item-format.ts";
 import {
 	npmTestTracker,
 	TEST_PASSED_EVENT,
@@ -65,6 +66,21 @@ import {
 	commitDescriptionCheck,
 	DESCRIPTION_REVIEWED_EVENT,
 } from "./rules/commit-description-check.ts";
+
+declare global {
+	/**
+	 * Plugin author registers `workItemFormat:` so the engine's mapped
+	 * type ({@link TopLevelWhenClause}) accepts it as a leaf-level key
+	 * with a typed argument shape. Without this augmentation, rules in
+	 * this plugin (or any consumer's rules) referencing `workItemFormat:`
+	 * would fail typecheck against the strict registry-driven type.
+	 *
+	 * @see PredicateShape, PiSteeringPredicates in pi-steering's schema.
+	 */
+	interface PiSteeringPredicates {
+		workItemFormat: PredicateShape<WorkItemFormatArgs>;
+	}
+}
 
 // Re-export the type constants so consumers (e.g. another plugin or
 // a user's custom rule) can gate on the same events without

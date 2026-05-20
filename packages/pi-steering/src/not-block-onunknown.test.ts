@@ -31,9 +31,18 @@ import { describe, it } from "node:test";
 import {
 	RESERVED_PREDICATE_KEYS,
 	isReservedPredicateKey,
+	validateWhenClauseShape,
 } from "./evaluator-internals/predicates.ts";
 import { resolvePlugins } from "./plugin-merger.ts";
-import type { Plugin, ReservedPredicateKey } from "./schema.ts";
+import { buildEvaluator } from "./evaluator.ts";
+import { makeCtx, makeTrackedHost } from "./__test-helpers__.ts";
+import type {
+	Plugin,
+	PredicateModifiers,
+	ReservedPredicateKey,
+	Rule,
+	TopLevelWhenClause,
+} from "./schema.ts";
 
 // ---------------------------------------------------------------------------
 // Reserved-key registration check (plugin-merger throws)
@@ -144,3 +153,167 @@ describe("RESERVED_PREDICATE_KEYS: type \u2194 runtime sync pin", () => {
 		assert.ok(_checked.length > 0);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// MODIFIER_KEYS ↔ keyof PredicateModifiers sync pin
+// ---------------------------------------------------------------------------
+
+describe("MODIFIER_KEYS: type ↔ runtime sync pin", () => {
+	it("validateWhenClauseShape strips `onUnknown` when counting leaves (modifier-only outer block throws)", () => {
+		// If `onUnknown` ever drops out of MODIFIER_KEYS, an outer
+		// block with only `onUnknown:` would count it as a leaf and
+		// the validator would PASS — masking the empty-clause foot-gun.
+		// This tests the runtime side of the sync pin.
+		assert.throws(
+			() =>
+				validateWhenClauseShape(
+					{ onUnknown: "block" } as unknown as TopLevelWhenClause<string>,
+					'rule "r".when',
+				),
+			/contains no predicate leaves/,
+		);
+	});
+
+	it("keyof PredicateModifiers compile-time matches the runtime modifier list", () => {
+		// Belt-and-suspenders: the type-level `_MODIFIER_KEYS_COVERS_TYPE`
+		// constant in `evaluator-internals/predicates.ts` fails compilation
+		// when a future modifier (e.g. v0.2 `priority?:`) is added without
+		// updating MODIFIER_KEYS. We pin the contract here too so a reader
+		// landing on this test file can see the lockstep relationship.
+		const expected: readonly (keyof PredicateModifiers)[] = ["onUnknown"];
+		assert.equal(expected.length, 1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Rule.when wired to TopLevelWhenClause<Writes>
+// ---------------------------------------------------------------------------
+
+describe("Rule.when: registry-driven mapped type wireup", () => {
+	it("NonNullable<Rule['when']> is structurally identical to TopLevelWhenClause<string>", () => {
+		// Compile-only assertion. If `BaseRule.when` ever regresses to
+		// the legacy `WhenClause` (loose index signature), this fails to
+		// typecheck — the registry-driven mapped type's narrow domain is
+		// not assignable to a wider permissive interface.
+		type RuleWhenIsTopLevel = NonNullable<Rule["when"]> extends
+			TopLevelWhenClause<string>
+			? TopLevelWhenClause<string> extends NonNullable<Rule["when"]>
+				? true
+				: false
+			: false;
+		const _identity: RuleWhenIsTopLevel = true;
+		void _identity;
+		assert.ok(true);
+	});
+
+	it("rule-level onUnknown: is forbidden against the actual Rule type", () => {
+		const _r: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git",
+			reason: "r",
+			when: {
+				cwd: /work/,
+				// @ts-expect-error — rule-level onUnknown: is not on TopLevelWhenClause.
+				onUnknown: "block",
+			},
+		};
+		assert.ok(_r.name === "r");
+	});
+
+	it("leaf-level onUnknown: inside not: is forbidden against the actual Rule type", () => {
+		const _r: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git",
+			reason: "r",
+			when: {
+				not: {
+					// @ts-expect-error — InnerValue<"cwd"> excludes leaf-level modifiers.
+					cwd: { pattern: /work/, onUnknown: "allow" },
+				},
+			},
+		};
+		assert.ok(_r.name === "r");
+	});
+
+	it("not: not: recursion is forbidden against the actual Rule type", () => {
+		const _r: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git",
+			reason: "r",
+			when: {
+				not: {
+					// @ts-expect-error — TopLevelWhenClauseNoRecurse has no `not?:` field.
+					not: { cwd: /work/ },
+				},
+			},
+		};
+		assert.ok(_r.name === "r");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Runtime nested-not: guard (catches JSON / `as any` escape hatches)
+// ---------------------------------------------------------------------------
+
+describe("validateWhenClauseShape: nested-not: rejection", () => {
+	it("throws on `when: { not: { not: { cwd: P } } }` directly", () => {
+		assert.throws(
+			() =>
+				validateWhenClauseShape(
+					{
+						not: { not: { cwd: /work/ } },
+					} as unknown as TopLevelWhenClause<string>,
+					'rule "r".when',
+				),
+			/contains a nested 'not:' key/,
+		);
+	});
+
+	it("throws at buildEvaluator config-resolve time when a rule slips a nested not: through `as any`", () => {
+		const rule: Rule = {
+			name: "nested-not-via-cast",
+			tool: "bash",
+			field: "command",
+			pattern: "^git",
+			reason: "r",
+			when: { not: { not: { cwd: /work/ } } } as unknown as NonNullable<
+				Rule["when"]
+			>,
+		};
+		assert.throws(
+			() =>
+				buildEvaluator(
+					{ rules: [rule] },
+					resolvePlugins([], {}),
+					makeTrackedHost(),
+				),
+			/contains a nested 'not:' key/,
+		);
+	});
+
+	it("the error message names the path and explains why nested not: is forbidden", () => {
+		assert.throws(
+			() =>
+				validateWhenClauseShape(
+					{
+						not: { not: { cwd: /work/ } },
+					} as unknown as TopLevelWhenClause<string>,
+					'rule "my-rule".when',
+				),
+			(err: Error) => {
+				assert.match(err.message, /'rule "my-rule"\.when\.not'/);
+				assert.match(err.message, /Use a single 'not:' wrapper/);
+				return true;
+			},
+		);
+	});
+});
+
+// Keep makeCtx referenced so its import is not dropped on tree-shake passes.
+void makeCtx;

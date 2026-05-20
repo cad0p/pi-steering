@@ -238,14 +238,14 @@ export const noMainCommitGithub = {
 		remote: { pattern: /github\.com[/:]/, onUnknown: "allow" },
 	},
 	reason: (ctx) => {
-		// Walker-unknown branch: the engine fired fail-closed via the
-		// branch predicate's default `onUnknown: "block"`, but we
-		// haven't confirmed which protected branch (main / master /
-		// mainline / trunk) is involved — don't make an unverified
-		// positive claim. Note: walker-unknown CWD is unreachable here
-		// because `remote:` opts into `onUnknown: "allow"` and projects
-		// the trinary unknown to false BEFORE this reason fn runs (the
-		// rule skips, deferring to the generic noMainCommit).
+		// Walker-unknown branch: protected-branch unverified. Don't
+		// make a positive claim about which protected branch is
+		// involved.
+		//
+		// (CWD is always known in this rule's reason fn — `remote:`'s
+		//  `onUnknown: "allow"` projects walker-unknown CWD to false at
+		//  the leaf level, so the rule skips to the generic
+		//  `noMainCommit` before this reason fn runs.)
 		const branchRes = walkerString(ctx, "branch", NO_CHECKOUT_IN_CHAIN);
 		if (branchRes.kind === "unknown") {
 			return (

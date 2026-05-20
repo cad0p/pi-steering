@@ -60,10 +60,11 @@ async function callReason(ctx: PredicateContext): Promise<string> {
 
 describe("example: dynamic-reason-runtime-cwd", () => {
 	it("rule.when uses the canonical positive form (`isClean: false`)", () => {
-		// Pins the rule's `when:` to `{ isClean: false }`. Both this form
-		// and the equivalent `{ not: { isClean: true } }` produce the same
-		// fail-CLOSED behavior on the walker-unknown branch under the
-		// trinary engine's default block-level `onUnknown: "block"`; the
+		// Pins the rule's `when:` to `{ isClean: false }`. The equivalent
+		// `{ not: { isClean: true } }` shape produces the same fail-CLOSED
+		// behavior on the walker-unknown branch under the trinary engine's
+		// default block-level `onUnknown: "block"`, but diverges on the
+		// walker-known + git-fails row (see README truth table); the
 		// positive form is preferred for readability and per-leaf modifier
 		// composition. See README "Why isClean: false over not: { isClean: true }".
 		const rule = getDeployRule();

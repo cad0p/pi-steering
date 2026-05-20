@@ -56,21 +56,35 @@ the same fail-CLOSED behavior under walker-unknown cwd by default.
 Both shapes describe "the working tree is NOT clean". Under the trinary
 engine introduced in v0.1.0, both are fail-CLOSED by default on the
 walker-unknown-cwd branch, so polarity-of-default is no longer the
-deciding factor. The recommendation is now about readability and
-composition surface area:
+deciding factor. The recommendation is now about readability, smaller
+composition surface, and an end-to-end behavior gap on the
+walker-known + git-fails row.
 
 | state                       | `isClean` returns | `when: { isClean: false }`      | `when: { not: { isClean: true } }` |
 |-----------------------------|-------------------|----------------------------------|--------------------------------------|
 | walker-unknown cwd          | `"unknown"`       | fires ✅ (leaf default block)    | fires ✅ (block-level default block) |
 | walker-known + clean        | `true`            | does NOT fire ✅                 | does NOT fire ✅                      |
 | walker-known + dirty        | `false`           | fires ✅                         | fires ✅                              |
-| walker-known + git fails    | `false`           | does NOT fire ❌ (fail-OPEN)     | does NOT fire ❌ (fail-OPEN)          |
+| walker-known + git fails    | `false`           | does NOT fire ❌ (fail-OPEN)     | fires ⚠️ (Kleene-AND-false absorbs)  |
 
-The two shapes now agree on every row including the walker-unknown
-branch. Both lose the walker-known + git-fails row (the `getWorkingTreeClean`
-helper returns `null` on non-zero exit, the handler short-circuits to
-`false`); pair `isClean` with an `upstream` check to cover that branch
-as gitPlugin's `predicates.ts` JSDoc directs.
+The two shapes agree on every row except `walker-known + git fails`,
+where they diverge:
+
+- `isClean: false`: the handler returns boolean `false` on git failure
+  (`getWorkingTreeClean` returns `null` → handler short-circuits to
+  `false`, NOT `"unknown"`).  Leaf verdict is `false` → rule skips.
+- `not: { isClean: true }`: the handler again returns `false` on git
+  failure.  Inner verdict is `false`, Kleene AND of a single false leaf
+  is `false`, the not-flip yields `true` → rule fires.
+
+The asymmetry is real: `isClean: false` reads as "fire when the
+handler positively asserts dirty"; `not: { isClean: true }` reads as
+"fire when the handler does NOT positively assert clean", and a
+failed git call is a non-clean-assertion under that wording.  Pair
+`isClean` with an `upstream` check to cover the git-fails branch
+uniformly under either shape (handler returns `false` on git failure;
+the `upstream:` leaf surfaces trinary `"unknown"` and the engine's
+`onUnknown:` policy projects).
 
 Why prefer `{ isClean: false }`:
 
@@ -87,8 +101,22 @@ Why prefer `{ isClean: false }`:
   exactly so authors can avoid `not:` for negation when a documented
   inverted shape exists.
 
-`{ not: { isClean: true } }` is correct and equivalent under the new
-engine — pick whichever reads cleaner at the call site.
+### Pair with `upstream:` to cover the git-fails branch
+
+Neither bare-form nor `not:`-form covers the `walker-known + git fails`
+row uniformly.  Put a fail-CLOSED `upstream:` check first in the same
+`when:` to convert the gitfailure into a definite verdict (the
+`upstream:` handler surfaces `"unknown"` instead of returning a
+boolean, so the engine's `onUnknown:` policy projects to fail-CLOSED
+and the rule fires regardless of which `isClean:` shape you used):
+
+```ts
+when: { upstream: /./, isClean: false }
+```
+
+`{ not: { isClean: true } }` is correct under the new engine for the
+walker-unknown row — pick whichever reads cleaner at the call site,
+and pair it with `upstream:` either way.
 
 Rule of thumb for any future plugin author copying this example:
 prefer the predicate's documented inverted shape (e.g., `isClean: false`,

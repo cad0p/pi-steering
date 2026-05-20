@@ -621,3 +621,99 @@ describe("git plugin: isClean spread form drives through readLeafOnUnknown", () 
 		);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 8. isClean: false vs not: { isClean: true } — README equivalence pin
+//
+// The dynamic-reason-runtime-cwd example README documents that
+// `isClean: false` and `not: { isClean: true }` agree on every truth-
+// table row EXCEPT `walker-known + git fails`, where they diverge:
+//   - `isClean: false`: handler returns `false` on git failure → leaf
+//     verdict false → rule skips.
+//   - `not: { isClean: true }`: handler returns `false` → inner
+//     verdict false → Kleene-AND-false-absorbs → not-flip yields true
+//     → rule fires.
+// This test pins both arms of the divergence so future engine drift
+// trips the test alongside the README — the cross-link in the
+// describe / test descriptions is intentional.
+// ---------------------------------------------------------------------------
+
+describe("git plugin: README equivalence — isClean: false vs not: { isClean: true } (walker-known + git fails row)", () => {
+	const gitFailsExec = async (
+		cmd: string,
+		args: string[],
+	): Promise<PiExecResult> => {
+		// `git status --porcelain` exits non-zero (git failure path the
+		// handler treats as `null` → boolean `false`).
+		if (
+			cmd === "git" &&
+			args[0] === "status" &&
+			args[1] === "--porcelain"
+		) {
+			return {
+				stdout: "",
+				stderr: "fatal: not a git repository",
+				code: 128,
+				killed: false,
+			};
+		}
+		return { stdout: "", stderr: "", code: 1, killed: false };
+	};
+
+	it("`when: { isClean: false }` does NOT fire on git failure (handler returns false → leaf false → rule skips)", async () => {
+		const { evaluator } = buildRuntime(
+			{
+				plugins: [gitPlugin],
+				rules: [
+					{
+						name: "deploy-requires-clean-positive",
+						tool: "bash",
+						field: "command",
+						pattern: /^npm\s+run\s+deploy\b/,
+						reason: "Working tree must be clean.",
+						when: { isClean: false },
+					},
+				],
+			},
+			gitFailsExec,
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("npm run deploy"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"git failure → handler returns false → leaf verdict false → rule skips",
+		);
+	});
+
+	it("`when: { not: { isClean: true } }` FIRES on git failure (handler returns false → Kleene-AND-false-absorbs → not-flip = true)", async () => {
+		const { evaluator } = buildRuntime(
+			{
+				plugins: [gitPlugin],
+				rules: [
+					{
+						name: "deploy-requires-clean-not",
+						tool: "bash",
+						field: "command",
+						pattern: /^npm\s+run\s+deploy\b/,
+						reason: "Working tree must be clean.",
+						when: { not: { isClean: true } },
+					},
+				],
+			},
+			gitFailsExec,
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("npm run deploy"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			res && res.block === true,
+			"git failure → handler returns false → inner verdict false → Kleene-AND false absorbs → not(false) = true → rule fires",
+		);
+	});
+});

@@ -210,6 +210,15 @@ function unwrapBooleanLeafArg(args: unknown): boolean | undefined {
 }
 
 /**
+ * Test-internal export of {@link unwrapBooleanLeafArg}. Module-private
+ * by intent; the underscore prefix flags "not part of the public
+ * surface" so external consumers can grep-discover the test
+ * convention. Direct unit tests pin malformed-input branches that
+ * are hard to drive via the engine end-to-end.
+ */
+export const _unwrapBooleanLeafArg = unwrapBooleanLeafArg;
+
+/**
  * Direct one-shot git exec used only by the `branch` predicate's
  * tracker-missing fallback (the predicate's three-way tracker
  * discrimination stays in predicate-land; see the `branch` JSDoc
@@ -551,7 +560,7 @@ export const commitsAhead: PredicateHandler<
  *      dispatches on.
  */
 export const hasStagedChanges: PredicateHandler<
-	boolean | { value: boolean }
+	boolean | { value: boolean; onUnknown?: "allow" | "block" }
 > = async (args, ctx) => {
 	if (cwdIsWalkerUnknown(ctx)) return "unknown";
 	// Schema's `PredicateShape<boolean>` auto-detects spreadBase to
@@ -598,7 +607,7 @@ export const hasStagedChanges: PredicateHandler<
  *      on.
  */
 export const isClean: PredicateHandler<
-	boolean | { value: boolean }
+	boolean | { value: boolean; onUnknown?: "allow" | "block" }
 > = async (args, ctx) => {
 	if (cwdIsWalkerUnknown(ctx)) return "unknown";
 	// Schema's `PredicateShape<boolean>` auto-detects spreadBase to

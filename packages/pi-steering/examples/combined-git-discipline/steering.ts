@@ -30,10 +30,7 @@
 import { defineConfig } from "pi-steering";
 
 export default defineConfig({
-	// Cast: `defineConfig`'s `AllRuleNames` typo-check union covers
-	// plugin + user rules but not `DEFAULT_RULES`. Runtime merge
-	// honors this disable; only the compile-time check is narrow.
-	disabledRules: ["no-force-push"] as unknown as [],
+	disabledRules: ["no-force-push"],
 	rules: [
 		{
 			name: "no-force-push-strict",

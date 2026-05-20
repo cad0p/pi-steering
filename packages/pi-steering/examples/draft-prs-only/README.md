@@ -2,7 +2,7 @@
 
 A rule pack that forces `gh pr create` to include `--draft`.
 
-> **v0.1.0 TypeScript form:** see [`steering.ts`](./steering.ts) — drop in at `~/.pi/steering.ts` or `<project-root>/.pi/steering.ts`. The JSON form in [`steering.json`](./steering.json) is still supported for v0.0.x configs.
+> **TypeScript form (canonical):** see [`steering.ts`](./steering.ts) — drop in at `~/.pi/steering.ts` or `<project-root>/.pi/steering.ts`. TypeScript gets compile-time typo checks via `defineConfig`. The [`steering.json`](./steering.json) form is also accepted as a documented subset (pattern-strings only — no plugins, observers, function-valued fields, or `when.<predicate>` keys; those require TypeScript).
 
 ## What it enforces
 

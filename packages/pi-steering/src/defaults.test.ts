@@ -31,10 +31,18 @@ import type { BashToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_PLUGINS, DEFAULT_RULES } from "./defaults.ts";
 import { buildEvaluator } from "./evaluator.ts";
 import { resolvePlugins } from "./plugin-merger.ts";
+import type { Rule } from "./schema.ts";
 import {
 	makeCtx,
 	makeTrackedHost as makeHost,
 } from "./__test-helpers__.ts";
+
+// `DEFAULT_RULES` is `as const satisfies readonly Rule[]` — preserving
+// each rule's `name` literal for the typo-check unions in
+// `define-config.ts`. For shape-invariant iteration, the test code
+// reads against the wider `Rule` view (optional fields visible,
+// pattern not narrowed to a string-literal), so widen it once here.
+const RULES_AS_RULE: readonly Rule[] = DEFAULT_RULES;
 
 // ---------------------------------------------------------------------------
 // Shape invariants
@@ -53,7 +61,7 @@ describe("defaults: DEFAULT_RULES shape", () => {
 	});
 
 	it("every rule has non-empty name, pattern, reason", () => {
-		for (const r of DEFAULT_RULES) {
+		for (const r of RULES_AS_RULE) {
 			assert.ok(r.name.length > 0, `empty name: ${JSON.stringify(r)}`);
 			const patternLen =
 				typeof r.pattern === "string"
@@ -65,7 +73,7 @@ describe("defaults: DEFAULT_RULES shape", () => {
 	});
 
 	it("every rule has a valid regex pattern (requires/unless too)", () => {
-		for (const r of DEFAULT_RULES) {
+		for (const r of RULES_AS_RULE) {
 			if (typeof r.pattern === "string") {
 				assert.doesNotThrow(
 					() => new RegExp(r.pattern as string),

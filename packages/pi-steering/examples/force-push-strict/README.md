@@ -31,16 +31,20 @@ the lease-variant carve-out is an attack surface. This rule pack closes it.
 
 Two equivalent forms. Pick whichever matches your setup.
 
-### v0.1.0+ TypeScript form (preferred)
+### TypeScript form (canonical)
 
 Copy [`steering.ts`](./steering.ts) to `~/.pi/steering.ts` (or
 `<project-root>/.pi/steering.ts`) for a repo-scoped policy. The
 TypeScript form participates in compile-time checking via
 `defineConfig`.
 
-### v0.0.x JSON form (legacy)
+### JSON form (subset)
 
-Merge this into your `steering.json`. The `disable` entry turns off the built-in `no-force-push`; the new `no-force-push-strict` rule takes its place:
+Merge this into your `steering.json`. JSON is a deliberate subset of
+the TypeScript shape — it covers pattern-string rules and override
+flags but not plugins, observers, function-valued fields, or
+`when.<predicate>` keys. The `disable` entry turns off the built-in
+`no-force-push`; the new `no-force-push-strict` rule takes its place:
 
 ```json
 {

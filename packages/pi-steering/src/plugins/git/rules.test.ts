@@ -592,15 +592,17 @@ describe("rules: no-main-commit-github", () => {
 	});
 
 	it("`git checkout $VAR && git commit` on github clone → walker-unknown branch routes to the bespoke 'could not verify' message", async () => {
-		// Pins the walker-unknown-branch sibling early-return in the
-		// reason fn (parallel to the walker-unknown-cwd early-return).
-		// Setup: github remote stubbed + dynamic checkout target in the
-		// chain so the branch tracker collapses to its `"unknown"`
-		// sentinel under known cwd. The branch predicate's default
-		// `onUnknown: "block"` fires fail-closed; the reason fn detects
-		// `branchRes.kind === "unknown"` and emits the bespoke "could
-		// not verify the current branch" message rather than falling
-		// through to a positive claim about the protected branch.
+		// Pins the walker-unknown-branch early-return in the reason fn.
+		// Walker-unknown CWD is no longer a sibling branch — `remote:` opts
+		// into `onUnknown: "allow"` and projects unknown→false BEFORE this
+		// reason fn runs (the rule skips, deferring to the generic
+		// noMainCommit). Setup: github remote stubbed + dynamic checkout
+		// target in the chain so the branch tracker collapses to its
+		// `"unknown"` sentinel under known cwd. The branch predicate's
+		// default `onUnknown: "block"` fires fail-closed; the reason fn
+		// detects `branchRes.kind === "unknown"` and emits the bespoke
+		// "could not verify the current branch" message rather than
+		// falling through to a positive claim about the protected branch.
 		//
 		// Counterfactual rationale: without the walker-unknown-branch
 		// sibling early-return, the reason fn falls through to the

@@ -505,6 +505,22 @@ describe("git plugin: no-main-commit-github walker-unknown cwd", () => {
 			/\[steering:no-main-commit-github@/,
 			"github-flavored rule must NOT fire when its `remote:` leaf opts into `onUnknown: \"allow\"` and walker can't resolve cwd",
 		);
+		// The reason text should be the generic protected-branch reason,
+		// not github-flavored PR-flow guidance, and must not contain
+		// walker-unknown-branch error text (the github-flavored rule's
+		// bespoke "could not verify the current branch" line lives
+		// behind its bespoke reason fn — it's the github rule, not the
+		// generic, that handles walker-unknown branch).
+		assert.doesNotMatch(
+			res.reason!,
+			/walker.*unknown/i,
+			"generic rule's reason text doesn't mention walker-unknown (that's the github rule's domain, and the github rule didn't fire here)",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/open a PR|pull request/i,
+			"generic rule's reason text doesn't carry github-flavored PR-flow guidance",
+		);
 	});
 });
 

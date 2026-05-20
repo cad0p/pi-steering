@@ -60,7 +60,7 @@ const deployRequiresCleanTree = {
 	// the walker-unknown branch — but `isClean: false` is the simpler
 	// shape when no other leaves share the not-block. See README
 	// "Why isClean: false over not: { isClean: true }" for the full
-	// truth table and the migration story from v0.0.x.
+	// truth table.
 	when: { isClean: false },
 	reason: (ctx) => {
 		if (ctx.walkerState?.cwd === "unknown") {

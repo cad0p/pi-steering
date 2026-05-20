@@ -507,3 +507,100 @@ describe("git plugin: no-main-commit-github walker-unknown cwd", () => {
 		);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 7. isClean spread-form engine end-to-end
+//
+// Pins the engine's strip-modifier-then-call-handler contract for
+// boolean predicates: the spread form `{ value: false, onUnknown:
+// "allow" }` must reach the handler with `onUnknown:` stripped (the
+// engine's `readLeafOnUnknown` consumes it before dispatch). This
+// drives `evaluateWhen` → `readLeafOnUnknown` → `isClean` handler
+// end-to-end.
+// ---------------------------------------------------------------------------
+
+describe("git plugin: isClean spread form drives through readLeafOnUnknown", () => {
+	it("`isClean: { value: false, onUnknown: \"allow\" }` fires when working tree is dirty (engine strips the modifier before dispatch)", async () => {
+		// Stub `git status --porcelain` to report a dirty tree.
+		const { evaluator } = buildRuntime(
+			{
+				plugins: [gitPlugin],
+				rules: [
+					{
+						name: "deploy-requires-clean",
+						tool: "bash",
+						field: "command",
+						pattern: /^npm\s+run\s+deploy\b/,
+						reason: "Working tree dirty.",
+						when: { isClean: { value: false, onUnknown: "allow" } },
+					},
+				],
+			},
+			async (cmd: string, args: string[]): Promise<PiExecResult> => {
+				if (
+					cmd === "git" &&
+					args[0] === "status" &&
+					args[1] === "--porcelain"
+				) {
+					return {
+						stdout: " M file.ts\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				return { stdout: "", stderr: "", code: 1, killed: false };
+			},
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("npm run deploy"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			res && res.block === true,
+			"engine strips `onUnknown: 'allow'` and calls the handler with `{ value: false }`; handler unwraps to `false`, sees dirty tree, returns true → rule fires",
+		);
+		assert.match(
+			res.reason!,
+			/\[steering:deploy-requires-clean@[^\]]+\]/,
+		);
+	});
+
+	it("`isClean: { value: false, onUnknown: \"allow\" }` skips on walker-unknown cwd (handler surfaces `\"unknown\"` → leaf `\"allow\"` → false)", async () => {
+		// Pins the walker-unknown-cwd path: the inline guard at the
+		// handler's top surfaces `"unknown"`; the engine's leaf-level
+		// `onUnknown: "allow"` projects unknown → false, the rule skips.
+		const { evaluator } = buildRuntime(
+			{
+				plugins: [gitPlugin],
+				rules: [
+					{
+						name: "deploy-requires-clean",
+						tool: "bash",
+						field: "command",
+						pattern: /^npm\s+run\s+deploy\b/,
+						reason: "Working tree dirty.",
+						when: { isClean: { value: false, onUnknown: "allow" } },
+					},
+				],
+			},
+			async (): Promise<PiExecResult> => ({
+				stdout: " M file.ts\n",
+				stderr: "",
+				code: 0,
+				killed: false,
+			}),
+		);
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$VAR" && npm run deploy'),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"walker-unknown cwd → handler returns 'unknown' → leaf-level 'allow' projects to false → rule skips",
+		);
+	});
+});

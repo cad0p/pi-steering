@@ -32,11 +32,18 @@ import { describe, it } from "node:test";
 // field. The reference below keeps the import live for the
 // type-system without triggering unused-import diagnostics.
 import gitPlugin from "./plugins/git/index.ts";
+import {
+	commitsAhead,
+	hasStagedChanges,
+	isClean,
+	type CommitsAheadArgs,
+} from "./plugins/git/predicates.ts";
 import type {
 	BuiltInWhenLeaves,
 	InnerValue,
 	OuterValue,
 	PluginPredicateKey,
+	PredicateHandler,
 	TopLevelWhenClause,
 } from "./schema.ts";
 
@@ -138,6 +145,30 @@ describe("per-predicate typing: positive cases", () => {
 		const spreadBranch: InnerValue<"branch"> = { pattern: /pattern/ };
 		assert.ok(bareBranch !== undefined);
 		assert.ok(spreadBranch !== undefined);
+	});
+
+	it("InnerValue<\"upstream\">: bare OR spreadBase (NO modifiers)", () => {
+		// Mirrors the `branch` pin above for the other Pattern-leaf
+		// registry-driven predicates so a future shape regression on
+		// any one of them surfaces independently.
+		const bare: InnerValue<"upstream"> = /origin\/main/;
+		const spread: InnerValue<"upstream"> = { pattern: /origin\/main/ };
+		assert.ok(bare !== undefined);
+		assert.ok(spread !== undefined);
+	});
+
+	it("InnerValue<\"remote\">: bare OR spreadBase (NO modifiers)", () => {
+		const bare: InnerValue<"remote"> = /github\.com/;
+		const spread: InnerValue<"remote"> = { pattern: /github\.com/ };
+		assert.ok(bare !== undefined);
+		assert.ok(spread !== undefined);
+	});
+
+	it("InnerValue<\"hasStagedChanges\">: bare boolean OR { value: boolean } (NO modifiers)", () => {
+		const bare: InnerValue<"hasStagedChanges"> = true;
+		const spread: InnerValue<"hasStagedChanges"> = { value: true };
+		assert.ok(bare !== undefined);
+		assert.ok(spread !== undefined);
 	});
 
 	it("upstream: bare + spread + leaf-level onUnknown:", () => {
@@ -281,6 +312,50 @@ describe("PluginPredicateKey: reserved-key filter", () => {
 		const _b: ContainsOnUnknown = false;
 		void _a;
 		void _b;
+		assert.ok(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// gitPlugin handler signatures (named exports vs registry shapes)
+// ---------------------------------------------------------------------------
+
+describe("gitPlugin handler signatures: named-export type pins", () => {
+	it("`commitsAhead` is `PredicateHandler<number | CommitsAheadArgs>`", () => {
+		// Pins the named export against the registry shape. If a future
+		// change widens the handler arg (e.g., adding a new union member
+		// without updating the registry's `PredicateShape<number,
+		// CommitsAheadArgs>` SpreadBase), the conditional collapses to
+		// `false` and the assignment fails to typecheck.
+		type _CommitsAheadSig = typeof commitsAhead extends PredicateHandler<
+			number | CommitsAheadArgs
+		>
+			? true
+			: false;
+		const _checkCommitsAhead: _CommitsAheadSig = true;
+		void _checkCommitsAhead;
+		assert.ok(true);
+	});
+
+	it("`isClean` is `PredicateHandler<boolean | { value: boolean }>`", () => {
+		type _IsCleanSig = typeof isClean extends PredicateHandler<
+			boolean | { value: boolean }
+		>
+			? true
+			: false;
+		const _checkIsClean: _IsCleanSig = true;
+		void _checkIsClean;
+		assert.ok(true);
+	});
+
+	it("`hasStagedChanges` is `PredicateHandler<boolean | { value: boolean }>`", () => {
+		type _HasStagedSig = typeof hasStagedChanges extends PredicateHandler<
+			boolean | { value: boolean }
+		>
+			? true
+			: false;
+		const _checkHasStaged: _HasStagedSig = true;
+		void _checkHasStaged;
 		assert.ok(true);
 	});
 });

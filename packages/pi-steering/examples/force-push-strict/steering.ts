@@ -5,7 +5,7 @@
  * Example: force-push-strict rule pack.
  *
  * Equivalent to `steering.json` in this directory but expressed in the
- * v0.1.0 canonical TypeScript form. Drop this file in at
+ * canonical TypeScript form. Drop this file in at
  * `.pi/steering.ts` (or `.pi/steering/index.ts`) to activate.
  *
  * What it enforces: no force pushes of ANY kind, including

@@ -31,18 +31,32 @@ every wrapper form) lives in the engine's own test suite.
 3. **Verify** the rule is active by running `pi` in the target
    directory; the rules load on `session_start`.
 
-### JSON config (subset)
+### JSON
 
-Each example also ships a `steering.json`. Copy it to
-`~/.pi/agent/steering.json` or `<your-project>/.pi/steering.json` —
-the loader accepts both formats and merges them by layer.
+The loader does **not** load `.pi/steering.json` files directly — only
+`.pi/steering.ts` / `.pi/steering/index.ts`. To migrate an existing
+JSON config:
 
-JSON is a deliberate **subset** of the TypeScript shape: it covers
-pattern-string rules, `requires` / `unless`, `when.cwd`, and override
-flags. Features that need values JSON can't represent — plugins,
-observers, function-valued fields, `when.<predicate>` keys — require
-the TypeScript form. Use whichever fits the rule pack's needs; mix
-freely across layers.
+1. Convert with the CLI: `pi-steering import-json .pi/steering.json -o .pi/steering/index.ts`
+2. Or programmatically: `fromJSON(JSON.parse(text))` from
+   [`compat.ts`](../src/compat.ts), if you're wrapping the conversion
+   in your own tooling.
+
+Each example ships a `steering.json` for reference / migration
+testing — they're authored against the v0 PoC shape so
+`pi-steering import-json` round-trips them cleanly. They do **not**
+participate in the loader's `.pi/` walk-up; only the `.ts` form does.
+
+JSON is a deliberate **subset** of the TypeScript schema: pattern-string
+rules, `requires` / `unless`, `when.cwd` (string pattern only), and
+override flags. Plugins, observers, function-valued rule fields,
+plugin-registered predicate keys (`when.<customKey>`), `when.not`,
+and `when.condition` are TypeScript-only — `pi-steering import-json`
+rejects them with `FromJSONError`. Equivalently: any `when` clause
+member other than `when.cwd` is rejected.
+
+If you're not ready to migrate, the v0 runtime had its own loader that
+did load JSON; staying on v0 is an option until you convert.
 
 ## Verifying a rule works
 

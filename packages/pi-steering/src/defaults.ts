@@ -148,4 +148,8 @@ export const DEFAULT_RULES = [
  * decision - keep the list minimal. Domain-specific plugins (RDS,
  * npm, etc.) stay opt-in.
  */
+// Same `as const satisfies readonly Plugin[]` rationale as
+// `DEFAULT_RULES` above — preserves the `name` literal so
+// `DefaultPluginName` (in `define-config.ts`) projects off the
+// concrete value rather than widening to `string`.
 export const DEFAULT_PLUGINS = [gitPlugin] as const satisfies readonly Plugin[];

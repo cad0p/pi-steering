@@ -35,7 +35,13 @@
 import type { Plugin, Rule } from "./schema.ts";
 import gitPlugin from "./plugins/git/index.ts";
 
-export const DEFAULT_RULES: Rule[] = [
+export const DEFAULT_RULES = [
+	// `as const satisfies readonly Rule[]` (vs. `: Rule[]`) preserves
+	// each rule's `name` literal through to `defaults` consumers. The
+	// type unions in `define-config.ts` (`DefaultRuleName`,
+	// `AllRuleNames`) project off `(typeof DEFAULT_RULES)[number]["name"]`
+	// — a bare `Rule[]` annotation widens those literals to `string`
+	// and silently disables typo-detection on `disabledRules`.
 	{
 		name: "no-force-push",
 		tool: "bash",
@@ -105,7 +111,7 @@ export const DEFAULT_RULES: Rule[] = [
 		reason:
 			"Long-running dev servers and watchers block the agent loop. Ask the user to run it manually in another terminal, or use a background-process tool. Representative — add your own via `.pi/steering.ts` if a framework isn't listed here.",
 	},
-];
+] as const satisfies readonly Rule[];
 
 /**
  * Default plugins shipped by the package.
@@ -142,4 +148,4 @@ export const DEFAULT_RULES: Rule[] = [
  * decision - keep the list minimal. Domain-specific plugins (RDS,
  * npm, etc.) stay opt-in.
  */
-export const DEFAULT_PLUGINS: Plugin[] = [gitPlugin];
+export const DEFAULT_PLUGINS = [gitPlugin] as const satisfies readonly Plugin[];

@@ -1,9 +1,8 @@
 # Rule-pack examples
 
 Curated rule-pack examples for common workflows. Each subdirectory
-ships both a v0.1.0 TypeScript config (`steering.ts`) and the
-legacy v0.0.x JSON form (`steering.json`). Each has its own README
-with rationale.
+ships both a TypeScript config (`steering.ts`) and a JSON config
+(`steering.json`). Each has its own README with rationale.
 
 | Example | What it enforces | Best for |
 |---------|------------------|----------|
@@ -21,7 +20,7 @@ every wrapper form) lives in the engine's own test suite.
 
 ## How to use
 
-### v0.1.0+ (TypeScript, preferred)
+### TypeScript (canonical)
 
 1. **Copy** `steering.ts` from an example directory into one of:
    - `~/.pi/steering.ts` (or `~/.pi/steering/index.ts`) — applies globally.
@@ -32,13 +31,18 @@ every wrapper form) lives in the engine's own test suite.
 3. **Verify** the rule is active by running `pi` in the target
    directory; the rules load on `session_start`.
 
-### v0.0.x (JSON, legacy)
+### JSON config (subset)
 
-Each example also ships a `steering.json` for teams still on the v0
-format. Copy it to `~/.pi/agent/steering.json` or
-`<your-project>/.pi/steering.json`. The loader accepts both formats;
-v0.1.0-only features (plugins, observers, `when.<predicate>`) are
-TypeScript-only.
+Each example also ships a `steering.json`. Copy it to
+`~/.pi/agent/steering.json` or `<your-project>/.pi/steering.json` —
+the loader accepts both formats and merges them by layer.
+
+JSON is a deliberate **subset** of the TypeScript shape: it covers
+pattern-string rules, `requires` / `unless`, `when.cwd`, and override
+flags. Features that need values JSON can't represent — plugins,
+observers, function-valued fields, `when.<predicate>` keys — require
+the TypeScript form. Use whichever fits the rule pack's needs; mix
+freely across layers.
 
 ## Verifying a rule works
 

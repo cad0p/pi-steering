@@ -545,6 +545,91 @@ describe("defineConfig: bare-annotation footgun (ADR §8 authoring pattern)", ()
 	});
 });
 
+describe("defineConfig: default rule + plugin names in typo-check union", () => {
+	// `AllRuleNames` and `AllPluginNames` include the names of
+	// `DEFAULT_RULES` / `DEFAULT_PLUGINS` directly, so disabling an
+	// engine-shipped default typechecks without a cast — the same as
+	// disabling a plugin or user rule. Pins the contract that
+	// `defaults.ts` keeps `as const satisfies readonly Rule[]` /
+	// `readonly Plugin[]` so literal `name` values survive into the
+	// unions; if either annotation regresses to a bare `Rule[]` /
+	// `Plugin[]`, these `@ts-expect-error` directives stop firing and
+	// the file fails to compile.
+
+	it("disabledRules accepts a single default-rule name without a cast", () => {
+		const cfg = defineConfig({
+			disabledRules: ["no-force-push"],
+		});
+		assert.deepEqual(cfg.disabledRules, ["no-force-push"]);
+	});
+
+	it("disabledRules accepts every other shipped default name", () => {
+		const cfg = defineConfig({
+			disabledRules: [
+				"no-hard-reset",
+				"no-rm-rf-slash",
+				"no-long-running-commands",
+			],
+		});
+		assert.equal(cfg.disabledRules?.length, 3);
+	});
+
+	it("disabledRules accepts a mix of default + plugin + user rule names", () => {
+		const plugin = {
+			name: "p",
+			rules: [
+				{
+					name: "plugin-rule",
+					tool: "bash",
+					field: "command",
+					pattern: /./,
+					reason: "r",
+				},
+			],
+		} as const satisfies Plugin;
+		const cfg = defineConfig({
+			plugins: [plugin],
+			rules: [
+				{
+					name: "user-rule",
+					tool: "bash",
+					field: "command",
+					pattern: /./,
+					reason: "r",
+				},
+			],
+			disabledRules: ["no-force-push", "plugin-rule", "user-rule"],
+		});
+		assert.equal(cfg.disabledRules?.length, 3);
+	});
+
+	it("disabledRules rejects unknown names even when no plugins/user rules are registered", () => {
+		const cfg = defineConfig({
+			// @ts-expect-error — "no-force-pushh" is a typo of the default
+			// rule "no-force-push". Default rule names are part of the
+			// typo-check union; misspellings are rejected at compile time.
+			disabledRules: ["no-force-pushh"],
+		});
+		assert.equal(cfg.disabledRules?.length, 1);
+	});
+
+	it("disabledPlugins accepts a default-plugin name without a cast", () => {
+		const cfg = defineConfig({
+			disabledPlugins: ["git"],
+		});
+		assert.deepEqual(cfg.disabledPlugins, ["git"]);
+	});
+
+	it("disabledPlugins rejects unknown names even when no plugins are registered", () => {
+		const cfg = defineConfig({
+			// @ts-expect-error — "gti" is a typo of the default plugin
+			// "git". Default plugin names are part of the typo-check union.
+			disabledPlugins: ["gti"],
+		});
+		assert.equal(cfg.disabledPlugins?.length, 1);
+	});
+});
+
 describe("defineConfig: cross-module plugin typo detection (F2 regression fence)", () => {
 	// The F2 finding: gitPlugin's emitted .d.ts was widening rule names
 	// to `Rule<string, string>[]`, which silently disabled typo detection

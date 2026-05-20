@@ -35,13 +35,7 @@ export default defineConfig({
 	// Disable the shipped default so its less-strict block-reason (
 	// "use --force-with-lease if you must") doesn't leak to the LLM
 	// alongside our stricter variant.
-	//
-	// Cast: `defineConfig`'s `AllRuleNames` typo-check union covers
-	// plugin + user rules but not `DEFAULT_RULES`. The runtime merge
-	// honors the disable; only the compile-time check is narrow. See
-	// <https://github.com/cad0p/pi-steering-hooks/issues> for the
-	// tracking issue.
-	disabledRules: ["no-force-push"] as unknown as [],
+	disabledRules: ["no-force-push"],
 	rules: [
 		{
 			name: "no-force-push-strict",

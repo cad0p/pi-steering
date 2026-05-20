@@ -182,6 +182,34 @@ function unknownVerdict(onUnknown: "allow" | "block"): boolean {
 }
 
 /**
+ * Unwrap the boolean payload from a {@link PredicateShape}<boolean>
+ * argument. Accepts the bare form (`true` / `false`) and the
+ * spread form (`{ value: true }` / `{ value: false }`); modifiers
+ * (currently `onUnknown:`) are stripped before the handler is
+ * called by the engine's `readLeafOnUnknown`, so the spread shape
+ * the handler sees is `{ value: boolean }` only.
+ *
+ * Returns `undefined` on malformed input — the caller decides what
+ * to do with that (typically `return false`, mirroring the existing
+ * pattern-unwrap fail-closed contract).
+ *
+ * Used by {@link isClean} and {@link hasStagedChanges}; both ship
+ * with `PredicateShape<boolean>` in the registry so the bare/spread
+ * shape is identical at the type level too.
+ */
+function unwrapBooleanLeafArg(args: unknown): boolean | undefined {
+	if (typeof args === "boolean") return args;
+	if (
+		args !== null
+		&& typeof args === "object"
+		&& typeof (args as { value?: unknown }).value === "boolean"
+	) {
+		return (args as { value: boolean }).value;
+	}
+	return undefined;
+}
+
+/**
  * Direct one-shot git exec used only by the `branch` predicate's
  * tracker-missing fallback (the predicate's three-way tracker
  * discrimination stays in predicate-land; see the `branch` JSDoc
@@ -451,6 +479,9 @@ export interface CommitsAheadArgs {
  * @see walkerUnknownCwdReason — compose the agent-facing reason text
  *      for the walker-unknown-cwd fail-closed branch in your rule's
  *      ReasonFn.
+ * @see PiSteeringPredicates.commitsAhead — the registry entry that
+ *      declares the bare / spreadBase shape this handler dispatches
+ *      on.
  */
 export const commitsAhead: PredicateHandler<
 	number | CommitsAheadArgs
@@ -515,6 +546,9 @@ export const commitsAhead: PredicateHandler<
  * @see walkerUnknownCwdReason — compose the agent-facing reason text
  *      for the walker-unknown-cwd fail-closed branch in your rule's
  *      ReasonFn.
+ * @see PiSteeringPredicates.hasStagedChanges — the registry entry
+ *      that declares the bare / spreadBase shape this handler
+ *      dispatches on.
  */
 export const hasStagedChanges: PredicateHandler<
 	boolean | { value: boolean }
@@ -524,18 +558,8 @@ export const hasStagedChanges: PredicateHandler<
 	// `{ value: boolean }`; unwrap so authors can attach modifiers via
 	// `{ value: true, onUnknown: "allow" }` (modifiers stripped before
 	// the handler is called by readLeafOnUnknown).
-	let expected: boolean;
-	if (typeof args === "boolean") {
-		expected = args;
-	} else if (
-		args !== null
-		&& typeof args === "object"
-		&& typeof (args as { value?: unknown }).value === "boolean"
-	) {
-		expected = (args as { value: boolean }).value;
-	} else {
-		return false;
-	}
+	const expected = unwrapBooleanLeafArg(args);
+	if (expected === undefined) return false;
 	const state = await getStagedChanges(ctx);
 	if (state === null) return false; // unknown — don't fire
 	return expected === state;
@@ -567,6 +591,9 @@ export const hasStagedChanges: PredicateHandler<
  * @see walkerUnknownCwdReason — compose the agent-facing reason text
  *      for the walker-unknown-cwd fail-closed branch in your rule's
  *      ReasonFn.
+ * @see PiSteeringPredicates.isClean — the registry entry that
+ *      declares the bare / spreadBase shape this handler dispatches
+ *      on.
  */
 export const isClean: PredicateHandler<
 	boolean | { value: boolean }
@@ -576,18 +603,8 @@ export const isClean: PredicateHandler<
 	// `{ value: boolean }`; unwrap so authors can attach modifiers via
 	// `{ value: true, onUnknown: "allow" }` (modifiers stripped before
 	// the handler is called by readLeafOnUnknown).
-	let expected: boolean;
-	if (typeof args === "boolean") {
-		expected = args;
-	} else if (
-		args !== null
-		&& typeof args === "object"
-		&& typeof (args as { value?: unknown }).value === "boolean"
-	) {
-		expected = (args as { value: boolean }).value;
-	} else {
-		return false;
-	}
+	const expected = unwrapBooleanLeafArg(args);
+	if (expected === undefined) return false;
 	const clean = await getWorkingTreeClean(ctx);
 	if (clean === null) return false;
 	return expected === clean;

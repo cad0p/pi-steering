@@ -442,6 +442,19 @@ describe("predicate: commitsAhead", () => {
 		]);
 		assert.equal(await commitsAhead(0, ctx), true);
 	});
+
+	it("bare-number `commitsAhead: 2` does NOT match when count is 1 (negative case for the bare-number sugar path)", async () => {
+		// Pins the bare-number sugar's miss path symmetrically with the
+		// `{ eq: 1 }` miss test above. The bare-number sugar dispatches
+		// through `eq = args` at the top of the handler, so the
+		// comparator-mismatch branch is the same code path, but the
+		// authoring shape differs and a regression that special-cased
+		// the bare-number entry could mask the miss case.
+		const { ctx } = makeCtx([
+			{ match: (cmd) => cmd === "git", result: execOk("1\n") },
+		]);
+		assert.equal(await commitsAhead(2, ctx), false);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -531,7 +544,7 @@ describe("predicate: hasStagedChanges", () => {
 		// the handler itself just unwraps `value:`.
 		assert.equal(
 			await hasStagedChanges(
-				{ value: false, onUnknown: "allow" } as unknown as boolean,
+				{ value: false, onUnknown: "allow" } as unknown as { value: boolean },
 				ctx,
 			),
 			true,
@@ -610,7 +623,7 @@ describe("predicate: isClean", () => {
 		]);
 		assert.equal(
 			await isClean(
-				{ value: false, onUnknown: "allow" } as unknown as boolean,
+				{ value: false, onUnknown: "allow" } as unknown as { value: boolean },
 				ctx,
 			),
 			true,

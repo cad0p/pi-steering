@@ -62,19 +62,11 @@ import type { PredicateContext } from "../schema.ts";
  * };
  * ```
  *
- * @remarks `not:` over a runtime-cwd predicate is safe by default
- *          under the new engine. The runtime-cwd predicate surfaces
- *          `"unknown"` on the walker-unknown branch; inside a `not:`
- *          block, the block-level `onUnknown:` (default `"block"` =
- *          fail-CLOSED) decides the not-clause's contribution — the
- *          not-flip is skipped on the unknown-leaf case so authors
- *          who write `onUnknown: "block"` directly mean "rule fires"
- *          without double inversion. The simpler `{ isClean: false }`
- *          form sidesteps the choice; if you set
- *          `onUnknown: "allow"` on a not-block over a runtime-cwd
- *          predicate, you opt back into fail-OPEN, which is rarely
- *          what you want. gitPlugin's `predicates.ts` JSDoc documents
- *          both polarities.
+ * @remarks Inside a `not:` block, the runtime-cwd predicate's
+ *          `"unknown"` composes with the block-level `onUnknown:`
+ *          (default `"block"` = fail-CLOSED). See {@link
+ *          TopLevelWhenClauseNoRecurse} for the not-block-modifier-
+ *          placement contract.
  */
 export function walkerUnknownCwdReason(
 	ctx: PredicateContext,

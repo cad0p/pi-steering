@@ -3089,6 +3089,65 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			"known cwd doesn't match /github/ → inner false → not(false) = true → rule fires",
 		);
 	});
+
+	it("`not: { condition: () => false }`: PredicateFn-false absorbs in Kleene AND → not(false) = true → rule fires", async () => {
+		// Pins the condition-leaf path through the not-block evaluator.
+		// `condition:` is a built-in non-registry leaf (sits on
+		// BuiltInWhenLeaves) but goes through the same Kleene-AND
+		// composition + not-flip as registry-driven plugin predicates.
+		// A returned `false` absorbs in the AND; the not-flip yields
+		// `true` so the rule fires.
+		const rule = makeRule(
+			{ not: { condition: () => false } },
+			"not-condition-false-fires",
+		);
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolve(),
+			makeHost(),
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			r && r.block === true,
+			"condition false absorbs → not(false) = true → rule fires",
+		);
+	});
+
+	it("`not: { condition: () => { throw } }`: PredicateFn throw → unknown leaf → default block fires", async () => {
+		// Pins the condition-throw → unknown-leaf path through the
+		// not-block evaluator. A condition that throws produces an
+		// `"unknown"` verdict at the leaf; with no leaves to absorb to
+		// false, Kleene AND yields `"unknown"` and the block-level
+		// `onUnknown:` (default `"block"`) fires the rule fail-CLOSED.
+		const rule = makeRule(
+			{
+				not: {
+					condition: () => {
+						throw new Error("boom");
+					},
+				},
+			},
+			"not-condition-throw-fires",
+		);
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolve(),
+			makeHost(),
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			r && r.block === true,
+			"condition throw → unknown leaf → default block fires fail-CLOSED",
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------

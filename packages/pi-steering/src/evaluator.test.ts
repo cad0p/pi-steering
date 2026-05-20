@@ -3151,6 +3151,41 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
 			"condition throw → unknown leaf → default block fires fail-CLOSED",
 		);
 	});
+
+	it("`not: { condition: () => { throw }, onUnknown: 'allow' }`: PredicateFn throw → unknown leaf → block-level allow skips", async () => {
+		// Companion to the default-`"block"` test above. Block-level
+		// `onUnknown: "allow"` projects the unknown-leaf case to
+		// `false` BEFORE the not-flip applies, so the not-clause
+		// contributes `false` → outer when-AND short-circuits → rule
+		// SKIPS (fail-OPEN). This is the documented opt-in path for
+		// authors who want a throwing condition to NOT fire the rule.
+		const rule = makeRule(
+			{
+				not: {
+					condition: () => {
+						throw new Error("boom");
+					},
+					onUnknown: "allow",
+				},
+			},
+			"not-condition-throw-allow-skips",
+		);
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolve(),
+			makeHost(),
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			r,
+			undefined,
+			"condition throw → unknown leaf → block-level allow projects to false → not-clause skips → rule SKIPS (fail-OPEN)",
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -6121,7 +6156,7 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
 			);
 			assert.ok(
 				warnings.some((w) =>
-					/Rule "a-throws".*when\.condition threw.*hunter2/.test(w),
+					/Rule "a-throws"@user.*when\.condition threw.*hunter2/.test(w),
 				),
 				`no matching warning in:\n${warnings.join("\n")}`,
 			);
@@ -6130,13 +6165,16 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
 		}
 	});
 
-	it("surfaces the plugin source in the warning tag for plugin rules", async () => {
+	it("surfaces the plugin source in BOTH the warning channel and the block-reason tag", async () => {
 		// Plugin rule's `condition:` throws — caught locally,
-		// projected via the leaf `onUnknown:` policy (default `"block"`
-		// = fail-CLOSED), rule fires with the plugin's source tag in the
-		// block reason. Warning's @source tag also reads `@<plugin-name>`
-		// for parity (logged via the same channel as plugin-handler
-		// throws in {@link evaluateLeafTrinary}).
+		// projected via the default `"block"` policy (outer `condition:`
+		// has no leaf-level `onUnknown:` opt-in), rule fires fail-CLOSED.
+		// Both the LLM-facing block reason AND the operator-facing warning
+		// log carry the `@<plugin-name>` source tag, matching the S1
+		// wrapper format `predicate threw for rule "<name>"@<source>` in
+		// {@link runPredicateChain} and the plugin-handler exception
+		// channel in {@link evaluateLeafTrinary}. Operators can grep
+		// either channel by source tag to triage plugin-introduced bugs.
 		const pluginRule: Rule = {
 			name: "bad-plugin-rule",
 			tool: "bash",
@@ -6165,15 +6203,16 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
 				makeCtx("/r"),
 				0,
 			);
-			// Rule fires fail-CLOSED with the plugin source tag.
+			// Block-reason channel: source-tagged with plugin name.
 			assert.ok(result && result.block === true);
 			assert.ok(
 				/\[steering:bad-plugin-rule@my-plugin\]/.test(result.reason ?? ""),
-				`expected plugin-source tag; got: ${result.reason}`,
+				`expected plugin-source tag in block reason; got: ${result.reason}`,
 			);
+			// Warning channel: same `@<plugin-name>` tag, anchored.
 			assert.ok(
 				warnings.some((w) =>
-					/Rule "bad-plugin-rule".*when\.condition threw.*plugin predicate bug/.test(
+					/Rule "bad-plugin-rule"@my-plugin.*when\.condition threw.*plugin predicate bug/.test(
 						w,
 					),
 				),

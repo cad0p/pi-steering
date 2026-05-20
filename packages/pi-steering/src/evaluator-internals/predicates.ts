@@ -717,14 +717,18 @@ function projectVerdict(
  * buggy plugin handler whose `"unknown"` then routes through the
  * default `onUnknown: "block"` policy keeps the rule firing instead
  * of silently fail-OPEN-skipping. Handler errors are logged via
- * `console.warn` so plugin authors can debug; the rule + key are
- * included so the source of the throw is unambiguous.
+ * `console.warn` so plugin authors can debug; the rule name +
+ * `@<source>` tag + key are included so the source of the throw is
+ * unambiguous and operators can grep the warning channel by source
+ * tag (matching the S1 wrapper format `predicate threw for rule
+ * "<name>"@<source>` in {@link runPredicateChain}).
  */
 async function evaluateLeafTrinary(
 	handler: PredicateHandler,
 	value: unknown,
 	ctx: PredicateContext,
 	ruleName: string,
+	source: string,
 	key: string,
 ): Promise<PredicateVerdict> {
 	try {
@@ -736,7 +740,7 @@ async function evaluateLeafTrinary(
 		// unknown for fail-CLOSED-by-default; log so the plugin author can
 		// trace it.
 		console.warn(
-			`[pi-steering] Rule "${ruleName}": when.${key} handler returned ` +
+			`[pi-steering] Rule "${ruleName}"@${source}: when.${key} handler returned ` +
 				`${JSON.stringify(result)}; expected boolean | "unknown". ` +
 				`Treating as "unknown"; the configured onUnknown policy will ` +
 				`project this to a definite verdict.`,
@@ -748,7 +752,7 @@ async function evaluateLeafTrinary(
 				? `${err.message}\n${err.stack ?? ""}`
 				: String(err);
 		console.warn(
-			`[pi-steering] Rule "${ruleName}": when.${key} handler threw: ${msg}`,
+			`[pi-steering] Rule "${ruleName}"@${source}: when.${key} handler threw: ${msg}`,
 		);
 		return "unknown";
 	}
@@ -811,6 +815,7 @@ async function evaluateNotBlock(
 	ctx: PredicateContext,
 	predicates: Record<string, PredicateHandler>,
 	ruleName: string,
+	source: string,
 ): Promise<boolean> {
 	// Read block-level `onUnknown:` modifier. Default fail-CLOSED.
 	const blockOnUnknown =
@@ -856,7 +861,7 @@ async function evaluateNotBlock(
 						? `${err.message}\n${err.stack ?? ""}`
 						: String(err);
 				console.warn(
-					`[pi-steering] Rule "${ruleName}": when.condition (inside not:) ` +
+					`[pi-steering] Rule "${ruleName}"@${source}: when.condition (inside not:) ` +
 						`threw: ${msg}`,
 				);
 				verdicts.push("unknown");
@@ -868,7 +873,7 @@ async function evaluateNotBlock(
 		const handler = predicates[key];
 		if (handler === undefined) throw new UnknownPredicateError(key);
 		verdicts.push(
-			await evaluateLeafTrinary(handler, value, ctx, ruleName, key),
+			await evaluateLeafTrinary(handler, value, ctx, ruleName, source, key),
 		);
 	}
 
@@ -906,9 +911,11 @@ async function evaluateNotBlock(
  *                    `onUnknown:` policy without the not-flip on unknown
  *                    leaves.
  *   - `condition`  — {@link PredicateFn}; call with ctx. Throws caught
- *                    and treated as `"unknown"`; projected via
- *                    leaf-level `onUnknown:` policy (default `"block"`
- *                    — rule fires fail-CLOSED). Mirrors the inner
+ *                    and treated as `"unknown"`. Outer-level
+ *                    `condition:` is bare-`PredicateFn`-typed (no
+ *                    spread shape), so the projection always uses the
+ *                    default `"block"` policy and a throwing condition
+ *                    fires the rule fail-CLOSED. Mirrors the inner
  *                    not-block exception treatment + the
  *                    plugin-handler contract in
  *                    {@link evaluateLeafTrinary}.
@@ -929,6 +936,7 @@ export async function evaluateWhen(
 	ctx: PredicateContext,
 	predicates: Record<string, PredicateHandler>,
 	ruleName: string,
+	source: string,
 ): Promise<boolean> {
 	if (!when) return true;
 
@@ -966,19 +974,20 @@ export async function evaluateWhen(
 				ctx,
 				predicates,
 				ruleName,
+				source,
 			);
 			if (!notFires) return false;
 			continue;
 		}
 
-		// Built-in: condition (escape-hatch function). Boolean-only per
-		// spec — the callback owns its own walker-unknown handling.
-		//
-		// Throws are caught and treated as `"unknown"`, then projected
-		// via {@link readLeafOnUnknown} + {@link projectVerdict}. A bare
-		// `condition: fn` carries no `onUnknown:` sibling — default
-		// `"block"` fires the rule fail-CLOSED. This mirrors the inner
-		// not-block branch's exception treatment so a `condition:`
+		// Built-in: condition (escape-hatch function). The callback
+		// returns boolean; throws (sync or rejected promise) are caught
+		// and projected via the "unknown" policy. Outer-level
+		// `condition:` is bare-`PredicateFn`-typed (no spread shape), so
+		// no leaf-level `onUnknown:` opt-in exists at this site — the
+		// projection always uses the default `"block"` policy and a
+		// throwing condition fires the rule fail-CLOSED. This mirrors the
+		// inner not-block branch's exception treatment so a `condition:`
 		// callback exhibits identical behavior at outer-vs-inner
 		// placement, and matches the plugin-handler exception contract
 		// in {@link evaluateLeafTrinary}.
@@ -993,12 +1002,17 @@ export async function evaluateWhen(
 						? `${err.message}\n${err.stack ?? ""}`
 						: String(err);
 				console.warn(
-					`[pi-steering] Rule "${ruleName}": when.condition threw: ${msg}`,
+					`[pi-steering] Rule "${ruleName}"@${source}: when.condition threw: ${msg}`,
 				);
 				verdict = "unknown";
 			}
-			const onUnknown = readLeafOnUnknown(value);
-			if (!projectVerdict(verdict, onUnknown)) return false;
+			// `condition?:` is bare PredicateFn (no spread shape); leaf-level
+			// `onUnknown:` is not reachable from the schema. Hard-code default
+			// `"block"` policy for symmetry with the plugin-handler exception
+			// contract. Authors needing fail-OPEN wrap inside
+			// `not: { condition: fn, onUnknown: "allow" }` (block-level
+			// modifier) OR catch the throw inside the callback body.
+			if (!projectVerdict(verdict, "block")) return false;
 			continue;
 		}
 
@@ -1011,6 +1025,7 @@ export async function evaluateWhen(
 			value,
 			ctx,
 			ruleName,
+			source,
 			key,
 		);
 		const onUnknown = readLeafOnUnknown(value);

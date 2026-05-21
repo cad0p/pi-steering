@@ -71,7 +71,7 @@
 
 import type {
 	BuiltInWhenLeaves,
-	Pattern,
+	Patterns,
 	Plugin,
 	PredicateShape,
 } from "../../schema.ts";
@@ -81,15 +81,6 @@ import { branchTracker } from "./branch-tracker.ts";
 import { gitCwdExtensions } from "./cwd-extensions.ts";
 import { predicates } from "./predicates.ts";
 import { rules } from "./rules.ts";
-
-/**
- * Local alias for the pattern-leaf shape: a single Pattern or an
- * OR-of-patterns array. Mirrors the `Patterns` alias used in the
- * per-predicate-typing schema — kept private to the gitPlugin's
- * registry augmentation since plugin authors typically pull `Pattern`
- * from pi-steering directly and don't need a shared `Patterns` alias.
- */
-type Patterns = Pattern | Pattern[];
 
 declare global {
 	/**

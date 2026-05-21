@@ -44,6 +44,28 @@ import type { EnvState, Tracker, Word } from "unbash-walker";
 export type Pattern = string | RegExp;
 
 /**
+ * `Patterns` — the OR-of-patterns shorthand for pattern-leaf
+ * predicate registrations. A single {@link Pattern} or an array
+ * of {@link Pattern}s (interpreted as OR-of-matches: any pattern
+ * matching counts as a hit).
+ *
+ * Use as the bare-type parameter of {@link PredicateShape} when
+ * registering a pattern-leaf predicate that accepts both bare
+ * shorthand (`when: { myPredicate: /^foo$/ }`) and explicit object
+ * form (`when: { myPredicate: { pattern: /^foo$/ } }`):
+ *
+ * @example
+ * ```ts
+ * declare global {
+ *   interface PiSteeringPredicates {
+ *     myPredicate: PredicateShape<Patterns>;
+ *   }
+ * }
+ * ```
+ */
+export type Patterns = Pattern | Pattern[];
+
+/**
  * Escape-hatch predicate: arbitrary user-supplied logic evaluated with a
  * {@link PredicateContext}. Returned value gates whether the surrounding
  * rule fires. Async OK - evaluator awaits it.

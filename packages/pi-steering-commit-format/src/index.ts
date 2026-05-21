@@ -38,8 +38,10 @@ export {
 export { BUILTIN_FORMATS } from "./builtin-formats.ts";
 
 // Default plugin (named export + default re-export, matching
-// pi-steering-flags shape).
-export { commitFormatPlugin } from "./plugin.ts";
+// pi-steering-flags shape). The default `commitFormat` predicate is
+// also re-exported standalone for authors who want to inspect or
+// reuse it outside the plugin wrapper.
+export { commitFormat, commitFormatPlugin } from "./plugin.ts";
 export { default } from "./plugin.ts";
 
 // NOT exported: CONVENTIONAL_REGEX, JIRA_REGEX (internal-only).

@@ -19,6 +19,12 @@
  *
  * See this package's README for usage examples, and the pi-steering
  * README "Writing plugins" section for the design rationale.
+ *
+ * `declare global` lives here (alongside the plugin definition) so
+ * `import "pi-steering-flags"` pulls the registry augmentation in
+ * transitively. This package has no separate `plugin.ts` (the index
+ * IS the plugin definition); sibling `pi-steering-commit-format`
+ * mirrors the same import-side-effect contract from its `plugin.ts`.
  */
 
 import type { Plugin, PredicateShape } from "pi-steering";
@@ -87,8 +93,12 @@ declare global {
  * The plugin. `as const satisfies Plugin` preserves literal types so
  * `defineConfig({ plugins: [flagsPlugin] })` can cross-reference the
  * predicate names at compile time.
+ *
+ * Exported both as a named const (`flagsPlugin`) and as the default
+ * export, mirroring `pi-steering-commit-format`'s `commitFormatPlugin`
+ * shape so authors can pick the import style they prefer.
  */
-const flagsPlugin = {
+export const flagsPlugin = {
 	name: "flags",
 	predicates: {
 		requiresFlag,

@@ -272,19 +272,11 @@ export async function loadConfigs(cwd: string): Promise<SteeringConfig[]> {
 /**
  * Soft-warn helper — shared by the collision detection branches below
  * so the phrasing is consistent and easy to adjust later.
- *
- * If `warnings` is provided, the message is pushed there for the caller
- * to surface (e.g., via pi's `ctx.ui.notify`). Otherwise falls back to
- * `console.warn` for standalone usage (CLI, tests, embedded runtimes
- * without a pi context).
  */
-function warnCollision(kind: string, name: string, warnings?: string[]): void {
-	const message = `[pi-steering] duplicate ${kind} "${name}"; keeping first-registered entry.`;
-	if (warnings) {
-		warnings.push(message);
-		return;
-	}
-	console.warn(message);
+function warnCollision(kind: string, name: string): void {
+	console.warn(
+		`[pi-steering] duplicate ${kind} "${name}"; keeping first-registered entry.`,
+	);
 }
 
 /**
@@ -292,17 +284,14 @@ function warnCollision(kind: string, name: string, warnings?: string[]): void {
  * First-registered wins (inner layer is first — matches pi's
  * project-local → global convention).
  */
-function mergePlugins(
-	layers: readonly SteeringConfig[],
-	warnings?: string[],
-): Plugin[] {
+function mergePlugins(layers: readonly SteeringConfig[]): Plugin[] {
 	const seen = new Set<string>();
 	const out: Plugin[] = [];
 	for (const layer of layers) {
 		if (!layer.plugins) continue;
 		for (const plugin of layer.plugins) {
 			if (seen.has(plugin.name)) {
-				warnCollision("plugin", plugin.name, warnings);
+				warnCollision("plugin", plugin.name);
 				continue;
 			}
 			seen.add(plugin.name);
@@ -322,24 +311,17 @@ function mergePlugins(
  * stay silent: overriding a rule by name is the documented
  * customization path.
  */
-function mergeRules(
-	layers: readonly SteeringConfig[],
-	warnings?: string[],
-): Rule[] {
+function mergeRules(layers: readonly SteeringConfig[]): Rule[] {
 	const byName = new Map<string, Rule>();
 	for (const layer of layers) {
 		if (!layer.rules) continue;
 		const seenInLayer = new Set<string>();
 		for (const rule of layer.rules) {
 			if (seenInLayer.has(rule.name)) {
-				const message =
+				console.warn(
 					`[pi-steering] duplicate rule "${rule.name}" within ` +
-					"single config layer; keeping first, dropping subsequent";
-				if (warnings) {
-					warnings.push(message);
-				} else {
-					console.warn(message);
-				}
+						"single config layer; keeping first, dropping subsequent",
+				);
 				continue;
 			}
 			seenInLayer.add(rule.name);
@@ -360,17 +342,14 @@ function mergeRules(
  * (authoring mistake); cross-layer overrides are silent (intentional
  * customization).
  */
-function mergeObservers(
-	layers: readonly SteeringConfig[],
-	warnings?: string[],
-): Observer[] {
+function mergeObservers(layers: readonly SteeringConfig[]): Observer[] {
 	const byName = new Map<string, Observer>();
 	for (const layer of layers) {
 		if (!layer.observers) continue;
 		const seenInLayer = new Set<string>();
 		for (const obs of layer.observers) {
 			if (seenInLayer.has(obs.name)) {
-				warnCollision("observer", obs.name, warnings);
+				warnCollision("observer", obs.name);
 				continue;
 			}
 			seenInLayer.add(obs.name);
@@ -460,10 +439,7 @@ function assertTrackerNameUnique(plugins: readonly Plugin[]): void {
  * (Rule / observer / plugin collisions are warned during their own
  * merge passes.) First-registered wins in every case.
  */
-function warnSoftPluginCollisions(
-	plugins: readonly Plugin[],
-	warnings?: string[],
-): void {
+function warnSoftPluginCollisions(plugins: readonly Plugin[]): void {
 	const predicateSeen = new Map<string, string>();
 	const extensionSeen = new Map<string, string>(); // "tracker/basename" -> pluginName
 	for (const plugin of plugins) {
@@ -471,7 +447,7 @@ function warnSoftPluginCollisions(
 			for (const key of Object.keys(plugin.predicates)) {
 				const prior = predicateSeen.get(key);
 				if (prior !== undefined) {
-					warnCollision(`predicate (\`when.${key}\`)`, key, warnings);
+					warnCollision(`predicate (\`when.${key}\`)`, key);
 					continue;
 				}
 				predicateSeen.set(key, plugin.name);
@@ -485,7 +461,7 @@ function warnSoftPluginCollisions(
 					const key = `${trackerName}/${basename}`;
 					const prior = extensionSeen.get(key);
 					if (prior !== undefined) {
-						warnCollision("tracker extension", key, warnings);
+						warnCollision("tracker extension", key);
 						continue;
 					}
 					extensionSeen.set(key, plugin.name);
@@ -501,33 +477,24 @@ function warnSoftPluginCollisions(
  * the OUTERMOST layer — its fields apply when no real layer specifies
  * them, otherwise real layers override.
  *
- * Soft collision warnings:
- *
- *   - If `options.warnings` is provided, warning messages are pushed
- *     there for the caller to surface (e.g., via pi's
- *     `ctx.ui.notify("...", "warning")` for persistent display).
- *   - Otherwise warnings fall back to `console.warn` for standalone
- *     usage (CLI, tests, embedded runtimes without pi context).
- *
- * Throws synchronously for tracker-name collisions (always a bug).
+ * Emits soft-warn console.warn calls for non-fatal collisions; throws
+ * for tracker-name collisions.
  */
 export function buildConfig(
 	layers: readonly SteeringConfig[],
 	defaults?: SteeringConfig,
-	options?: { warnings?: string[] },
 ): SteeringConfig {
 	// Build the effective inner-first layer list. `defaults` goes at
 	// the END (outermost position) so inner real layers override it.
 	const effective: SteeringConfig[] = [...layers];
 	if (defaults !== undefined) effective.push(defaults);
 
-	const warnings = options?.warnings;
-	const plugins = mergePlugins(effective, warnings);
+	const plugins = mergePlugins(effective);
 	assertTrackerNameUnique(plugins);
-	warnSoftPluginCollisions(plugins, warnings);
+	warnSoftPluginCollisions(plugins);
 
-	const rules = mergeRules(effective, warnings);
-	const observers = mergeObservers(effective, warnings);
+	const rules = mergeRules(effective);
+	const observers = mergeObservers(effective);
 
 	const out: SteeringConfig = {};
 	if (plugins.length > 0) out.plugins = plugins;

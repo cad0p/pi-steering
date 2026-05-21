@@ -62,27 +62,17 @@ export async function buildSessionRuntime(
 	evaluator: EvaluatorRuntime;
 	dispatcher: ObserverDispatcher;
 	config: SteeringConfig;
-	/**
-	 * Soft-warn messages collected during config load + plugin resolution.
-	 * Caller (typically the bridge in `register()`) surfaces these via
-	 * pi's `ctx.ui.notify(message, "warning")` for persistent display.
-	 * Empty array if no warnings.
-	 */
-	warnings: string[];
 }> {
-	const warnings: string[] = [];
 	const rawLayers = await loadConfigs(cwd);
 	// First merge without defaults: we only need `disableDefaults` at
 	// this point, and layering defaults in would make the check
 	// meaningless (defaults shouldn't themselves opt into
-	// `disableDefaults`). Don't pipe warnings here — the second buildConfig
-	// call below covers the same merge with defaults applied; warnings
-	// from this probe pass would duplicate.
+	// `disableDefaults`).
 	const probe = buildConfig(rawLayers);
 	const defaults: SteeringConfig | undefined = probe.disableDefaults
 		? undefined
 		: { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS };
-	const merged = buildConfig(rawLayers, defaults, { warnings });
+	const merged = buildConfig(rawLayers, defaults);
 
 	// Apply `disabledRules` to the merged rule set. Plugin-shipped rules
 	// are filtered inside `resolvePlugins`; user / default rules go
@@ -105,13 +95,6 @@ export async function buildSessionRuntime(
 		// the evaluator introduces later should be added here.
 		["cwd", "env"],
 	);
-
-	// Surface plugin-resolution warnings (predicate/observer/rule
-	// collisions inside a single layer's plugin set, disabled plugins,
-	// orphan tracker extensions). Bridge consumes via ctx.ui.notify.
-	for (const w of resolved.warnings) {
-		warnings.push(`[pi-steering] ${w.message}`);
-	}
 
 	// Drop observers whose declared writes are unconsumed. Applied
 	// across plugin-merged observers AND user-authored observers using
@@ -137,5 +120,5 @@ export async function buildSessionRuntime(
 		userDrop.kept,
 		host,
 	);
-	return { evaluator, dispatcher, config: filteredConfig, warnings };
+	return { evaluator, dispatcher, config: filteredConfig };
 }

@@ -60,18 +60,10 @@ export default function register(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_event, ctx: ExtensionContext) => {
 		try {
-			const {
-				evaluator: ev,
-				dispatcher: dp,
-				warnings,
-			} = await buildSessionRuntime(ctx.cwd, host);
-			// Surface config-load + plugin-resolution warnings persistently
-			// via pi's UI. `console.warn` would only flash briefly during
-			// reload before being scrolled off; `ctx.ui.notify` adds a sticky
-			// notification the user can review and dismiss.
-			for (const message of warnings) {
-				ctx.ui.notify(message, "warning");
-			}
+			const { evaluator: ev, dispatcher: dp } = await buildSessionRuntime(
+				ctx.cwd,
+				host,
+			);
 			evaluator = ev;
 			dispatcher = dp;
 		} catch (err) {

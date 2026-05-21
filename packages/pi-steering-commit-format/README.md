@@ -77,22 +77,42 @@ import {
   BUILTIN_FORMATS,
   commitFormatFactory,
 } from "pi-steering-commit-format";
-import type { Plugin } from "pi-steering";
+import type { Plugin, PredicateShape } from "pi-steering";
 
 const myCommitFormat = commitFormatFactory({
   ...BUILTIN_FORMATS,
   custom: (msg) => /^\[CUSTOM\]/.test(msg),
 });
 
+// Register the predicate name on `PiSteeringPredicates` so consumers
+// get the same compile-time autocomplete + JSDoc on hover the default
+// `commitFormat` predicate provides. Without this `declare global`
+// block, an unregistered predicate name is rejected at the type
+// level inside a rule's `when:` slot.
+declare global {
+  interface PiSteeringPredicates {
+    /** `when.myCommitFormat` — conventional + jira + custom. */
+    myCommitFormat: PredicateShape<
+      Parameters<typeof myCommitFormat>[0]
+    >;
+  }
+}
+
 export const myPlugin = {
   name: "my-org",
-  predicates: { commitFormat: myCommitFormat },
+  predicates: { myCommitFormat },
 } as const satisfies Plugin;
 ```
 
 The factory's `require:` arg is type-narrowed to `keyof F`, so TypeScript flags typos at the rule's `when:` slot. Calling with an unknown format name via a JS / `as any` bypass fail-CLOSES (the predicate fires).
 
 `BUILTIN_FORMATS` is the registry of available checkers, NOT a default-required set — callers always pick which formats to AND together via `require:`.
+
+For reference patterns when registering a custom predicate name on `PiSteeringPredicates`, see:
+
+- `pi-steering`'s `gitPlugin` in `plugins/git/index.ts` (multi-predicate registry block, mixed bare + spread shapes).
+- `pi-steering-flags`'s `src/index.ts` (sibling external plugin's registry block).
+- This package's own `src/plugin.ts` (single-predicate spread-only registry block for `commitFormat`).
 
 ## License
 

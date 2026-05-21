@@ -144,6 +144,7 @@ export type {
 	OperatorField,
 	OuterValue,
 	Pattern,
+	Patterns,
 	Plugin,
 	PluginPredicateKey,
 	PredicateContext,

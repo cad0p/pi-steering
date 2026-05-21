@@ -3,19 +3,36 @@
 
 /**
  * Default plugin: convenience for the common case (no extension, no
- * custom formats). If you want different formats, build your own
- * predicate via {@link commitFormatFactory} and register it in your
- * own plugin.
+ * custom formats).
+ *
+ * Custom-format authors must:
+ *   1. Build a predicate via `commitFormatFactory(formats)`
+ *   2. Register it in their plugin's `predicates: { ... }` map
+ *   3. Augment `PiSteeringPredicates` with the predicate name and
+ *      `PredicateShape<CommitFormatArgs<...>>` so `when:` typechecks
+ *      and the format-name union narrows for typo detection
  *
  * Mirrors the `pi-steering-flags` shape: `as const satisfies Plugin`
  * preserves literal types so `defineConfig({ plugins: [commitFormatPlugin] })`
  * can cross-reference the predicate names at compile time.
+ *
+ * `declare global` lives here (alongside the plugin definition) so
+ * `import "pi-steering-commit-format"` pulls the registry augmentation
+ * in transitively. Mirror this convention in your own custom-format
+ * plugin (or place it next to the plugin's central definition file).
  */
 
 import type { Plugin, PredicateShape } from "pi-steering";
 import { BUILTIN_FORMATS } from "./builtin-formats.ts";
 import { commitFormatFactory } from "./factory.ts";
 import type { CommitFormatArgs } from "./factory.ts";
+
+/**
+ * Literal union of the format names registered in {@link BUILTIN_FORMATS}.
+ * Plugged into the registry's `CommitFormatArgs<...>` so authors writing
+ * `when: { commitFormat: { require: ["..."] } }` get TS2322 on typos.
+ */
+type BuiltinFormatName = keyof typeof BUILTIN_FORMATS;
 
 /**
  * Default `commitFormat` predicate, built from {@link commitFormatFactory}
@@ -45,6 +62,12 @@ declare global {
 	 * compile-time autocomplete + JSDoc on hover for `when.commitFormat`
 	 * inside their rule literals.
 	 *
+	 * Each entry declares the predicate's `bare` value type and
+	 * (optionally) an explicit `spreadBase` (the spread's object form
+	 * WITHOUT modifiers). Modifiers (currently `onUnknown:`) are added
+	 * at use site via `& PredicateModifiers` (outer leaf) or at the
+	 * not-block top level (inside `not:`).
+	 *
 	 * The predicate inspects `ctx.input.command` only — no walker
 	 * state is consulted, so there's no walker-unknown-cwd guard.
 	 *
@@ -53,12 +76,15 @@ declare global {
 	 * register their predicate's name on this interface from their
 	 * own plugin's `declare global` block. The registry is the source
 	 * of truth for the `when:` keyset; an unregistered predicate name
-	 * is rejected at the type level. See pi-steering's gitPlugin
-	 * (`plugins/git/index.ts`) and pi-steering-flags (`src/index.ts`)
-	 * for canonical multi-predicate registry blocks.
+	 * is rejected at the type level.
 	 *
 	 * @see PredicateShape, DefaultSpreadBase, PredicateModifiers in
 	 *      `pi-steering`'s `schema.ts` for the full registry contract.
+	 * @see The `gitPlugin` declaration in pi-steering's
+	 *      `plugins/git/index.ts` for the canonical multi-predicate
+	 *      registry block.
+	 * @see The `flagsPlugin` declaration in pi-steering-flags'
+	 *      `src/index.ts` for the sibling-package registry block.
 	 */
 	interface PiSteeringPredicates {
 		/**
@@ -90,7 +116,7 @@ declare global {
 		 * detected `SpreadBase` (object form: the `Bare` shape itself)
 		 * matches the desired authoring surface.
 		 */
-		commitFormat: PredicateShape<CommitFormatArgs>;
+		commitFormat: PredicateShape<CommitFormatArgs<BuiltinFormatName>>;
 	}
 }
 

@@ -146,10 +146,40 @@ describe("pi-steering-commit-format PiSteeringPredicates registry", () => {
 				+ "} as const satisfies Rule;\n"
 				+ "export default defineConfig({ rules: [r] });\n";
 			const diagnostics = compile(scratchDir, source);
+			// Pin to TS2353 ("Object literal may only specify known
+			// properties") rather than `length !== 0` so probe-source
+			// drift can't silently mask the rejection — a different
+			// error code would mean the fence is firing for the wrong
+			// reason and needs investigation.
+			const tsErrors = diagnostics.filter((d) => d.code === 2353);
 			assert.notEqual(
-				diagnostics.length,
+				tsErrors.length,
 				0,
-				"unknown predicate key should fail to typecheck",
+				"unknown predicate key should fail to typecheck with TS2353",
+			);
+		});
+	});
+
+	it("rejects typo'd format names in `require:` — BuiltinFormatName narrows the literal union", () => {
+		withScratch("typo-format", (scratchDir) => {
+			// `conventionnnnnal` is a typo for `conventional`. Without
+			// the `BuiltinFormatName` narrowing in the registry block,
+			// this would typecheck (FormatName defaults to `string`).
+			// With the narrowing, TS rejects it as TS2322 ("Type 'X' is
+			// not assignable to type 'Y'").
+			const source =
+				IMPORT_HEADER
+				+ "const r = {\n"
+				+ RULE_PROLOGUE
+				+ '\n\twhen: { commitFormat: { require: ["conventionnnnnal"] } },\n'
+				+ "} as const satisfies Rule;\n"
+				+ "export default defineConfig({ rules: [r] });\n";
+			const diagnostics = compile(scratchDir, source);
+			const tsErrors = diagnostics.filter((d) => d.code === 2322);
+			assert.notEqual(
+				tsErrors.length,
+				0,
+				"typo'd format name should fail to typecheck with TS2322",
 			);
 		});
 	});

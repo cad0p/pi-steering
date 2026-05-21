@@ -153,10 +153,16 @@ describe("pi-steering-flags PiSteeringPredicates registry", () => {
 				+ "} as const satisfies Rule;\n"
 				+ "export default defineConfig({ rules: [r] });\n";
 			const diagnostics = compile(scratchDir, source);
+			// Pin to TS2353 ("Object literal may only specify known
+			// properties") rather than `length !== 0` so probe-source
+			// drift can't silently mask the rejection \u2014 a different
+			// error code would mean the fence is firing for the wrong
+			// reason and needs investigation.
+			const tsErrors = diagnostics.filter((d) => d.code === 2353);
 			assert.notEqual(
-				diagnostics.length,
+				tsErrors.length,
 				0,
-				"unknown predicate key should fail to typecheck",
+				"unknown predicate key should fail to typecheck with TS2353",
 			);
 		});
 	});

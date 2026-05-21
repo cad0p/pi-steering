@@ -296,7 +296,8 @@ Plugin-registered predicate leaves come from the `PiSteeringPredicates` registry
 
 ```ts
 // inside a plugin's index.ts
-type Patterns = Pattern | Pattern[];
+import type { Patterns, PredicateShape } from "pi-steering";
+
 declare global {
   interface PiSteeringPredicates {
     // Auto-detected spreadBase form: `Bare` is the bare leaf type;

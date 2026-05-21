@@ -40,13 +40,16 @@ import type { EnvState, Tracker, Word } from "unbash-walker";
  * is used as-is.
  *
  * See ADR "Design → Rule schema" → Pattern.
+ *
+ * @see {@link Patterns} for the OR-of-matches shorthand used by
+ * pattern-leaf predicate registry augmentations.
  */
 export type Pattern = string | RegExp;
 
 /**
- * `Patterns` — the OR-of-patterns shorthand for pattern-leaf
- * predicate registrations. A single {@link Pattern} or an array
- * of {@link Pattern}s (interpreted as OR-of-matches: any pattern
+ * The OR-of-patterns shorthand for pattern-leaf predicate
+ * registrations: a single {@link Pattern} or an array of
+ * {@link Pattern}s (interpreted as OR-of-matches: any pattern
  * matching counts as a hit).
  *
  * Use as the bare-type parameter of {@link PredicateShape} when
@@ -56,6 +59,8 @@ export type Pattern = string | RegExp;
  *
  * @example
  * ```ts
+ * import type { Patterns, PredicateShape } from "pi-steering";
+ *
  * declare global {
  *   interface PiSteeringPredicates {
  *     myPredicate: PredicateShape<Patterns>;
@@ -211,7 +216,7 @@ export interface PredicateModifiers {
 export type DefaultSpreadBase<Bare> =
 	[Bare] extends [object]
 		? Bare
-		: [Bare] extends [Pattern | Pattern[]]
+		: [Bare] extends [Patterns]
 			? { pattern: Bare }
 			: { value: Bare };
 

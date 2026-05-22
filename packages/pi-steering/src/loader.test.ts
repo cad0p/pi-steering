@@ -671,6 +671,37 @@ describe("loader: buildConfig", () => {
 		assert.match(hit.message, /branch/);
 	});
 
+	it("suppresses the tracker-name-collision diagnostic when disabledPlugins covers one of the participants", () => {
+		// The diagnostic message itself directs the user to "rename one
+		// tracker or disable one plugin". Following that remedy must
+		// resolve the diagnostic in the same edit — same disable-then-
+		// detect ordering as plugin-name-collision and rule-name-collision.
+		const t = { initial: 0, unknown: -1, modifiers: {} } as const;
+		const a: Plugin = { name: "pa", trackers: { branch: t as never } };
+		const b: Plugin = { name: "pb", trackers: { branch: t as never } };
+		const { diagnostics } = buildConfig([
+			{ plugins: [a, b], disabledPlugins: ["pa"] },
+		]);
+		assert.equal(
+			diagnostics.filter((d) => d.kind === "tracker-name-collision").length,
+			0,
+			`disabling one participant should suppress the diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+	});
+
+	it("still emits a tracker-name-collision diagnostic without the disable", () => {
+		// Inverse of the previous test — same colliding plugins, no
+		// disabledPlugins, the diagnostic still fires.
+		const t = { initial: 0, unknown: -1, modifiers: {} } as const;
+		const a: Plugin = { name: "pa", trackers: { branch: t as never } };
+		const b: Plugin = { name: "pb", trackers: { branch: t as never } };
+		const { diagnostics } = buildConfig([{ plugins: [a, b] }]);
+		assert.equal(
+			diagnostics.filter((d) => d.kind === "tracker-name-collision").length,
+			1,
+		);
+	});
+
 	it("drops a colliding plugin from collision detection when disabledPlugins covers it", () => {
 		// Disabling 'git' in any layer should suppress the cross-layer
 		// duplicate-plugin diagnostic for 'git'. The user's natural

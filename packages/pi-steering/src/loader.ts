@@ -487,13 +487,21 @@ export function mergeBool(
  * the same state dimension is always a bug; the runtime escalates
  * these to a thrown error regardless of the user's strict-mode
  * preference.
+ *
+ * Plugins whose name appears in `disabledPlugins` are skipped before
+ * collision detection so a user resolving the error by following the
+ * diagnostic's own remedy ("disable one plugin") sees the diagnostic
+ * go away in the same edit. Mirrors the disable-then-detect ordering
+ * in {@link mergePlugins} and {@link mergeRules}.
  */
 function detectTrackerNameCollisions(
 	plugins: readonly Plugin[],
+	disabledPlugins: ReadonlySet<string>,
 	diagnostics: SteeringDiagnostic[],
 ): void {
 	const seen = new Map<string, string>(); // trackerName -> pluginName
 	for (const plugin of plugins) {
+		if (disabledPlugins.has(plugin.name)) continue;
 		if (!plugin.trackers) continue;
 		for (const trackerName of Object.keys(plugin.trackers)) {
 			const prior = seen.get(trackerName);
@@ -553,7 +561,7 @@ export function buildConfig(
 	// resolvePlugins, not here. buildConfig handles cross-layer and
 	// within-layer name-collision shapes only.
 	const plugins = mergePlugins(effective, disabledPluginsSet, diagnostics);
-	detectTrackerNameCollisions(plugins, diagnostics);
+	detectTrackerNameCollisions(plugins, disabledPluginsSet, diagnostics);
 
 	const rules = mergeRules(effective, disabledRulesSet, diagnostics);
 	const observers = mergeObservers(effective, diagnostics);

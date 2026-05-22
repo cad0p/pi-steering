@@ -14,7 +14,8 @@
  *
  * Exit codes:
  *   0 - success
- *   1 - invalid arguments / file read / parse error
+ *   1 - invalid arguments / file read / parse error / `list`
+ *       surfaced one or more error-class diagnostics (CI-lint signal)
  *   2 - import-json conversion error ({@link FromJSONError})
  */
 
@@ -242,9 +243,17 @@ async function runList(args: string[]): Promise<number> {
 	// users running `pi-steering list` against a tree with broken layers,
 	// dual-form coexistence, stray files, or cross-layer collisions see
 	// them — restores the pre-refactor visibility the loader's direct
-	// `console.warn` calls used to provide.
-	for (const d of loaderDiagnostics) {
+	// `console.warn` calls used to provide. Track whether any error-
+	// class diagnostic was emitted so the CLI can exit non-zero, giving
+	// CI lint pipelines a binary signal that the config would refuse to
+	// start in production.
+	let sawError = false;
+	const recordDiagnostic = (d: SteeringDiagnostic) => {
+		if (d.type === "error") sawError = true;
 		process.stderr.write(`${formatSingleLineDiagnostic(d)}\n`);
+	};
+	for (const d of loaderDiagnostics) {
+		recordDiagnostic(d);
 	}
 
 	if (layers.length === 0) {
@@ -255,13 +264,13 @@ async function runList(args: string[]): Promise<number> {
 		} else {
 			process.stdout.write("No steering config found.\n");
 		}
-		return 0;
+		return sawError ? 1 : 0;
 	}
 
 	const { config, diagnostics: mergeAndResolveDiagnostics } =
 		runCliMergeWithInfoCapture(layers);
 	for (const d of mergeAndResolveDiagnostics) {
-		process.stderr.write(`${formatSingleLineDiagnostic(d)}\n`);
+		recordDiagnostic(d);
 	}
 
 	if (format === "json") {
@@ -271,7 +280,7 @@ async function runList(args: string[]): Promise<number> {
 	} else {
 		process.stdout.write(renderListText(config));
 	}
-	return 0;
+	return sawError ? 1 : 0;
 }
 
 /**
@@ -319,6 +328,12 @@ FLAGS
   --format=text   (default) human-readable grouped output
   --format=json   machine-readable JSON
   -h, --help      show this help
+
+EXIT CODES
+  0   resolved successfully (warnings, if any, are fail-soft)
+  1   one or more error-class diagnostics surfaced — production
+      runtime would refuse to start on this config; CI lint pipelines
+      can gate on this code
 
 EXAMPLES
   pi-steering list

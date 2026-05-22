@@ -580,7 +580,10 @@ describe("pi-steering list: diagnostics on stderr", () => {
 			};`,
 		);
 		const r = await runCli({ cwd: scratch }, "list");
-		assert.equal(r.code, 0);
+		// Error-class diagnostic → exit 1 so CI pipelines using
+		// `pi-steering list` as a config-lint pre-flight gate the run
+		// without parsing stderr.
+		assert.equal(r.code, 1);
 		assert.match(
 			r.stderr,
 			/\[pi-steering\] ERROR: tracker name collision/,
@@ -614,7 +617,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 			};`,
 		);
 		const r = await runCli({ cwd: scratch }, "list");
-		assert.equal(r.code, 0);
+		assert.equal(r.code, 1);
 		assert.match(
 			r.stderr,
 			/\[pi-steering\] ERROR: tracker name "events" is reserved/,
@@ -645,7 +648,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 			};`,
 		);
 		const r = await runCli({ cwd: scratch }, "list");
-		assert.equal(r.code, 0);
+		assert.equal(r.code, 1);
 		assert.match(
 			r.stderr,
 			/\[pi-steering\] ERROR: rule name "bad name" \(plugin "forge-plugin"\).*disallowed/,
@@ -653,7 +656,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		);
 	});
 
-	it("a clean config produces no diagnostic lines on stderr", async () => {
+	it("a clean config produces no diagnostic lines on stderr and exits 0", async () => {
 		writeScratchConfig(
 			scratch,
 			`export default {
@@ -677,6 +680,24 @@ describe("pi-steering list: diagnostics on stderr", () => {
 			diagnosticLines.length,
 			0,
 			`expected zero diagnostic lines; got: ${JSON.stringify(diagnosticLines)}`,
+		);
+	});
+
+	it("a warning-only diagnostic stream still exits 0 (warnings are fail-soft on the CLI)", async () => {
+		// Warning-class diagnostics like `layer-stray-file` are advisory
+		// — they don't prevent production from starting on this config.
+		// CI pipelines treating exit 1 as "config rejected" should not
+		// trip on warnings; the CLI only escalates exit code on error-
+		// class diagnostics.
+		const pi = join(scratch, ".pi", "steering");
+		mkdirSync(pi, { recursive: true });
+		writeFileSync(join(pi, "rules.json"), "{}", "utf8");
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		assert.match(
+			r.stderr,
+			/ignoring non-\.ts file/,
+			`expected stray-file diagnostic on stderr; got: ${r.stderr}`,
 		);
 	});
 });

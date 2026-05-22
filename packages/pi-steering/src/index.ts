@@ -74,7 +74,7 @@ export default function register(pi: ExtensionAPI): void {
 		} catch (err) {
 			console.error(
 				`[pi-steering] Failed to load steering config: ` +
-					`${err instanceof Error ? err.message : String(err)}. ` +
+					`${err instanceof Error ? err.message : String(err)}\n` +
 					`Extension will not block any tool calls for this session.`,
 			);
 			evaluator = null;

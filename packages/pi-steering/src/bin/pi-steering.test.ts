@@ -531,3 +531,60 @@ describe("pi-steering list", () => {
 		assert.equal(disabled.disabled, true);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// list: diagnostic surfacing on stderr
+// ---------------------------------------------------------------------------
+
+describe("pi-steering list: diagnostics on stderr", () => {
+	it("writes a layer-stray-file diagnostic to stderr in the legacy single-line shape", async () => {
+		const pi = join(scratch, ".pi", "steering");
+		mkdirSync(pi, { recursive: true });
+		writeFileSync(join(pi, "rules.json"), "{}", "utf8");
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		// Diagnostic on stderr; stdout shows the empty-config render.
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] .*rules\.json: ignoring non-\.ts file under \.pi\/steering\//,
+			`expected stray-file diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("writes a layer-import-failed diagnostic to stderr when a layer fails to import", async () => {
+		const pi = join(scratch, ".pi");
+		mkdirSync(pi, { recursive: true });
+		writeFileSync(
+			join(pi, "steering.ts"),
+			"export default { rules: {{ not valid ts }} };",
+			"utf8",
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] .*\.pi\/steering\.ts: failed to import:/,
+			`expected layer-import-failed diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("writes an error-class merge diagnostic to stderr with the ERROR: tag", async () => {
+		writeScratchConfig(
+			scratch,
+			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
+			export default {
+				plugins: [
+					{ name: "pa", trackers: { branch: t } },
+					{ name: "pb", trackers: { branch: t } },
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: tracker name collision/,
+			`expected ERROR-tagged tracker collision on stderr; got: ${r.stderr}`,
+		);
+	});
+});

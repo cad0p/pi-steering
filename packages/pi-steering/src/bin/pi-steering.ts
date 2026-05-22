@@ -28,8 +28,30 @@ import type {
 	Observer,
 	Rule,
 	SteeringConfig,
+	SteeringDiagnostic,
 	TopLevelWhenClause,
 } from "../schema.ts";
+
+/**
+ * Render a single diagnostic in the legacy single-line stderr shape
+ * the loader emitted via `console.warn` before the strict-mode
+ * refactor:
+ *
+ *   `[pi-steering] /path/to/file: failed to import: ...`           (warning)
+ *   `[pi-steering] ERROR: tracker name collision: ...`             (error)
+ *
+ * Errors are tagged with an `ERROR:` prefix so a user grepping for
+ * them in CI logs has a clear handle. Path prefix is conditional on
+ * {@link SteeringDiagnostic.path} being set — cross-layer collisions
+ * (no source path) render with the message alone.
+ *
+ * Exported for unit testing the format without spinning up the CLI.
+ */
+export function formatCliDiagnostic(d: SteeringDiagnostic): string {
+	const severity = d.type === "error" ? "ERROR: " : "";
+	const pathPrefix = d.path !== undefined ? `${d.path}: ` : "";
+	return `[pi-steering] ${severity}${pathPrefix}${d.message}`;
+}
 
 /**
  * CLI entrypoint. Exported (not just `void main(...)` at module top)
@@ -221,8 +243,11 @@ async function runList(args: string[]): Promise<number> {
 	// wanting to see built-ins can check the package README or run with
 	// a verbose flag we can add later.
 	let layers;
+	let loaderDiagnostics: readonly SteeringDiagnostic[] = [];
 	try {
-		({ layers } = await loadConfigs(process.cwd()));
+		({ layers, diagnostics: loaderDiagnostics } = await loadConfigs(
+			process.cwd(),
+		));
 	} catch (err) {
 		process.stderr.write(
 			`pi-steering: failed to load config: ${
@@ -230,6 +255,15 @@ async function runList(args: string[]): Promise<number> {
 			}\n`,
 		);
 		return 1;
+	}
+
+	// Surface loader-side diagnostics on stderr in the legacy shape so
+	// users running `pi-steering list` against a tree with broken layers,
+	// dual-form coexistence, stray files, or cross-layer collisions see
+	// them — restores the pre-refactor visibility the loader's direct
+	// `console.warn` calls used to provide.
+	for (const d of loaderDiagnostics) {
+		process.stderr.write(`${formatCliDiagnostic(d)}\n`);
 	}
 
 	if (layers.length === 0) {
@@ -243,7 +277,10 @@ async function runList(args: string[]): Promise<number> {
 		return 0;
 	}
 
-	const { config } = buildConfig(layers);
+	const { config, diagnostics: mergeDiagnostics } = buildConfig(layers);
+	for (const d of mergeDiagnostics) {
+		process.stderr.write(`${formatCliDiagnostic(d)}\n`);
+	}
 
 	if (format === "json") {
 		process.stdout.write(

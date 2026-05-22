@@ -590,18 +590,29 @@ export function buildConfig(
 
 /**
  * Convenience: load all layers for `cwd`, then merge with optional
- * `defaults`. Equivalent to
- * `buildConfig((await loadConfigs(cwd)).layers, defaults).config`.
+ * `defaults`. Equivalent to running {@link loadConfigs} then
+ * {@link buildConfig} and concatenating their diagnostics arrays
+ * — returns the same `{ config, diagnostics }` shape "the loader saw
+ * EVERYTHING up to the runtime hand-off" so callers don't have to
+ * stitch the two diagnostic streams together themselves.
  *
- * Diagnostics produced by {@link loadConfigs} and {@link buildConfig}
- * are discarded by this convenience wrapper. Callers that want
- * structured diagnostics should call {@link loadConfigs} +
- * {@link buildConfig} directly.
+ * The runtime (`buildSessionRuntime`) does NOT use this wrapper
+ * directly because it needs the raw layer list for the two-pass
+ * disable-defaults probe. External callers building their own
+ * extensions or CLIs that want the full merged config + diagnostics
+ * in one call should reach for this.
  */
 export async function loadSteeringConfig(
 	cwd: string,
 	defaults?: SteeringConfig,
-): Promise<SteeringConfig> {
-	const { layers } = await loadConfigs(cwd);
-	return buildConfig(layers, defaults).config;
+): Promise<{ config: SteeringConfig; diagnostics: SteeringDiagnostic[] }> {
+	const { layers, diagnostics: loaderDiagnostics } = await loadConfigs(cwd);
+	const { config, diagnostics: mergeDiagnostics } = buildConfig(
+		layers,
+		defaults,
+	);
+	return {
+		config,
+		diagnostics: [...loaderDiagnostics, ...mergeDiagnostics],
+	};
 }

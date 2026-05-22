@@ -867,15 +867,16 @@ describe("loader: loadSteeringConfig", () => {
 				`{ rules: [{ name: "r", tool: "bash", field: "command", pattern: "^git", reason: "r" }] }`,
 			),
 		);
-		const merged = await loadSteeringConfig(cwd);
+		const { config: merged, diagnostics } = await loadSteeringConfig(cwd);
 		assert.equal(merged.rules?.length, 1);
 		assert.equal(merged.rules?.[0]?.name, "r");
+		assert.deepEqual(diagnostics, []);
 	});
 
 	it("applies caller-supplied defaults when no layer sets a field", async () => {
 		const cwd = join(tmp, "p");
 		mkdirSync(cwd, { recursive: true });
-		const merged = await loadSteeringConfig(cwd, {
+		const { config: merged, diagnostics } = await loadSteeringConfig(cwd, {
 			defaultNoOverride: true,
 			rules: [
 				{
@@ -889,5 +890,36 @@ describe("loader: loadSteeringConfig", () => {
 		});
 		assert.equal(merged.defaultNoOverride, true);
 		assert.equal(merged.rules?.[0]?.name, "built-in");
+		assert.deepEqual(diagnostics, []);
+	});
+
+	it("surfaces both loader-side and merge-side diagnostics in a single array", async () => {
+		// Stage a dual-form coexistence (loader-side warning) plus a
+		// within-layer rule-name collision (merge-side warning) so we
+		// can confirm both streams flow through the wrapper.
+		const cwd = join(tmp, "p");
+		mkdirSync(cwd, { recursive: true });
+		writeConfig(
+			join(cwd, ".pi", "steering.ts"),
+			configModule("{}"),
+		);
+		writeConfig(
+			join(cwd, ".pi", "steering", "index.ts"),
+			configModule(
+				`{ rules: [
+					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
+					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+				] }`,
+			),
+		);
+		const { diagnostics } = await loadSteeringConfig(cwd);
+		assert.ok(
+			diagnostics.some((d) => d.kind === "layer-form-coexistence"),
+			`expected a layer-form-coexistence diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.ok(
+			diagnostics.some((d) => d.kind === "rule-name-collision"),
+			`expected a rule-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
 	});
 });

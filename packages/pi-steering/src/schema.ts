@@ -1717,14 +1717,16 @@ export interface SteeringConfig {
  *
  * The set is split between two surfaces:
  *   - LOADER (`layer-form-coexistence`, `layer-import-failed`,
- *     `layer-stray-file`) — produced while walking up the filesystem
- *     and importing per-layer config files.
- *   - PLUGIN-MERGER (added in later refactor steps) — produced while
- *     resolving plugin shapes into the runtime registry.
- *
- * Today this union covers only the LOADER kinds. The plugin-merger
- * categories land in a follow-up refactor that unifies
- * `PluginResolveWarning` into this shape.
+ *     `layer-stray-file`, `plugin-name-collision`,
+ *     `rule-name-collision`, `observer-name-collision`,
+ *     `tracker-name-collision`) — produced while walking up the
+ *     filesystem, importing per-layer config files, and merging
+ *     layers into a single effective config.
+ *   - PLUGIN-MERGER (`predicate-collision`, `observer-collision`,
+ *     `rule-collision`, `plugin-disabled`, `extension-orphan`,
+ *     `rule-disabled`, `reserved-tracker-name`,
+ *     `reserved-predicate-key`) — produced while resolving plugin
+ *     shapes into the runtime registry.
  */
 export type SteeringDiagnosticKind =
 	/**
@@ -1772,7 +1774,60 @@ export type SteeringDiagnosticKind =
 	 * bug, not a soft override. Rename one tracker or disable one
 	 * plugin.
 	 */
-	| "tracker-name-collision";
+	| "tracker-name-collision"
+	/**
+	 * Two plugins both register a predicate handler under the same
+	 * `when.<key>`. The first-registered handler wins; the later
+	 * plugin's handler is dropped.
+	 */
+	| "predicate-collision"
+	/**
+	 * Two plugins both register an observer with the same `name`.
+	 * The first-registered observer wins; the later plugin's observer
+	 * is dropped. Distinct from `observer-name-collision` which
+	 * applies to within-layer duplicates in user-authored config.
+	 */
+	| "observer-collision"
+	/**
+	 * Two plugins both ship a rule with the same `name`. The
+	 * first-registered rule wins; the later plugin's rule is dropped.
+	 * Distinct from `rule-name-collision` which applies to
+	 * within-layer duplicates in user-authored config.
+	 */
+	| "rule-collision"
+	/**
+	 * A plugin was skipped because its name appears in the merged
+	 * config's `disabledPlugins`. Informational — surfaced so a user
+	 * debugging "why isn't my plugin firing?" can see the disable take
+	 * effect.
+	 */
+	| "plugin-disabled"
+	/**
+	 * A plugin's `trackerExtensions` references a tracker name that
+	 * no plugin (and no built-in walker tracker) registers. The
+	 * extension is ignored.
+	 */
+	| "extension-orphan"
+	/**
+	 * A plugin-shipped rule was removed from the merged rule list
+	 * because its name appears in the merged config's `disabledRules`.
+	 * Informational — mirrors `plugin-disabled`.
+	 */
+	| "rule-disabled"
+	/**
+	 * A plugin attempts to register a tracker under a reserved name
+	 * (e.g. `events`). Always an error — reserved names are owned by
+	 * the engine. Rename the tracker.
+	 */
+	| "reserved-tracker-name"
+	/**
+	 * A plugin attempts to register a predicate handler under a
+	 * reserved key (an operator field like `not` or a modifier key
+	 * like `onUnknown`). Always an error — reserved keys collide
+	 * with the schema's operator/modifier surface. Rename the
+	 * predicate.
+	 */
+	| "reserved-predicate-key";
 
 /**
  * Structured issue surfaced while loading a steering config.

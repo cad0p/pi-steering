@@ -59,7 +59,7 @@ describe("resolvePlugins: empty input", () => {
 		assert.deepEqual(state.trackerModifiers, {});
 		assert.deepEqual(state.composedTrackers, {});
 		assert.deepEqual(state.rules, []);
-		assert.deepEqual(state.warnings, []);
+		assert.deepEqual(state.diagnostics, []);
 	});
 });
 
@@ -87,7 +87,7 @@ describe("resolvePlugins: single plugin surface", () => {
 		assert.equal(state.composedTrackers["t"], tracker);
 		assert.deepEqual(state.rules, [rule]);
 		assert.deepEqual(state.rulePluginOwners, { r: "p" });
-		assert.deepEqual(state.warnings, []);
+		assert.deepEqual(state.diagnostics, []);
 	});
 });
 
@@ -119,11 +119,11 @@ describe("resolvePlugins: predicate collision (soft)", () => {
 
 		const state = resolvePlugins([p1, p2], {});
 		assert.equal(state.predicates["branch"], keptHandler);
-		assert.equal(state.warnings.length, 1);
-		assert.equal(state.warnings[0]?.kind, "predicate-collision");
-		assert.match(state.warnings[0]?.message ?? "", /when\.branch/);
-		assert.match(state.warnings[0]?.message ?? "", /first/);
-		assert.match(state.warnings[0]?.message ?? "", /second/);
+		assert.equal(state.diagnostics.length, 1);
+		assert.equal(state.diagnostics[0]?.kind, "predicate-collision");
+		assert.match(state.diagnostics[0]?.message ?? "", /when\.branch/);
+		assert.match(state.diagnostics[0]?.message ?? "", /first/);
+		assert.match(state.diagnostics[0]?.message ?? "", /second/);
 	});
 });
 
@@ -137,8 +137,8 @@ describe("resolvePlugins: observer collision (soft)", () => {
 		const state = resolvePlugins([p1, p2], {});
 		assert.deepEqual(state.observers, [kept]);
 		assert.equal(state.observers[0], kept, "first-registered instance kept");
-		assert.equal(state.warnings.length, 1);
-		assert.equal(state.warnings[0]?.kind, "observer-collision");
+		assert.equal(state.diagnostics.length, 1);
+		assert.equal(state.diagnostics[0]?.kind, "observer-collision");
 	});
 });
 
@@ -152,8 +152,8 @@ describe("resolvePlugins: rule collision (soft)", () => {
 		const state = resolvePlugins([p1, p2], {});
 		assert.equal(state.rules.length, 1);
 		assert.equal(state.rules[0], kept);
-		assert.equal(state.warnings.length, 1);
-		assert.equal(state.warnings[0]?.kind, "rule-collision");
+		assert.equal(state.diagnostics.length, 1);
+		assert.equal(state.diagnostics[0]?.kind, "rule-collision");
 	});
 });
 
@@ -174,21 +174,29 @@ describe("resolvePlugins: tracker collision (hard error)", () => {
 		);
 	});
 
-	it('throws when a plugin registers the reserved tracker name "events"', () => {
+	it('records an error-class diagnostic when a plugin registers the reserved tracker name "events"', () => {
 		// `walkerState.events` is written by the evaluator's speculative-
 		// entry synthesis pass (see evaluator.ts `prepareBashState`). A
 		// plugin-registered `events` tracker would be silently clobbered
 		// when the evaluator merges synthesized entries in, breaking
-		// `when.happened` with `in: "tool_call"`. Schema JSDoc promises rejection;
-		// this test holds the promise honest.
+		// `when.happened` with `in: "tool_call"`. Schema JSDoc promises
+		// rejection; this test holds the promise honest.
 		const p: Plugin = {
 			name: "broken",
 			trackers: { events: mkTracker("x") as Tracker<unknown> },
 		};
-		assert.throws(
-			() => resolvePlugins([p], {}),
-			/tracker name "events" is reserved/,
+		const state = resolvePlugins([p], {});
+		const hit = state.diagnostics.find(
+			(d) => d.kind === "reserved-tracker-name",
 		);
+		assert.ok(
+			hit,
+			`expected a reserved-tracker-name diagnostic; got: ${JSON.stringify(state.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /tracker name "events" is reserved/);
+		// The reserved tracker is dropped, not added to the trackers map.
+		assert.ok(!("events" in state.trackers));
 	});
 });
 
@@ -211,7 +219,7 @@ describe("resolvePlugins: tracker extensions", () => {
 		};
 
 		const state = resolvePlugins([owner, extender], {});
-		assert.deepEqual(state.warnings, []);
+		assert.deepEqual(state.diagnostics, []);
 		assert.equal(state.trackers["cwd"], tracker, "raw tracker preserved");
 		const composed = state.composedTrackers["cwd"]!;
 		assert.notEqual(
@@ -235,9 +243,9 @@ describe("resolvePlugins: tracker extensions", () => {
 			},
 		};
 		const state = resolvePlugins([extender], {});
-		assert.equal(state.warnings.length, 1);
-		assert.equal(state.warnings[0]?.kind, "extension-orphan");
-		assert.match(state.warnings[0]?.message ?? "", /"nosuch"/);
+		assert.equal(state.diagnostics.length, 1);
+		assert.equal(state.diagnostics[0]?.kind, "extension-orphan");
+		assert.match(state.diagnostics[0]?.message ?? "", /"nosuch"/);
 		assert.deepEqual(state.trackerModifiers, {});
 		assert.deepEqual(state.composedTrackers, {});
 	});
@@ -258,7 +266,7 @@ describe("resolvePlugins: tracker extensions", () => {
 		};
 		const state = resolvePlugins([extender], {}, ["cwd"]);
 		assert.equal(
-			state.warnings.filter((w) => w.kind === "extension-orphan").length,
+			state.diagnostics.filter((w) => w.kind === "extension-orphan").length,
 			0,
 			"no orphan warning when the tracker name is declared built-in",
 		);
@@ -343,7 +351,7 @@ describe("resolvePlugins: config filters", () => {
 		const state = resolvePlugins([plugin], { disabledRules: ["drop-me"] });
 		assert.equal(state.rules.length, 1);
 		assert.equal(state.rules[0]?.name, "keep-me");
-		const warn = state.warnings.find((w) => w.kind === "rule-disabled");
+		const warn = state.diagnostics.find((w) => w.kind === "rule-disabled");
 		assert.ok(warn, "expected rule-disabled warning");
 	});
 
@@ -364,7 +372,7 @@ describe("resolvePlugins: config filters", () => {
 		assert.deepEqual(state.rules, []);
 		assert.ok(!("branch" in state.predicates));
 		assert.ok("other" in state.predicates);
-		const warn = state.warnings.find((w) => w.kind === "plugin-disabled");
+		const warn = state.diagnostics.find((w) => w.kind === "plugin-disabled");
 		assert.ok(warn, "expected plugin-disabled warning");
 		assert.match(warn?.message ?? "", /"git"/);
 	});

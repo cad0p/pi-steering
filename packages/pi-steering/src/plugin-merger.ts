@@ -39,6 +39,7 @@ import type {
 	ReservedPredicateKey,
 	Rule,
 	SteeringConfig,
+	SteeringDiagnostic,
 } from "./schema.ts";
 import {
 	isReservedPredicateKey,
@@ -101,32 +102,6 @@ export function validateName(
 }
 
 /**
- * Soft warning surfaced during plugin resolution. The runtime logs these
- * at startup; tests consume the array directly.
- */
-export interface PluginResolveWarning {
-	/**
-	 * Discriminator for what kind of collision / misconfiguration fired.
-	 *
-	 *   - `"predicate-collision"`  — two plugins register `when.<same-key>`.
-	 *   - `"observer-collision"`   — two observers share the same name.
-	 *   - `"rule-collision"`       — two plugin-shipped rules share a name.
-	 *   - `"plugin-disabled"`      — a plugin was skipped via `disabledPlugins`.
-	 *   - `"extension-orphan"`     — trackerExtension targets a tracker no
-	 *                                plugin registers.
-	 *   - `"rule-disabled"`        — a rule was removed via `config.disabledRules`.
-	 */
-	kind:
-		| "predicate-collision"
-		| "observer-collision"
-		| "rule-collision"
-		| "plugin-disabled"
-		| "extension-orphan"
-		| "rule-disabled";
-	message: string;
-}
-
-/**
  * Fully-resolved plugin state: the evaluator + observer dispatcher drive
  * off this shape. All maps / arrays are freshly built and safe for the
  * caller to stash on the extension closure.
@@ -175,8 +150,13 @@ export interface ResolvedPluginState {
 	 */
 	rulePluginOwners: Record<string, string>;
 
-	/** Non-fatal issues observed during merge. */
-	warnings: PluginResolveWarning[];
+	/**
+	 * Diagnostics observed while resolving plugins. Includes both
+	 * non-fatal collisions (warning class) and reserved-name violations
+	 * that the runtime escalates to a thrown error regardless of
+	 * strict-mode settings.
+	 */
+	diagnostics: SteeringDiagnostic[];
 }
 
 /**
@@ -243,10 +223,17 @@ function composeTracker(
  *
  * Collision semantics per the ADR:
  *   - predicate / observer / plugin-shipped-rule name collision — first
- *     wins, WARN logged.
- *   - tracker name collision — THROWS.
- *   - trackerExtension targeting an unregistered tracker — WARN,
- *     extension ignored.
+ *     wins, recorded as a warning-class diagnostic.
+ *   - tracker name collision — still throws (the loader-side
+ *     buildConfig records this as an error-class diagnostic before
+ *     reaching this function; the throw is defense-in-depth for
+ *     direct resolvePlugins callers that bypass buildConfig).
+ *   - reserved tracker name (`events`) and reserved predicate keys
+ *     (operator/modifier surface) — recorded as error-class
+ *     diagnostics; the runtime escalates to a thrown error regardless
+ *     of strict-mode settings.
+ *   - trackerExtension targeting an unregistered tracker — recorded
+ *     as a warning-class diagnostic, extension ignored.
  *
  * `knownBuiltinTrackers` lists tracker names the caller guarantees are
  * injected at a later wiring stage (e.g. the evaluator's built-in
@@ -261,7 +248,7 @@ export function resolvePlugins(
 	config: SteeringConfig,
 	knownBuiltinTrackers: readonly string[] = [],
 ): ResolvedPluginState {
-	const warnings: PluginResolveWarning[] = [];
+	const diagnostics: SteeringDiagnostic[] = [];
 	const disabledPlugins = new Set(config.disabledPlugins ?? []);
 	const disabledRules = new Set(config.disabledRules ?? []);
 
@@ -284,12 +271,13 @@ export function resolvePlugins(
 	}
 
 	// Filter plugins honoring `disabledPlugins`. Record disabled ones so
-	// callers see them in the warning log (handy for debugging a rule
-	// that inexplicably stopped firing).
+	// callers see them in the diagnostics array (handy for debugging a
+	// rule that inexplicably stopped firing).
 	const activePlugins: Plugin[] = [];
 	for (const plugin of plugins) {
 		if (disabledPlugins.has(plugin.name)) {
-			warnings.push({
+			diagnostics.push({
+				type: "warning",
 				kind: "plugin-disabled",
 				message: `plugin "${plugin.name}" disabled via config.disabledPlugins`,
 			});
@@ -310,13 +298,16 @@ export function resolvePlugins(
 			// the evaluator merges synthesized speculative entries under that
 			// name (see schema.ts `PredicateContext.walkerState` JSDoc).
 			if (name === "events") {
-				throw new Error(
-					`[pi-steering] tracker name "events" is reserved: ` +
-						`plugin "${plugin.name}" registers a tracker under that ` +
-						`name but the evaluator uses it on \`walkerState\` for ` +
-						`speculative-entry synthesis consumed by the built-in ` +
-						`\`when.happened\` predicate. Rename the tracker.`,
-				);
+				diagnostics.push({
+					type: "error",
+					kind: "reserved-tracker-name",
+					message:
+						`tracker name "events" is reserved: plugin "${plugin.name}" ` +
+						"registers a tracker under that name but the evaluator uses " +
+						"it on `walkerState` for speculative-entry synthesis consumed " +
+						"by the built-in `when.happened` predicate. Rename the tracker.",
+				});
+				continue;
 			}
 			const prior = trackerOwner.get(name);
 			if (prior !== undefined) {
@@ -349,7 +340,8 @@ export function resolvePlugins(
 			plugin.trackerExtensions,
 		)) {
 			if (!(trackerName in trackers) && !builtins.has(trackerName)) {
-				warnings.push({
+				diagnostics.push({
+					type: "warning",
 					kind: "extension-orphan",
 					message:
 						`plugin "${plugin.name}" extends tracker "${trackerName}" ` +
@@ -418,17 +410,22 @@ export function resolvePlugins(
 				// `key` is narrowed to `ReservedPredicateKey` by the
 				// `isReservedPredicateKey` type guard above.
 				const suggestion = suggestions[key];
-				throw new Error(
-					`[pi-steering] Plugin "${plugin.name}" attempted to register ` +
-						`reserved predicate key "${key}". This name conflicts with ` +
-						`the schema's operator/modifier surface ` +
-						`(${RESERVED_PREDICATE_KEYS.join(", ")}). Choose a different ` +
-						`name (e.g., ${suggestion}).`,
-				);
+				diagnostics.push({
+					type: "error",
+					kind: "reserved-predicate-key",
+					message:
+						`Plugin "${plugin.name}" attempted to register reserved ` +
+						`predicate key "${key}". This name conflicts with the ` +
+						`schema's operator/modifier surface ` +
+						`(${RESERVED_PREDICATE_KEYS.join(", ")}). Choose a ` +
+						`different name (e.g., ${suggestion}).`,
+				});
+				continue;
 			}
 			const prior = predicateOwner.get(key);
 			if (prior !== undefined) {
-				warnings.push({
+				diagnostics.push({
+					type: "warning",
 					kind: "predicate-collision",
 					message:
 						`duplicate predicate "when.${key}" — plugins "${prior}" ` +
@@ -449,7 +446,8 @@ export function resolvePlugins(
 		for (const observer of plugin.observers) {
 			const prior = observerOwner.get(observer.name);
 			if (prior !== undefined) {
-				warnings.push({
+				diagnostics.push({
+					type: "warning",
 					kind: "observer-collision",
 					message:
 						`duplicate observer "${observer.name}" — plugins "${prior}" ` +
@@ -473,7 +471,8 @@ export function resolvePlugins(
 		if (!plugin.rules) continue;
 		for (const rule of plugin.rules) {
 			if (disabledRules.has(rule.name)) {
-				warnings.push({
+				diagnostics.push({
+					type: "warning",
 					kind: "rule-disabled",
 					message: `rule "${rule.name}" (from plugin "${plugin.name}") disabled via config.disabledRules`,
 				});
@@ -481,7 +480,8 @@ export function resolvePlugins(
 			}
 			const prior = ruleOwner.get(rule.name);
 			if (prior !== undefined) {
-				warnings.push({
+				diagnostics.push({
+					type: "warning",
 					kind: "rule-collision",
 					message:
 						`duplicate rule "${rule.name}" — plugins "${prior}" ` +
@@ -502,6 +502,6 @@ export function resolvePlugins(
 		composedTrackers,
 		rules,
 		rulePluginOwners: Object.fromEntries(ruleOwner),
-		warnings,
+		diagnostics,
 	};
 }

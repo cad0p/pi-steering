@@ -567,7 +567,7 @@ describe("defaults: disabledPlugins: [\"git\"] opts out of the real git plugin",
 		// CLI surfaces these in `list`. Spot-check that the warning fires
 		// here too, so a regression that silently accepts an unknown name
 		// also trips this test.
-		const warn = resolved.warnings.find((w) => w.kind === "plugin-disabled");
+		const warn = resolved.diagnostics.find((w) => w.kind === "plugin-disabled");
 		assert.ok(warn, "expected plugin-disabled warning for git");
 		assert.match(warn?.message ?? "", /"git"/);
 	});

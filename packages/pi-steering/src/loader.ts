@@ -175,13 +175,17 @@ export function findConfigFile(dir: string): {
 	const flatExists = flatForm !== undefined && existsSync(flatForm);
 	let diagnostic: SteeringDiagnostic | null = null;
 	if (indexExists && flatExists && indexForm !== undefined) {
+		// `path` points at the directory holding the conflict so the
+		// renderer's `${path}: ${message}` prefix surfaces the parent
+		// once and the message names which two forms coexist. The winning
+		// file path is implicit (the directory form always wins).
 		diagnostic = {
 			type: "warning",
 			kind: "layer-form-coexistence",
-			path: indexForm,
+			path: dir,
 			message:
-				`both .pi/steering.ts and .pi/steering/index.ts exist at ${dir}; ` +
-				"using directory form. Delete .pi/steering.ts to remove this warning.",
+				"both .pi/steering.ts and .pi/steering/index.ts exist; using " +
+				"directory form. Delete .pi/steering.ts to remove this warning.",
 		};
 	}
 	if (indexExists) return { file: indexForm ?? null, diagnostic };
@@ -274,7 +278,7 @@ export async function loadConfigs(cwd: string): Promise<{
 						type: "warning",
 						kind: "layer-stray-file",
 						path: stray,
-						message: `ignoring non-.ts file under .pi/steering/: ${stray}`,
+						message: "ignoring non-.ts file under .pi/steering/",
 					});
 				}
 			}
@@ -287,7 +291,7 @@ export async function loadConfigs(cwd: string): Promise<{
 				type: "warning",
 				kind: "layer-import-failed",
 				path: file,
-				message: `failed to load config at ${file}: ${String(err)}`,
+				message: `failed to import: ${String(err)}`,
 			});
 		}
 	}

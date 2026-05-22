@@ -162,10 +162,9 @@ describe("loader: findConfigFile", () => {
 		assert.ok(diagnostic, "expected a diagnostic when both forms coexist");
 		assert.equal(diagnostic.kind, "layer-form-coexistence");
 		assert.equal(diagnostic.type, "warning");
-		assert.equal(
-			diagnostic.path,
-			join(tmp, ".pi", "steering", "index.ts"),
-		);
+		// `path` points at the parent directory — the renderer's `${path}:`
+		// prefix surfaces the dir once and the message names the conflict.
+		assert.equal(diagnostic.path, tmp);
 		assert.match(
 			diagnostic.message,
 			/both .pi\/steering.ts and .pi\/steering\/index.ts/,
@@ -341,7 +340,7 @@ describe("loader: loadConfigs", () => {
 		);
 		assert.equal(hit.type, "warning");
 		assert.equal(hit.path, join(cwd, ".pi", "steering.ts"));
-		assert.match(hit.message, /failed to load config/);
+		assert.match(hit.message, /failed to import/);
 	});
 
 	it("records a layer-import-failed diagnostic when the default export is not an object", async () => {

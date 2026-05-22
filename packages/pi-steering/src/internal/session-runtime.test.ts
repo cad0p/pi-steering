@@ -236,7 +236,7 @@ describe("formatAggregatedDiagnostics: rule-based spec", () => {
 				type: "warning",
 				kind: "layer-import-failed",
 				path: "/u/.pi/steering.ts",
-				message: "failed to load config at /u/.pi/steering.ts: SyntaxError",
+				message: "failed to import: SyntaxError",
 			},
 			{
 				type: "error",

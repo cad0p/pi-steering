@@ -29,7 +29,7 @@ import {
 	type EvaluatorRuntime,
 	type EvaluatorHost,
 } from "../evaluator.ts";
-import { buildConfig, loadConfigs } from "../loader.ts";
+import { buildConfig, loadConfigs, mergeBool } from "../loader.ts";
 import {
 	buildObserverDispatcher,
 	type ObserverDispatcher,
@@ -81,19 +81,15 @@ function formatLegacyConsoleWarn(
 
 /**
  * Build the per-session evaluator + observer dispatcher from the walk-
- * up config rooted at `cwd`. Two-pass merge so `disableDefaults: true`
- * in any layer is honored before defaults are injected:
+ * up config rooted at `cwd`. `disableDefaults: true` in any layer is
+ * honored before defaults are injected:
  *
  *   1. `loadConfigs(cwd)` — async IO, read every layer from cwd →
  *      $HOME.
- *   2. `buildConfig(layers)` with NO defaults — lets us peek at the
- *      merged `disableDefaults` flag without DEFAULT_RULES /
- *      DEFAULT_PLUGINS polluting the result. Diagnostics from this
- *      probe are discarded; the second buildConfig pass produces the
- *      authoritative diagnostic stream.
- *   3. Re-run `buildConfig(layers, defaults?)` with defaults
- *      conditional on `disableDefaults`, producing the effective
- *      config.
+ *   2. `mergeBool(layers, "disableDefaults")` — inner-wins peek
+ *      across raw layers without paying for a full merge.
+ *   3. `buildConfig(layers, defaults?)` with defaults conditional on
+ *      the disableDefaults peek, producing the effective config.
  *   4. Apply `config.disabledRules` to the merged `rules` — the plugin
  *      merger handles this for plugin-shipped rules, but
  *      `buildConfig` leaves user/default rules in `config.rules`
@@ -125,14 +121,12 @@ export async function buildSessionRuntime(
 		await loadConfigs(cwd);
 	aggregated.push(...loaderDiagnostics);
 
-	// First merge without defaults: we only need `disableDefaults` at
-	// this point, and layering defaults in would make the check
-	// meaningless (defaults shouldn't themselves opt into
-	// `disableDefaults`). Probe diagnostics are discarded; the second
-	// pass below produces the authoritative diagnostic stream so we
-	// don't double-report.
-	const { config: probe } = buildConfig(rawLayers);
-	const defaults: SteeringConfig | undefined = probe.disableDefaults
+	// Peek at `disableDefaults` across raw layers without paying for
+	// a full merge. `mergeBool` walks layers inner-first and returns the
+	// first explicit value, matching `buildConfig`'s precedence.
+	const disableDefaults =
+		mergeBool(rawLayers, "disableDefaults") === true;
+	const defaults: SteeringConfig | undefined = disableDefaults
 		? undefined
 		: { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS };
 	const { config: merged, diagnostics: mergeDiagnostics } = buildConfig(

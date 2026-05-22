@@ -472,10 +472,12 @@ function mergeStringUnion(
  * merged correctly" without also asserting "the field-specific
  * default was applied".
  *
- * Exported for the bridge runtime, which needs to peek at
- * `disableDefaults` before deciding whether to layer in
- * DEFAULT_RULES / DEFAULT_PLUGINS, and at `failOnWarnings` before
- * deciding the strict-mode throw policy.
+ * Exported so a future single-pass `buildConfig` can peek at
+ * `disableDefaults` / `failOnWarnings` without re-reading the merged
+ * config; no current consumer outside this file. The two-pass probe
+ * in `buildSessionRuntime` and `loadHarness` does not yet use this
+ * directly — they read `merged.disableDefaults` / `merged.failOnWarnings`
+ * off the probe's merged config.
  */
 export function mergeBool(
 	layers: readonly SteeringConfig[],

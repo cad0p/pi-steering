@@ -80,11 +80,8 @@ import {
 	matchesWatch,
 	type ObserverDispatcher,
 } from "../observer-dispatcher.ts";
+import { runMergerWithLoaderShortCircuit } from "../internal/session-runtime.ts";
 import {
-	buildConfig,
-} from "../loader.ts";
-import {
-	resolvePlugins,
 	type ResolvedPluginState,
 } from "../plugin-merger.ts";
 import { dropUnusedObservers } from "../internal/drop-unused-observers.ts";
@@ -219,19 +216,26 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 
 	// Run the same merge that production does (single layer here, since
 	// loadHarness operates on an in-memory config rather than a walk-up
-	// chain). The diagnostics surface within-layer rule-name and
-	// observer-name collisions, plus tracker-name collisions and the
-	// cross-config plugin-name collisions that `includeDefaults: true`
-	// can introduce against DEFAULT_PLUGINS.
+	// chain). The shared helper short-circuits between buildConfig and
+	// resolvePlugins on error-class merge diagnostics so a
+	// `tracker-name-collision` flagged by `buildConfig` is not also
+	// re-flagged by `resolvePlugins`. The diagnostics surface within-
+	// layer rule-name and observer-name collisions, plus tracker-name
+	// collisions and the cross-config plugin-name collisions that
+	// `includeDefaults: true` can introduce against DEFAULT_PLUGINS.
 	const defaults: SteeringConfig | undefined = includeDefaults
 		? { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS }
 		: undefined;
-	const { config: mergedConfig, diagnostics: mergeDiagnostics } =
-		buildConfig([inputConfig], defaults);
+	const { merged: mergedConfig, resolved, diagnostics } =
+		runMergerWithLoaderShortCircuit(
+			[inputConfig],
+			defaults,
+			EVALUATOR_BUILTIN_TRACKERS,
+		);
 
 	// Apply `config.disabledRules` to user + default rules. Plugin-shipped
 	// rules are filtered inside `resolvePlugins`. Mirrors
-	// `buildSessionRuntime` in src/internal/session-runtime.ts.
+	// `buildSessionRuntime`.
 	const disabled = new Set(mergedConfig.disabledRules ?? []);
 	const filteredConfig: SteeringConfig = { ...mergedConfig };
 	if (mergedConfig.rules !== undefined) {
@@ -240,31 +244,20 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 		else delete filteredConfig.rules;
 	}
 
-	const resolved = resolvePlugins(
-		filteredConfig.plugins ?? [],
-		filteredConfig,
-		EVALUATOR_BUILTIN_TRACKERS,
-	);
-
 	// Aggregate every diagnostic produced during construction. Unlike
 	// `buildSessionRuntime`, loadHarness does NOT throw on error-class
 	// diagnostics — plugin-author tests assert on the array directly so
 	// they can see every diagnostic that fired in one read.
-	const diagnostics: SteeringDiagnostic[] = [
-		...mergeDiagnostics,
-		...resolved.diagnostics,
-	];
-
-	// Short-circuit on ANY error-class diagnostic — from the loader
-	// (tracker-name collision flagged by `detectTrackerNameCollisions`),
-	// from the cross-config merge (`buildConfig`), or from the plugin
-	// merger (`reserved-tracker-name`, `reserved-predicate-key`,
-	// `invalid-name`, `tracker-name-collision`). All error-class
-	// diagnostics produce the same no-op harness so plugin-author tests
-	// see uniform behavior regardless of which surface flagged the
-	// problem. Mirrors production's bridge-disabled state under the
-	// same conditions.
-	if (diagnostics.some((d) => d.type === "error")) {
+	//
+	// Short-circuit on ANY error-class diagnostic — from the cross-
+	// layer merge (`buildConfig`'s `detectTrackerNameCollisions`) or
+	// from the plugin merger (`reserved-tracker-name`,
+	// `reserved-predicate-key`, `invalid-name`, `tracker-name-collision`).
+	// All error-class diagnostics produce the same no-op harness so
+	// plugin-author tests see uniform behavior regardless of which
+	// surface flagged the problem. Mirrors production's bridge-disabled
+	// state under the same conditions.
+	if (resolved === null || diagnostics.some((d) => d.type === "error")) {
 		return buildNoopHarness(filteredConfig, diagnostics);
 	}
 

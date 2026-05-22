@@ -21,12 +21,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { FromJSONError, fromJSON } from "../compat.ts";
 import { EVALUATOR_BUILTIN_TRACKERS } from "../evaluator.ts";
-import { formatSingleLineDiagnostic } from "../internal/session-runtime.ts";
 import {
-	buildConfig,
-	loadConfigs,
-} from "../loader.ts";
-import { resolvePlugins } from "../plugin-merger.ts";
+	formatSingleLineDiagnostic,
+	runMergerWithLoaderShortCircuit,
+} from "../internal/session-runtime.ts";
+import { loadConfigs } from "../loader.ts";
 import type {
 	Observer,
 	Rule,
@@ -259,36 +258,9 @@ async function runList(args: string[]): Promise<number> {
 		return 0;
 	}
 
-	const { config, diagnostics: mergeDiagnostics } = buildConfig(layers);
-	for (const d of mergeDiagnostics) {
-		process.stderr.write(`${formatSingleLineDiagnostic(d)}\n`);
-	}
-
-	// Run the plugin merger so reserved-name violations, plugin /
-	// predicate / observer / rule collisions, and malformed plugin /
-	// rule / observer names surface on stderr too. Without this, a user
-	// running `pi-steering list` to debug their config would see no
-	// error for issues that fire only at session_start — the CLI's
-	// pre-flight role would silently skip the merger surface.
-	//
-	// Route the merger's `console.info` breadcrumbs (disabled plugins,
-	// dropped observers) to stderr for the duration of the call so
-	// `--format=json` consumers see clean JSON on stdout.
-	const originalInfo = console.info;
-	console.info = (...args: unknown[]) => {
-		process.stderr.write(`${args.map((a) => String(a)).join(" ")}\n`);
-	};
-	let resolved;
-	try {
-		resolved = resolvePlugins(
-			config.plugins ?? [],
-			config,
-			EVALUATOR_BUILTIN_TRACKERS,
-		);
-	} finally {
-		console.info = originalInfo;
-	}
-	for (const d of resolved.diagnostics) {
+	const { config, diagnostics: mergeAndResolveDiagnostics } =
+		runCliMergeWithInfoCapture(layers);
+	for (const d of mergeAndResolveDiagnostics) {
 		process.stderr.write(`${formatSingleLineDiagnostic(d)}\n`);
 	}
 
@@ -300,6 +272,37 @@ async function runList(args: string[]): Promise<number> {
 		process.stdout.write(renderListText(config));
 	}
 	return 0;
+}
+
+/**
+ * Run the merge+resolve pipeline through the shared
+ * {@link runMergerWithLoaderShortCircuit} helper, intercepting
+ * `console.info` for the duration so the plugin-merger's disabled-
+ * plugin / disabled-rule breadcrumbs go to stderr instead of
+ * contaminating stdout (which carries the structured `--format=json`
+ * output). The save/restore is wrapped in `try`/`finally` so a throw
+ * inside the helper still restores the original `console.info`.
+ */
+function runCliMergeWithInfoCapture(
+	layers: readonly SteeringConfig[],
+): {
+	config: SteeringConfig;
+	diagnostics: SteeringDiagnostic[];
+} {
+	const originalInfo = console.info;
+	console.info = (...args: unknown[]) => {
+		process.stderr.write(`${args.map((a) => String(a)).join(" ")}\n`);
+	};
+	try {
+		const { merged, diagnostics } = runMergerWithLoaderShortCircuit(
+			layers,
+			undefined,
+			EVALUATOR_BUILTIN_TRACKERS,
+		);
+		return { config: merged, diagnostics };
+	} finally {
+		console.info = originalInfo;
+	}
 }
 
 function printListHelp(): void {

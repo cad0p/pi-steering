@@ -568,7 +568,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		);
 	});
 
-	it("writes an error-class merge diagnostic to stderr with the ERROR: tag", async () => {
+	it("writes an error-class merge diagnostic to stderr with the ERROR: tag exactly once", async () => {
 		writeScratchConfig(
 			scratch,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
@@ -585,6 +585,17 @@ describe("pi-steering list: diagnostics on stderr", () => {
 			r.stderr,
 			/\[pi-steering\] ERROR: tracker name collision/,
 			`expected ERROR-tagged tracker collision on stderr; got: ${r.stderr}`,
+		);
+		// The shared merge-pipeline helper short-circuits between
+		// buildConfig and resolvePlugins on error-class merge
+		// diagnostics, so the same collision should appear exactly once
+		// even though both buildConfig and resolvePlugins independently
+		// detect tracker-name collisions.
+		const occurrences = r.stderr.match(/tracker name collision/g) ?? [];
+		assert.equal(
+			occurrences.length,
+			1,
+			`expected exactly one tracker-name-collision line on stderr; got ${occurrences.length}: ${r.stderr}`,
 		);
 	});
 

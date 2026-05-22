@@ -488,12 +488,16 @@ describe("loadHarness", () => {
 		assert.equal(hit.type, "warning");
 	});
 
-	it("does NOT throw on a tracker-name collision; surfaces it as an error-class diagnostic", () => {
+	it("does NOT throw on a tracker-name collision; surfaces it as a single error-class diagnostic", () => {
 		// loadHarness aggregates loader + buildConfig + resolvePlugins
 		// diagnostics and short-circuits to a no-op evaluator/dispatcher
 		// when any error-class diagnostic fires, so plugin-author tests
 		// can read the diagnostic from `harness.diagnostics` instead of
-		// catching a thrown Error.
+		// catching a thrown Error. The shared merge-pipeline helper
+		// short-circuits before resolvePlugins, so the same collision
+		// should appear exactly once even though both buildConfig's
+		// detectTrackerNameCollisions and resolvePlugins independently
+		// flag the same shape.
 		const t = {
 			initial: "?" as const,
 			unknown: "unknown" as const,
@@ -508,14 +512,16 @@ describe("loadHarness", () => {
 				],
 			},
 		});
-		const hit = harness.diagnostics.find(
+		const hits = harness.diagnostics.filter(
 			(d) => d.kind === "tracker-name-collision",
 		);
-		assert.ok(
-			hit,
-			`expected a tracker-name-collision diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		assert.equal(
+			hits.length,
+			1,
+			`expected a single tracker-name-collision diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
 		);
-		assert.equal(hit.type, "error");
+		const [hit] = hits;
+		assert.equal(hit?.type, "error");
 	});
 });
 

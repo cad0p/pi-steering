@@ -34,9 +34,61 @@ import {
 	buildObserverDispatcher,
 	type ObserverDispatcher,
 } from "../observer-dispatcher.ts";
-import { resolvePlugins } from "../plugin-merger.ts";
+import {
+	resolvePlugins,
+	type ResolvedPluginState,
+} from "../plugin-merger.ts";
 import type { SteeringConfig, SteeringDiagnostic } from "../schema.ts";
 import { dropUnusedObservers } from "./drop-unused-observers.ts";
+
+/**
+ * Run `buildConfig` over the raw layer list and short-circuit before
+ * `resolvePlugins` if any merge-side diagnostic is error-class. Both
+ * `buildConfig` (`detectTrackerNameCollisions`) and `resolvePlugins`
+ * independently flag tracker-name collisions; running the merger
+ * after the loader has already flagged one would emit the same
+ * diagnostic twice. The short-circuit centralizes that gate so every
+ * surface that runs the full merge+resolve pipeline
+ * (`buildSessionRuntime`, `loadHarness`, the `pi-steering list` CLI)
+ * emits each error-class diagnostic exactly once.
+ *
+ * Returns the merged `SteeringConfig`, the `ResolvedPluginState` (or
+ * `null` when the short-circuit fired), and the aggregated
+ * diagnostics array (merge-side then resolve-side, in order). On
+ * short-circuit `diagnostics` contains only the merge-side stream.
+ *
+ * Loader-side diagnostics from `loadConfigs` are NOT included here —
+ * callers that walked up from a cwd (`buildSessionRuntime`, the CLI)
+ * thread those in separately. `loadHarness` operates on a single
+ * in-memory layer and has no loader stream to thread.
+ */
+export function runMergerWithLoaderShortCircuit(
+	layers: readonly SteeringConfig[],
+	defaults: SteeringConfig | undefined,
+	builtinTrackers: readonly string[],
+): {
+	merged: SteeringConfig;
+	resolved: ResolvedPluginState | null;
+	diagnostics: SteeringDiagnostic[];
+} {
+	const { config: merged, diagnostics: mergeDiagnostics } = buildConfig(
+		layers,
+		defaults,
+	);
+	if (mergeDiagnostics.some((d) => d.type === "error")) {
+		return { merged, resolved: null, diagnostics: mergeDiagnostics };
+	}
+	const resolved = resolvePlugins(
+		merged.plugins ?? [],
+		merged,
+		builtinTrackers,
+	);
+	return {
+		merged,
+		resolved,
+		diagnostics: [...mergeDiagnostics, ...resolved.diagnostics],
+	};
+}
 
 /**
  * Render a diagnostics array into a single multi-line message
@@ -147,43 +199,20 @@ export async function buildSessionRuntime(
 	const defaults: SteeringConfig | undefined = disableDefaults
 		? undefined
 		: { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS };
-	const { config: merged, diagnostics: mergeDiagnostics } = buildConfig(
-		rawLayers,
-		defaults,
-	);
-	aggregated.push(...mergeDiagnostics);
+
+	// Run buildConfig + resolvePlugins through the shared helper so the
+	// short-circuit between the two passes is uniform across
+	// `buildSessionRuntime`, `loadHarness`, and the CLI's `runList`.
+	const { merged, resolved, diagnostics: mergeAndResolveDiagnostics } =
+		runMergerWithLoaderShortCircuit(
+			rawLayers,
+			defaults,
+			EVALUATOR_BUILTIN_TRACKERS,
+		);
+	aggregated.push(...mergeAndResolveDiagnostics);
 
 	const failOnWarnings = merged.failOnWarnings;
 	const treatWarningsAsErrors = failOnWarnings !== false;
-
-	// Short-circuit on error-class diagnostics produced by the loader
-	// or buildConfig BEFORE running resolvePlugins. The loader and the
-	// merger both detect tracker-name collisions; running the merger
-	// after the loader has already flagged one would emit a duplicate
-	// diagnostic. Bail out here with the aggregated render so users see
-	// every diagnostic at once without double-reporting.
-	if (aggregated.some((d) => d.type === "error")) {
-		throw new Error(formatAggregatedDiagnostics(aggregated));
-	}
-
-	// Apply `disabledRules` to the merged rule set. Plugin-shipped rules
-	// are filtered inside `resolvePlugins`; user / default rules go
-	// through `config.rules` on the evaluator side, so we filter them
-	// here to keep the semantic consistent across both sources.
-	const disabled = new Set(merged.disabledRules ?? []);
-	const filteredConfig: SteeringConfig = { ...merged };
-	if (merged.rules !== undefined) {
-		const kept = merged.rules.filter((r) => !disabled.has(r.name));
-		if (kept.length > 0) filteredConfig.rules = kept;
-		else delete filteredConfig.rules;
-	}
-
-	const resolved = resolvePlugins(
-		filteredConfig.plugins ?? [],
-		filteredConfig,
-		EVALUATOR_BUILTIN_TRACKERS,
-	);
-	aggregated.push(...resolved.diagnostics);
 
 	// Strict-mode contract: error-class diagnostics ALWAYS throw;
 	// warning-class diagnostics throw only when `failOnWarnings !==
@@ -210,6 +239,29 @@ export async function buildSessionRuntime(
 		for (const d of warnings) {
 			console.warn(formatSingleLineDiagnostic(d));
 		}
+	}
+
+	// At this point `resolved` cannot be null: the helper only returns
+	// `null` when merge-side diagnostics include an error-class entry,
+	// and the strict-mode throw above already fired in that case.
+	if (resolved === null) {
+		throw new Error(
+			"[pi-steering] internal: runMergerWithLoaderShortCircuit " +
+				"returned a null resolve without surfacing an error-class " +
+				"diagnostic",
+		);
+	}
+
+	// Apply `disabledRules` to the merged rule set. Plugin-shipped rules
+	// are filtered inside `resolvePlugins`; user / default rules go
+	// through `config.rules` on the evaluator side, so we filter them
+	// here to keep the semantic consistent across both sources.
+	const disabled = new Set(merged.disabledRules ?? []);
+	const filteredConfig: SteeringConfig = { ...merged };
+	if (merged.rules !== undefined) {
+		const kept = merged.rules.filter((r) => !disabled.has(r.name));
+		if (kept.length > 0) filteredConfig.rules = kept;
+		else delete filteredConfig.rules;
 	}
 
 	// Drop observers whose declared writes are unconsumed. Applied

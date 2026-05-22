@@ -479,11 +479,16 @@ function mergeStringUnion(
  * merged correctly" without also asserting "the field-specific
  * default was applied".
  *
- * Exported for callers that need to peek at one boolean field across
- * raw layers without paying for a full `buildConfig` merge —
- * `buildSessionRuntime` uses this to read `disableDefaults` before
- * deciding whether to inject `DEFAULT_PLUGINS` / `DEFAULT_RULES`. The
- * testing harness `loadHarness` exposes the same decision via the
+ * Exported across the loader/internal boundary so the internal
+ * `buildSessionRuntime` and `runMergerPipeline` can peek at one
+ * boolean field across raw layers without paying for a full
+ * `buildConfig` merge — `buildSessionRuntime` uses this to read
+ * `disableDefaults` before deciding whether to inject
+ * `DEFAULT_PLUGINS` / `DEFAULT_RULES`. NOT part of the public
+ * package surface (not re-exported from `index.ts`); external
+ * callers that need a similar field-level peek should `runMergerPipeline`
+ * or maintain their own pre-merge inspection. The testing harness
+ * `loadHarness` exposes the same `disableDefaults` decision via the
  * explicit `LoadHarnessOptions.includeDefaults` boolean instead, so
  * tests can choose harness contents directly without embedding the
  * flag in the config under test.
@@ -630,10 +635,11 @@ export function buildConfig(
  * Production-strictness divergence: `loadSteeringConfig` does NOT
  * apply the strict-mode `failOnWarnings` throw policy that
  * `buildSessionRuntime` does. The function never throws on
- * warning-class diagnostics regardless of `merged.failOnWarnings` —
- * it returns the diagnostics array and lets the embedder decide.
- * Embedders wanting production-faithful pre-flight semantics must
- * apply the rule themselves:
+ * warning-class OR error-class diagnostics — every diagnostic is
+ * returned in the array, regardless of `merged.failOnWarnings` or
+ * `type`. Embedders decide both the throw policy and the warning
+ * escalation policy themselves. Production-faithful pre-flight
+ * semantics:
  *
  *     const wouldRefuse = diagnostics.some(
  *       (d) =>

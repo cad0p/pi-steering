@@ -159,13 +159,15 @@ export interface Harness {
 	 * injection and `disable` filtering).
 	 *
 	 * No-op short-circuit caveat: when `harness.diagnostics` has an
-	 * error-class entry, treat `harness.config` as a debugging
-	 * artifact — it represents the input state pi-steering tried to
-	 * merge, NOT an executable config production would accept. Inspect
-	 * `harness.diagnostics` first to learn which surface flagged a
-	 * problem, then fix the source config and re-load before reading
-	 * `config` for any "production would have run on this shape"
-	 * interpretation.
+	 * error-class entry, treat `harness.config` as the post-merge,
+	 * post-disabledRules-filter snapshot pi-steering would have
+	 * handed to `buildEvaluator` if the diagnostics had been clean —
+	 * provided as a debugging artifact, NOT an executable config
+	 * production would accept (production would have thrown).
+	 * Inspect `harness.diagnostics` first to learn which surface
+	 * flagged a problem, then fix the source config and re-load
+	 * before reading `config` for any "production would have run on
+	 * this shape" interpretation.
 	 */
 	readonly config: SteeringConfig;
 	/**
@@ -180,13 +182,16 @@ export interface Harness {
 	 * carries only the resolve-side stream (predicate-collision,
 	 * observer-collision, rule-collision, extension-orphan, reserved-
 	 * tracker-name, reserved-predicate-key, plugin-shipped
-	 * invalid-name, tracker-name-collision). Consumers should prefer
-	 * `harness.diagnostics` for the canonical full list.
+	 * invalid-name). `tracker-name-collision` is gated upstream by
+	 * `runMergerPipeline`'s short-circuit; it only appears in
+	 * `resolved.diagnostics` via the no-op mirror, never via the
+	 * regular path. Consumers should prefer `harness.diagnostics` for
+	 * the canonical full list.
 	 */
 	readonly resolved: ResolvedPluginState;
 	/**
 	 * Every {@link SteeringDiagnostic} produced while building the
-	 * harness — loader-side (within-layer collisions, cross-config
+	 * harness — merge-side (within-layer collisions, cross-config
 	 * collisions when {@link LoadHarnessOptions.includeDefaults} is
 	 * `true`) and plugin-merger-side (predicate / observer / rule /
 	 * extension-orphan / reserved-name / invalid-name diagnostics,

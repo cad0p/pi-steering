@@ -38,14 +38,6 @@ import type { SteeringConfig, SteeringDiagnostic } from "../schema.ts";
 import { dropUnusedObservers } from "./drop-unused-observers.ts";
 
 /**
- * Type-only alias used while reading the not-yet-schemafied
- * `failOnWarnings` field. The schema field arrives in a follow-up
- * refactor; the runtime read site lands here so the strict-mode
- * contract has a home before the field is publicly authorable.
- */
-type ConfigWithStrictMode = SteeringConfig & { failOnWarnings?: boolean };
-
-/**
  * Render a diagnostics array into a single multi-line message
  * suitable for use as a thrown Error's `message`. The format:
  *
@@ -148,8 +140,7 @@ export async function buildSessionRuntime(
 	);
 	aggregated.push(...mergeDiagnostics);
 
-	const failOnWarnings =
-		(merged as ConfigWithStrictMode).failOnWarnings;
+	const failOnWarnings = merged.failOnWarnings;
 	const treatWarningsAsErrors = failOnWarnings !== false;
 
 	// Short-circuit on error-class diagnostics produced by the loader

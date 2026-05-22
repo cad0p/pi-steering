@@ -249,6 +249,7 @@ export interface DefineConfigInput<
 	disabledRules?: readonly AllRuleNames<P, R>[];
 	disabledPlugins?: readonly AllPluginNames<P>[];
 	disableDefaults?: boolean;
+	failOnWarnings?: boolean;
 	plugins?: P;
 	rules?: R;
 	observers?: Inline;
@@ -358,6 +359,9 @@ export function defineConfig<
 	}
 	if (config.disableDefaults !== undefined) {
 		out.disableDefaults = config.disableDefaults;
+	}
+	if (config.failOnWarnings !== undefined) {
+		out.failOnWarnings = config.failOnWarnings;
 	}
 	if (config.plugins !== undefined) {
 		// Cast: `readonly Plugin[]` → `Plugin[]` (shape is identical;

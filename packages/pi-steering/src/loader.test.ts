@@ -573,6 +573,32 @@ describe("loader: buildConfig", () => {
 		assert.equal(buildConfig([]).config.disableDefaults, undefined);
 	});
 
+	it("inner `failOnWarnings` wins; default left undefined when no layer specifies", () => {
+		// Inner-wins precedence is identical to `disableDefaults` /
+		// `defaultNoOverride` since all three flow through `mergeBool`.
+		assert.equal(
+			buildConfig([
+				{ failOnWarnings: false },
+				{ failOnWarnings: true },
+			]).config.failOnWarnings,
+			false,
+			"inner explicitly false beats outer true",
+		);
+		assert.equal(
+			buildConfig([
+				{},
+				{ failOnWarnings: true },
+			]).config.failOnWarnings,
+			true,
+			"missing inner layer leaves outer's explicit true in place",
+		);
+		assert.equal(
+			buildConfig([]).config.failOnWarnings,
+			undefined,
+			"buildConfig leaves the field undefined when no layer specifies it; runtime applies the !== false default",
+		);
+	});
+
 	it("records a plugin-name-collision diagnostic for cross-layer duplicate plugin names; first-wins", () => {
 		const pInner: Plugin = { name: "p", rules: [] };
 		const pOuter: Plugin = { name: "p", rules: [] };

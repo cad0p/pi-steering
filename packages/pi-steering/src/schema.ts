@@ -1695,6 +1695,25 @@ export interface SteeringConfig {
 	 */
 	disableDefaults?: boolean;
 
+	/**
+	 * Strict-mode opt-out. When `true` (default), any warning-class
+	 * {@link SteeringDiagnostic} produced while loading the config
+	 * escalates to a thrown error that disables the bridge for the
+	 * session. When explicitly set to `false`, warnings fall through
+	 * to `console.warn` and the bridge keeps running with whatever
+	 * subset of plugins / rules / observers loaded successfully.
+	 *
+	 * Error-class diagnostics ALWAYS throw regardless of this flag
+	 * (e.g. tracker name collision, reserved name violation) — the
+	 * engine cannot operate safely with those issues present.
+	 *
+	 * Walk-up merge: inner layer wins when specified, identical to
+	 * {@link disableDefaults}.
+	 *
+	 * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
+	 */
+	failOnWarnings?: boolean;
+
 	/** Plugins to load. Order matters for first-wins name collisions. */
 	plugins?: readonly Plugin[];
 

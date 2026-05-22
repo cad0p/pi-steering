@@ -442,22 +442,30 @@ function mergeStringUnion(
 }
 
 /**
- * Merge `defaultNoOverride`. Inner wins. If no layer specifies the
- * field AND the caller supplied a `defaults` config, that layer's
- * value is used. Otherwise returns `undefined` — buildConfig callers
- * typically coerce the final undefined into the ADR-mandated `true`
- * at predicate-evaluation time (fail-closed).
+ * Merge a boolean field across layers using inner-wins precedence.
+ * Inner wins. If no layer specifies the field AND the caller
+ * supplied a `defaults` config, that layer's value is used (since
+ * `defaults` is appended at the END of the inner-first layer list).
+ * Otherwise returns `undefined` — buildConfig callers typically
+ * coerce the final undefined according to field-specific semantics
+ * (e.g. evaluator-side `defaultNoOverride ?? true` fail-closed,
+ * runtime-side `failOnWarnings !== false` strict-default).
  *
- * NOTE we intentionally do NOT bake the `true` default into the
+ * NOTE we intentionally do NOT bake field-specific defaults into the
  * merged config here. The merged config reflects what the user
- * declared; Phase 3's evaluator applies the `?? true` fallback when
- * deciding whether overrides are allowed. Keeping the two concerns
- * separate lets tests assert "layers were merged correctly" without
- * also asserting "the fail-closed default was applied".
+ * declared; consumers apply the appropriate fallback at use time.
+ * Keeping the two concerns separate lets tests assert "layers were
+ * merged correctly" without also asserting "the field-specific
+ * default was applied".
+ *
+ * Exported for the bridge runtime, which needs to peek at
+ * `disableDefaults` before deciding whether to layer in
+ * DEFAULT_RULES / DEFAULT_PLUGINS, and at `failOnWarnings` before
+ * deciding the strict-mode throw policy.
  */
-function mergeBool(
+export function mergeBool(
 	layers: readonly SteeringConfig[],
-	key: "defaultNoOverride" | "disableDefaults",
+	key: "defaultNoOverride" | "disableDefaults" | "failOnWarnings",
 ): boolean | undefined {
 	// Layers are passed inner-first. Walk left-to-right and keep the
 	// FIRST layer that sets the field — that's the innermost explicit
@@ -562,6 +570,8 @@ export function buildConfig(
 	}
 	const disableDefaults = mergeBool(effective, "disableDefaults");
 	if (disableDefaults !== undefined) out.disableDefaults = disableDefaults;
+	const failOnWarnings = mergeBool(effective, "failOnWarnings");
+	if (failOnWarnings !== undefined) out.failOnWarnings = failOnWarnings;
 
 	return { config: out, diagnostics };
 }

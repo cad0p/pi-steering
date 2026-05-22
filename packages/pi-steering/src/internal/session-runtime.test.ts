@@ -109,7 +109,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		);
 	});
 
-	it("does NOT throw on a warning-class diagnostic when failOnWarnings: false; emits to console.warn", { skip: "failOnWarnings is plumbed through buildConfig in a follow-up refactor; this test activates once the schema field lands" }, async () => {
+	it("does NOT throw on a warning-class diagnostic when failOnWarnings: false; emits to console.warn", async () => {
 		writeSteeringConfig(
 			tmpHome,
 			`export default {
@@ -138,15 +138,14 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// Two plugins claim the tracker `branch`. The loader's
 		// buildConfig pushes an error-class tracker-name-collision
 		// diagnostic; the strict-mode opt-out applies only to warnings,
-		// not errors. Once `failOnWarnings` is plumbed through the schema
-		// in a follow-up refactor, the same scenario plus
-		// `failOnWarnings: false` will still throw — a separate
-		// integration case will pin that contract.
+		// not errors. Setting `failOnWarnings: false` does NOT change
+		// the throw — errors always escalate.
 		writeSteeringConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
 				disableDefaults: true,
+				failOnWarnings: false,
 				plugins: [
 					{ name: "pa", trackers: { branch: t } },
 					{ name: "pb", trackers: { branch: t } },

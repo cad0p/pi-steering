@@ -215,8 +215,11 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
 	} & Record<string, unknown>;
 
 	if (mod.default === undefined) {
+		// Path is intentionally omitted from the message; the caller wraps
+		// this throw in a `layer-import-failed` diagnostic whose own `path`
+		// field is the single source of truth for the file location.
 		throw new Error(
-			`Config file ${path} must have a default export. Use ` +
+			"config file must have a default export. Use " +
 				"`export default { ... } satisfies SteeringConfig` or " +
 				"`export default defineConfig({ ... })`.",
 		);
@@ -228,7 +231,7 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
 		Array.isArray(candidate)
 	) {
 		throw new Error(
-			`Config file ${path} default export must be a SteeringConfig object, ` +
+			`config file default export must be a SteeringConfig object, ` +
 				`got ${Array.isArray(candidate) ? "array" : typeof candidate}.`,
 		);
 	}
@@ -287,11 +290,18 @@ export async function loadConfigs(cwd: string): Promise<{
 		try {
 			layers.push(await importConfigFile(file));
 		} catch (err) {
+			// Use err.message (not String(err)) to drop the `Error: ` class
+			// prefix. Native runtime errors (jiti syntax errors,
+			// ERR_UNKNOWN_FILE_EXTENSION) may still embed the path inside
+			// their own message; we accept that duplication rather than
+			// regex-strip a moving-target prefix. The diagnostic's own
+			// `path` field carries the authoritative location.
+			const body = err instanceof Error ? err.message : String(err);
 			diagnostics.push({
 				type: "warning",
 				kind: "layer-import-failed",
 				path: file,
-				message: `failed to import: ${String(err)}`,
+				message: `failed to import: ${body}`,
 			});
 		}
 	}

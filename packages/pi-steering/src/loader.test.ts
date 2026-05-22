@@ -407,6 +407,30 @@ describe("loader: loadConfigs", () => {
 		);
 	});
 
+	it("layer-import-failed message does not duplicate the path that the diagnostic's `path` field already carries", async () => {
+		const cwd = join(tmp, "project");
+		mkdirSync(cwd, { recursive: true });
+		const configPath = join(cwd, ".pi", "steering.ts");
+		writeConfig(configPath, "export const rules = [];\n");
+		const { diagnostics } = await loadConfigs(cwd);
+		const hit = diagnostics.find((d) => d.kind === "layer-import-failed");
+		assert.ok(hit, "expected a layer-import-failed diagnostic");
+		assert.equal(hit.path, configPath);
+		// The path is on the diagnostic's `path` field; the message body
+		// must not embed the same absolute path. Locked here so a future
+		// edit that reintroduces the prefix fails the test.
+		assert.ok(
+			!hit.message.includes(configPath),
+			`message should not embed the path; got: ${hit.message}`,
+		);
+		assert.equal(
+			hit.message,
+			"failed to import: config file must have a default export. " +
+				"Use `export default { ... } satisfies SteeringConfig` or " +
+				"`export default defineConfig({ ... })`.",
+		);
+	});
+
 	it("handles heterogeneous config forms across layers (inner flat + outer dir)", async () => {
 		// Inner (session cwd) uses the single-file form .pi/steering.ts;
 		// outer ancestor uses the directory form .pi/steering/index.ts.

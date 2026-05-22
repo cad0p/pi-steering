@@ -157,6 +157,14 @@ export interface Harness {
 	/**
 	 * The effective config the harness was built from (after default
 	 * injection and `disable` filtering).
+	 *
+	 * No-op short-circuit caveat: when an error-class diagnostic
+	 * fires (the harness returns the no-op evaluator/dispatcher pair),
+	 * `config` is the input config as merged — NOT a guarantee that
+	 * production would accept it. Consumers must check
+	 * `harness.diagnostics.some(d => d.type === "error")` before
+	 * reading `config` if they intend to interpret it as "production
+	 * would have run on this shape."
 	 */
 	readonly config: SteeringConfig;
 	/** The plugin merger's resolved state, for introspection / assertions. */
@@ -173,6 +181,18 @@ export interface Harness {
 	 * (e.g. `harness.diagnostics.some(d => d.kind === "reserved-tracker-name")`)
 	 * so the failure surface is observable in test output rather than
 	 * a thrown error that hides which other diagnostics fired.
+	 *
+	 * Production-strictness divergence: `loadHarness` does NOT honor
+	 * the merged config's `failOnWarnings` flag. Production's
+	 * `buildSessionRuntime` throws when `failOnWarnings !== false`
+	 * (default `true`) AND any warning-class diagnostic is present;
+	 * the harness ignores `failOnWarnings` and returns a real
+	 * evaluator/dispatcher running on the post-collision merged
+	 * state. Tests intending to use the harness as a "production
+	 * prediction" should check this array against the strict-mode
+	 * rule themselves, e.g.
+	 * `harness.diagnostics.some(d => d.type === "error" || (config.failOnWarnings !== false && d.type === "warning"))`
+	 * before treating the harness's verdict as production-faithful.
 	 */
 	readonly diagnostics: readonly SteeringDiagnostic[];
 }

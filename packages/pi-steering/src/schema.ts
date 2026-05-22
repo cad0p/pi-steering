@@ -1718,12 +1718,13 @@ export interface SteeringConfig {
 	 * Walk-up merge: inner layer wins when specified, identical to
 	 * {@link disableDefaults}.
 	 *
-	 * Note: `failOnWarnings: false` cannot recover from a layer whose
-	 * own import fails (a broken ancestor that produces
-	 * `layer-import-failed` cannot itself communicate the opt-out).
-	 * Either fix the broken file, or place a working inner layer with
-	 * `failOnWarnings: false` so the inner-wins merge picks up the
-	 * opt-out before the broken layer's diagnostic escalates.
+	 * Note: a broken layer cannot communicate its OWN `failOnWarnings:
+	 * false` opt-out, since the loader can't read the failed file. To
+	 * recover from a `layer-import-failed` diagnostic on an outer
+	 * (ancestor) layer, set `failOnWarnings: false` on a successfully-
+	 * loaded inner layer; the inner-wins merge picks up the opt-out
+	 * before the broken layer's warning-class diagnostic escalates to
+	 * a thrown error. Alternatively, fix the broken file.
 	 *
 	 * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
 	 */
@@ -1891,6 +1892,18 @@ export type SteeringDiagnosticKind =
  * stable so tests and future tooling can dispatch on {@link kind}
  * without scanning {@link message} substrings.
  *
+ * Channel-ownership split (loader / merger vs. runtime). Diagnostics
+ * captured in this stream are by-design surfaced to the strict-mode
+ * runtime so it can decide whether to throw or pass through to
+ * `console.warn`. The loader (`loader.ts`) does not call
+ * `console.*` directly — the runtime owns the policy decision.
+ * However, by-design info breadcrumbs that are NOT configuration
+ * issues (`plugin-disabled`, `rule-disabled` from `resolvePlugins`,
+ * dropped-observer notices from `dropUnusedObservers`) go directly
+ * to `console.info` from where they're produced. They're not in
+ * this kind union because they describe normal behavior the user
+ * opted into, not problems that need actioning.
+ *
  * Render-format matrix — the same diagnostic surfaces in two
  * shapes depending on which renderer the runtime picks:
  *
@@ -1902,10 +1915,14 @@ export type SteeringDiagnosticKind =
  *   - Single-line per-diagnostic (`formatSingleLineDiagnostic`):
  *     `[pi-steering] <ERROR: >?<path: >?<message>` per diagnostic.
  *     Routed to `console.warn` for legacy fail-soft mode
- *     (`failOnWarnings: false`; warnings only — errors always throw
- *     via the aggregated form), and to stderr for the CLI
- *     `pi-steering list` pre-flight surface (warnings and errors
- *     both render here, with `ERROR: ` distinguishing the latter).
+ *     (`failOnWarnings: false`). Only warnings reach this route in
+ *     practice — error-class diagnostics escalate to a thrown error
+ *     via the aggregated form before warnings are flushed. Also
+ *     routed to stderr for the CLI `pi-steering list` pre-flight
+ *     surface (both warnings and errors render here, with `ERROR: `
+ *     distinguishing the latter). The function itself accepts both
+ *     severities; the warnings-only narrowing is a property of the
+ *     `console.warn` route's caller, not the formatter.
  *
  * The CLI prints diagnostics inline as the loader yields them, rather
  * than aggregating into a thrown error — the single-line shape
@@ -1938,15 +1955,22 @@ export interface SteeringDiagnostic {
 	 *     (`.pi/steering.ts` AND `.pi/steering/index.ts`); the dir is
 	 *     intentional rather than picking one of the two coexisting files
 	 *     arbitrarily.
+	 *   - Within-layer collisions (`rule-name-collision`,
+	 *     `observer-name-collision` produced by `mergeRules` /
+	 *     `mergeObservers` from a per-layer `seenInLayer` Set):
+	 *     COULD carry the offending layer's source path — there is
+	 *     a single source path — but the loader does not currently
+	 *     thread it through. Treat unset for now; path plumbing for
+	 *     within-layer collisions is a v0.2 follow-up.
 	 *   - Cross-layer collisions and plugin-shipped diagnostics
-	 *     (`plugin-name-collision`, `rule-name-collision`,
-	 *     `observer-name-collision`, `tracker-name-collision`,
+	 *     (`plugin-name-collision`, `tracker-name-collision`,
 	 *     `predicate-collision`, `observer-collision`, `rule-collision`,
 	 *     `extension-orphan`, `reserved-tracker-name`,
-	 *     `reserved-predicate-key`, `invalid-name`): unset. These
-	 *     diagnostics name the participants (layer paths or plugin
-	 *     names) inside `message` instead — there is no single source
-	 *     path for them.
+	 *     `reserved-predicate-key`, `invalid-name`): unset by design.
+	 *     These diagnostics name the participants (layer paths or
+	 *     plugin names) inside `message` because there is no single
+	 *     source path — the collision spans multiple layers or
+	 *     plugins.
 	 */
 	path?: string;
 }

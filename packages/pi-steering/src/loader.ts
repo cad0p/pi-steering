@@ -478,9 +478,12 @@ function mergeStringUnion(
  *
  * Exported for callers that need to peek at one boolean field across
  * raw layers without paying for a full `buildConfig` merge —
- * `buildSessionRuntime` and `loadHarness` use this to read
- * `disableDefaults` before deciding whether to inject `DEFAULT_PLUGINS`
- * / `DEFAULT_RULES`.
+ * `buildSessionRuntime` uses this to read `disableDefaults` before
+ * deciding whether to inject `DEFAULT_PLUGINS` / `DEFAULT_RULES`. The
+ * testing harness `loadHarness` exposes the same decision via the
+ * explicit `LoadHarnessOptions.includeDefaults` boolean instead, so
+ * tests can choose harness contents directly without embedding the
+ * flag in the config under test.
  */
 export function mergeBool(
 	layers: readonly SteeringConfig[],

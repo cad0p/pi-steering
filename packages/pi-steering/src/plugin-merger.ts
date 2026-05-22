@@ -204,9 +204,9 @@ export interface ResolvedPluginState {
 }
 
 /**
- * Treat either a single Modifier or an array of them as an array, without
- * allocating when the input is already an array. Returns a fresh array
- * so callers can mutate safely.
+ * Treat either a single Modifier or an array of them as a fresh
+ * array. Always allocates so callers can mutate safely without
+ * affecting the input plugin's modifier map.
  */
 function toModifierList<T>(
 	value: Modifier<T> | readonly Modifier<T>[],

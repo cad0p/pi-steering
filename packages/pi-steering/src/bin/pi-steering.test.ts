@@ -891,4 +891,51 @@ describe("pi-steering list: diagnostics on stderr", () => {
 			`expected observer-drop breadcrumb on stderr (consumer rule was disabled, observer should be reported as dropped to match runtime); got: ${r.stderr}`,
 		);
 	});
+
+	it("does NOT drop the observer when the consumer rule is enabled (inverse parity)", async () => {
+		// Inverse of the test above. Same fixture WITHOUT the
+		// `disabledRules: ["consumer"]` line: the consumer rule is
+		// alive, so the observer's writes ARE consumed and the
+		// observer is NOT dropped. Pins the inverse direction so a
+		// future refactor that flips the filter logic (e.g.
+		// `disabledRules.has(r.name)` flipped to
+		// `!disabledRules.has(r.name)`) is caught here — the
+		// disabledRules-true direction would still pass (observer
+		// drops because it's now over `disabledRules` itself, not
+		// its complement) but this inverse case would surface the
+		// regression.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				observers: [
+					{
+						name: "obs-x",
+						writes: ["X"],
+						onResult: () => {},
+					},
+				],
+				rules: [
+					{
+						name: "consumer",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+						when: { happened: { event: "X" } },
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(
+			r.code,
+			0,
+			`expected exit 0 (clean run); got code=${r.code}, stderr=${r.stderr}`,
+		);
+		assert.doesNotMatch(
+			r.stderr,
+			/\[pi-steering\] observer 'obs-x' dropped/,
+			`expected NO observer-drop breadcrumb on stderr (consumer rule is enabled, observer is consumed); got: ${r.stderr}`,
+		);
+	});
 });

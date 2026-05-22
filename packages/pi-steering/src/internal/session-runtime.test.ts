@@ -383,6 +383,89 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 	});
 });
 
+describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
+	let tmpHome: string;
+	let priorHome: string | undefined;
+	let infos: string[];
+	let origInfo: typeof console.info;
+	let origWarn: typeof console.warn;
+
+	beforeEach(() => {
+		tmpHome = mkdtempSync(join(tmpdir(), "pi-steering-runtime-"));
+		priorHome = process.env["HOME"];
+		process.env["HOME"] = tmpHome;
+		infos = [];
+		origInfo = console.info;
+		origWarn = console.warn;
+		console.info = (msg: unknown) => {
+			infos.push(String(msg));
+		};
+		// Silence the strict-mode warn channel; only the info-level
+		// observer-drop breadcrumb is under assertion here.
+		console.warn = () => {};
+	});
+
+	afterEach(() => {
+		console.info = origInfo;
+		console.warn = origWarn;
+		if (priorHome === undefined) delete process.env["HOME"];
+		else process.env["HOME"] = priorHome;
+		rmSync(tmpHome, { recursive: true, force: true });
+	});
+
+	it("emits an `observer dropped` breadcrumb when the observer's only consumer rule is disabled via `disabledRules` (parity with CLI)", async () => {
+		// Symmetric to the CLI regression test in
+		// `bin/pi-steering.test.ts` ("surfaces an `observer dropped`
+		// breadcrumb when the consumer rule is disabled via
+		// `disabledRules`"). The runtime filters `merged.rules` against
+		// `disabledRules` BEFORE handing the union to
+		// `dropUnusedObservers`, so an observer whose only consumer is
+		// disabled gets dropped at session_start. This test pins the
+		// production code path — a future refactor that swaps the
+		// runtime's filter order (filtering after observer-drop instead
+		// of before, or skipping the filter entirely) would let
+		// `pi-steering list` continue to surface the breadcrumb
+		// correctly while production silently fails to drop the
+		// observer.
+		writeSteeringConfig(
+			tmpHome,
+			`export default {
+				disableDefaults: true,
+				disabledRules: ["consumer"],
+				observers: [
+					{
+						name: "obs-x",
+						writes: ["X"],
+						onResult: () => {},
+					},
+				],
+				rules: [
+					{
+						name: "consumer",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+						when: { happened: { event: "X" } },
+					},
+				],
+			};`,
+		);
+		const result = await buildSessionRuntime(tmpHome, noopHost);
+		assert.ok(result.evaluator);
+		assert.ok(result.dispatcher);
+		const breadcrumb = infos.find((m) =>
+			/\[pi-steering\] observer 'obs-x' dropped; its writes \(X\) are not consumed by any rule/.test(
+				m,
+			),
+		);
+		assert.ok(
+			breadcrumb !== undefined,
+			`expected observer-drop breadcrumb on console.info (consumer rule was disabled, observer should be reported as dropped); got: ${JSON.stringify(infos)}`,
+		);
+	});
+});
+
 describe("formatAggregatedDiagnostics: rule-based spec", () => {
 	it("renders a single warning with no path prefix", () => {
 		const diagnostics: SteeringDiagnostic[] = [

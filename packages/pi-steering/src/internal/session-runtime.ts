@@ -58,14 +58,17 @@ import { dropUnusedObservers } from "./drop-unused-observers.ts";
  * unconditionally between `buildConfig` and the merge short-circuit
  * — so every surface gets the same `invalid-name` diagnostic stream
  * including the case where a merge-side error fires alongside a
- * malformed user-config name. The validation reads
- * `merged.rules[*].name` and `merged.observers[*].name`, both
- * populated by `buildConfig` even on merge error, and does not
- * depend on any `resolvePlugins` state. No surface routes user-
- * config malformed names through the plain-Error throw inside
- * `buildEvaluator` / `buildObserverDispatcher`. Plugin-shipped names
- * are still validated inside `resolvePlugins` (gated behind the
- * short-circuit, since `resolvePlugins` is the surface that consumes
+ * malformed user-config name. The validation reads each input
+ * layer's `rules[*].name` and `observers[*].name` from the raw
+ * `layers` array — NOT the post-merge `merged` config, which can
+ * include `DEFAULT_RULES` injected by `buildConfig` (validating
+ * those would mis-attribute package-controlled names to a `(user
+ * config)` source). It does not depend on any `resolvePlugins`
+ * state. No surface routes user-config malformed names through the
+ * plain-Error throw inside `buildEvaluator` /
+ * `buildObserverDispatcher`. Plugin-shipped names are still
+ * validated inside `resolvePlugins` (gated behind the short-
+ * circuit, since `resolvePlugins` is the surface that consumes
  * them).
  *
  * Returns the merged `SteeringConfig`, the `ResolvedPluginState` (or
@@ -172,9 +175,9 @@ export function formatAggregatedDiagnostics(
  *     warnings and errors render through this helper inline as the
  *     loader / merger yields them.
  *
- * Errors get an `ERROR: ` severity prefix after the bracket so a
- * user grepping CI logs has a clear handle; warnings have none.
- * Path prefix is conditional on {@link SteeringDiagnostic.path}
+ * Errors get an `ERROR: ` severity prefix after the `[pi-steering]`
+ * tag so a user grepping CI logs has a clear handle; warnings have
+ * none. Path prefix is conditional on {@link SteeringDiagnostic.path}
  * being set — cross-layer collisions (no source path) render with
  * the message alone.
  *

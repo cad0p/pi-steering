@@ -105,8 +105,9 @@ import type {
  * compose modifiers onto them) without emitting an `extension-orphan`
  * diagnostic.
  *
- * Both call sites — `buildSessionRuntime` and `loadHarness` — import
- * this constant so a future addition (e.g. an `argv` tracker) lights up
+ * All call sites (`buildSessionRuntime`, `loadHarness`,
+ * `loadSteeringConfig`, the `pi-steering list` CLI) import this
+ * constant so a future addition (e.g. an `argv` tracker) lights up
  * uniformly across production and the test harness.
  */
 export const EVALUATOR_BUILTIN_TRACKERS = ["cwd", "env"] as const;

@@ -480,14 +480,16 @@ function mergeStringUnion(
  * default was applied".
  *
  * Exported across the loader/internal boundary so the internal
- * `buildSessionRuntime` and `runMergerPipeline` can peek at one
- * boolean field across raw layers without paying for a full
- * `buildConfig` merge — `buildSessionRuntime` uses this to read
- * `disableDefaults` before deciding whether to inject
+ * `buildSessionRuntime` can peek at one boolean field across raw
+ * layers without paying for a full `buildConfig` merge —
+ * `buildSessionRuntime` is currently the only caller and uses this
+ * to read `disableDefaults` before deciding whether to inject
  * `DEFAULT_PLUGINS` / `DEFAULT_RULES`. NOT part of the public
  * package surface (not re-exported from `index.ts`); external
- * callers that need a similar field-level peek should `runMergerPipeline`
- * or maintain their own pre-merge inspection. The testing harness
+ * callers that need a similar field-level peek should call
+ * `loadSteeringConfig` (which runs the full merge+resolve pipeline
+ * and returns aggregated diagnostics) or maintain their own pre-
+ * merge inspection. The testing harness
  * `loadHarness` exposes the same `disableDefaults` decision via the
  * explicit `LoadHarnessOptions.includeDefaults` boolean instead, so
  * tests can choose harness contents directly without embedding the
@@ -635,11 +637,10 @@ export function buildConfig(
  * Production-strictness divergence: `loadSteeringConfig` does NOT
  * apply the strict-mode `failOnWarnings` throw policy that
  * `buildSessionRuntime` does. The function never throws on
- * warning-class OR error-class diagnostics — every diagnostic is
- * returned in the array, regardless of `merged.failOnWarnings` or
- * `type`. Embedders decide both the throw policy and the warning
- * escalation policy themselves. Production-faithful pre-flight
- * semantics:
+ * diagnostics — every diagnostic is returned in the array,
+ * regardless of `merged.failOnWarnings` or `type`. Embedders decide
+ * both the throw policy and the warning escalation policy
+ * themselves. Production-faithful pre-flight semantics:
  *
  *     const wouldRefuse = diagnostics.some(
  *       (d) =>
@@ -654,6 +655,11 @@ export function buildConfig(
  * disable-defaults peek. External callers building their own
  * extensions or CLIs that want the full effective config + every
  * diagnostic in one call should reach for this.
+ *
+ * @throws when Node is older than {@link MIN_NODE_MAJOR} (propagated
+ * from `loadConfigs` via the synchronous `assertNodeVersion`
+ * pre-flight check). This is the only throw path; no diagnostic
+ * class triggers a throw.
  */
 export async function loadSteeringConfig(
 	cwd: string,

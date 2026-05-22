@@ -523,6 +523,69 @@ describe("loadHarness", () => {
 		const [hit] = hits;
 		assert.equal(hit?.type, "error");
 	});
+
+	it("does NOT throw on a malformed user-config rule name; surfaces it as an invalid-name error-class diagnostic", () => {
+		// User-config rule name validation runs inside the shared
+		// merge-pipeline helper before `resolvePlugins`, so a malformed
+		// rule name in the harness's input config produces the same
+		// `kind: "invalid-name"` diagnostic shape as a malformed
+		// plugin-shipped rule name. Without unification the harness
+		// would throw a plain `pi-steering: rule name "..."` Error from
+		// `buildEvaluator`, contradicting the documented "does NOT throw
+		// on error-class diagnostics" contract.
+		const harness = loadHarness({
+			config: {
+				rules: [
+					{
+						name: "phony] BAD",
+						tool: "bash" as const,
+						field: "command" as const,
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			},
+		});
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "invalid-name",
+		);
+		assert.ok(
+			hit,
+			`expected an invalid-name diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /^rule name "phony\] BAD".*disallowed/);
+		assert.match(hit.message, /\(user config\)/);
+		// Harness short-circuits to a no-op evaluator/dispatcher pair
+		// the same way it does for plugin-shipped errors.
+		assert.equal(harness.resolved.rules.length, 0);
+	});
+
+	it("does NOT throw on a malformed user-config observer name; surfaces it as an invalid-name error-class diagnostic", () => {
+		// Same shape as the rule-name case but for observers — confirms
+		// the validation covers both surfaces of `validateUserConfigNames`.
+		const harness = loadHarness({
+			config: {
+				observers: [
+					{
+						name: "bad observer name",
+						watch: { toolName: "bash" as const },
+						onResult: () => {},
+					},
+				],
+			},
+		});
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "invalid-name",
+		);
+		assert.ok(
+			hit,
+			`expected an invalid-name diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /^observer name "bad observer name".*disallowed/);
+		assert.match(hit.message, /\(user config\)/);
+	});
 });
 
 // ---------------------------------------------------------------------------

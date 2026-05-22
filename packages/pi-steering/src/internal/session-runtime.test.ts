@@ -238,6 +238,97 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 			},
 		);
 	});
+
+	it("throws on a malformed user-config rule name (aggregated, not plain Error)", async () => {
+		// User-config rule + observer names route through the same
+		// `invalid-name` diagnostic stream as plugin-shipped names. Before
+		// the unification, this case threw a plain `pi-steering: rule name
+		// "..."` Error from `buildEvaluator` rather than the aggregated
+		// `N config issue:` shape; production callers and tests then had
+		// to handle two distinct error formats for what is structurally
+		// the same kind of issue.
+		writeSteeringConfig(
+			tmpHome,
+			`export default {
+				disableDefaults: true,
+				rules: [
+					{
+						name: "phony] BAD",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			};`,
+		);
+		await assert.rejects(
+			() => buildSessionRuntime(tmpHome, noopHost),
+			(err: Error) => {
+				assert.match(err.message, /^1 config issue:/);
+				assert.match(err.message, /\[error\]/);
+				assert.match(
+					err.message,
+					/rule name "phony\] BAD" \(user config\) contains disallowed/,
+				);
+				// Confirm the legacy plain-Error shape is GONE.
+				assert.doesNotMatch(err.message, /^pi-steering: rule name/);
+				return true;
+			},
+		);
+	});
+
+	it("aggregates a malformed user-config rule name with a warning-class diagnostic into one throw", async () => {
+		// Combined error (user-config invalid name) + warning (observer
+		// dropped). Confirms the user-config name diagnostic flows through
+		// the same aggregation path as everything else — single throw,
+		// errors-first ordering.
+		writeSteeringConfig(
+			tmpHome,
+			`export default {
+				disableDefaults: true,
+				rules: [
+					{
+						name: "phony] BAD",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+					{
+						name: "dup",
+						tool: "bash",
+						field: "command",
+						pattern: /^A/,
+						reason: "first",
+					},
+					{
+						name: "dup",
+						tool: "bash",
+						field: "command",
+						pattern: /^B/,
+						reason: "second",
+					},
+				],
+			};`,
+		);
+		await assert.rejects(
+			() => buildSessionRuntime(tmpHome, noopHost),
+			(err: Error) => {
+				assert.match(err.message, /^2 config issues:/);
+				const errorIdx = err.message.indexOf("[error]");
+				const warningIdx = err.message.indexOf("[warning]");
+				assert.ok(errorIdx > -1, "expected an [error] line");
+				assert.ok(warningIdx > -1, "expected a [warning] line");
+				assert.ok(
+					errorIdx < warningIdx,
+					"errors should be ordered before warnings",
+				);
+				assert.match(err.message, /\(user config\)/);
+				return true;
+			},
+		);
+	});
 });
 
 describe("formatAggregatedDiagnostics: rule-based spec", () => {

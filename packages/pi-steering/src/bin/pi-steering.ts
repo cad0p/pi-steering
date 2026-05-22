@@ -27,7 +27,6 @@ import {
 	runMergerWithLoaderShortCircuit,
 } from "../internal/session-runtime.ts";
 import { loadConfigs } from "../loader.ts";
-import { validateUserConfigNames } from "../plugin-merger.ts";
 import type {
 	Observer,
 	Rule,
@@ -274,17 +273,15 @@ async function runList(args: string[]): Promise<number> {
 		recordDiagnostic(d);
 	}
 
-	// Validate user-config rule + observer names. Plugin-shipped
-	// names are validated inside `resolvePlugins`; user-config names
-	// reach `validateName` only at session_start (via the evaluator /
-	// observer-dispatcher build-time throw). The CLI is the pre-flight
-	// surface, so it runs the same check here — otherwise a config with
-	// a malformed user-config rule name would render as a valid listing
-	// on stdout, then production would refuse to start on the same
-	// config and the user would see a different verdict.
-	for (const d of validateUserConfigNames(config)) {
-		recordDiagnostic(d);
-	}
+	// User-config rule + observer name validation runs inside
+	// `runMergerWithLoaderShortCircuit` (between `buildConfig` and
+	// `resolvePlugins`) so every surface — production runtime,
+	// `loadHarness`, and this CLI — gets the same `invalid-name`
+	// diagnostic stream. Tradeoff: when the merge step short-circuits
+	// on an error-class diagnostic (e.g. `tracker-name-collision`),
+	// user-config name validation does NOT run — plugin-shipped name
+	// validation also doesn't run in that case, so the CLI shows a
+	// consistent "merge-error suppresses downstream surfaces" view.
 
 	if (format === "json") {
 		process.stdout.write(

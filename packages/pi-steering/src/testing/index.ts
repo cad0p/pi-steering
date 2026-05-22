@@ -174,13 +174,18 @@ export interface Harness {
 	 * harness — loader-side (within-layer collisions, cross-config
 	 * collisions when {@link LoadHarnessOptions.includeDefaults} is
 	 * `true`) and plugin-merger-side (predicate / observer / rule /
-	 * extension-orphan / reserved-name diagnostics).
+	 * extension-orphan / reserved-name / invalid-name diagnostics,
+	 * plus user-config rule and observer name validation).
 	 *
 	 * Unlike production, `loadHarness` does NOT throw on error-class
 	 * diagnostics. Plugin-author tests assert directly on this array
 	 * (e.g. `harness.diagnostics.some(d => d.kind === "reserved-tracker-name")`)
 	 * so the failure surface is observable in test output rather than
-	 * a thrown error that hides which other diagnostics fired.
+	 * a thrown error that hides which other diagnostics fired. Both
+	 * plugin-shipped and user-config malformed names route through the
+	 * same `kind: "invalid-name"` diagnostic stream — plugin-author
+	 * tests can use a uniform matrix of malformed-name cases without
+	 * worrying about which surface raised the issue.
 	 *
 	 * Production-strictness divergence: `loadHarness` does NOT honor
 	 * the merged config's `failOnWarnings` flag. Production's

@@ -162,6 +162,45 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		);
 	});
 
+	it("throws on an invalid-name diagnostic for a malformed plugin name", async () => {
+		// `validateName` flows through the diagnostic stream rather than
+		// throwing a plain Error, so the strict-mode aggregation surfaces
+		// the malformed name in the same `N config issue:` shape as other
+		// error-class diagnostics. The malformed plugin must use a name
+		// shape the loader's plugin-name validation accepts — here we
+		// trigger the merger via a malformed RULE name shipped by an
+		// otherwise-valid plugin.
+		writeSteeringConfig(
+			tmpHome,
+			`export default {
+				disableDefaults: true,
+				plugins: [
+					{
+						name: "forge-plugin",
+						rules: [
+							{
+								name: "bad name",
+								tool: "bash",
+								field: "command",
+								pattern: /^never$/,
+								reason: "r",
+							},
+						],
+					},
+				],
+			};`,
+		);
+		await assert.rejects(
+			() => buildSessionRuntime(tmpHome, noopHost),
+			(err: Error) => {
+				assert.match(err.message, /^1 config issue:/);
+				assert.match(err.message, /\[error\]/);
+				assert.match(err.message, /^.*rule name "bad name".*disallowed/m);
+				return true;
+			},
+		);
+	});
+
 	it("aggregates multiple diagnostics with errors first", async () => {
 		// One error (tracker collision) + one warning (rule
 		// collision). Aggregated message lists the error before the

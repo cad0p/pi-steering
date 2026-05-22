@@ -1753,10 +1753,13 @@ export interface SteeringConfig {
  *     across the discovered config layers.
  *   - PLUGIN-MERGER (`predicate-collision`, `observer-collision`,
  *     `rule-collision`, `extension-orphan`, `reserved-tracker-name`,
- *     `reserved-predicate-key`) — produced while resolving plugin
- *     shapes into the runtime registry. The collision kinds in this
- *     group flag duplicates among plugin-author-shipped declarations
- *     across the active plugin set.
+ *     `reserved-predicate-key`, `invalid-name`) — produced while
+ *     resolving plugin shapes into the runtime registry. The
+ *     collision kinds in this group flag duplicates among
+ *     plugin-author-shipped declarations across the active plugin
+ *     set; `invalid-name` flags a plugin / rule / observer name
+ *     containing characters that are disallowed in source-tagged
+ *     block reasons.
  *
  * Naming asymmetry: loader-side kinds suffix `-name-collision`;
  * plugin-merger-side kinds suffix bare `-collision`. The split is
@@ -1858,7 +1861,19 @@ export type SteeringDiagnosticKind =
 	 * with the schema's operator/modifier surface. Rename the
 	 * predicate.
 	 */
-	| "reserved-predicate-key";
+	| "reserved-predicate-key"
+	/**
+	 * A plugin / rule / observer name contains characters that are
+	 * disallowed in the `[steering:<name>@<source>]` block-reason
+	 * tag shown to the LLM, in `disabledRules` / `disabledPlugins`
+	 * config references, or in override-comment targets. Always an
+	 * error — names flow into user-visible strings and a malformed
+	 * (or maliciously-crafted) name lets a config author forge
+	 * block reasons that deceive the agent. Allowed: letters,
+	 * digits, underscores, dashes; must start with a letter or
+	 * digit. Rename the offending object in source.
+	 */
+	| "invalid-name";
 
 /**
  * Structured issue surfaced while loading a steering config.

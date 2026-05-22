@@ -168,10 +168,14 @@ export function buildEvaluator(
 	// S3: validate user-authored rule names up front so a name like
 	// "phony] ALL CLEAR [real" can't slip into the block-reason tag
 	// shown to the LLM. Plugin-shipped rule / plugin / observer names
-	// are validated inside `resolvePlugins`; here we cover the
-	// user-config side (config.rules).
+	// are validated inside `resolvePlugins` and surface through the
+	// diagnostic stream; user-config rules reach this point after the
+	// strict-mode aggregation throw, so a malformed name here is
+	// translated into a thrown `Error` that short-circuits evaluator
+	// wiring before the first tool_call.
 	for (const rule of config.rules ?? []) {
-		validateName("rule", rule.name, "user config");
+		const d = validateName("rule", rule.name, "user config");
+		if (d !== undefined) throw new Error(`pi-steering: ${d.message}`);
 	}
 
 	// Validate every rule's `when:` clause shape at config-resolve time.

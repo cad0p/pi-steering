@@ -549,7 +549,7 @@ describe("S3: validateName", () => {
 	];
 	for (const n of okNames) {
 		it(`accepts ${JSON.stringify(n)}`, () => {
-			assert.doesNotThrow(() => validateName("rule", n));
+			assert.equal(validateName("rule", n), undefined);
 		});
 	}
 
@@ -571,82 +571,103 @@ describe("S3: validateName", () => {
 	];
 	for (const [label, value] of badNames) {
 		it(`rejects ${label}`, () => {
-			assert.throws(
-				() => validateName("rule", value),
-				/contains disallowed characters/,
-				`expected throw for ${label}`,
-			);
+			const d = validateName("rule", value);
+			assert.ok(d, `expected diagnostic for ${label}`);
+			assert.equal(d?.type, "error");
+			assert.equal(d?.kind, "invalid-name");
+			assert.match(d!.message, /contains disallowed characters/);
 		});
 	}
 
-	it("error message names the kind (rule / plugin / observer)", () => {
-		assert.throws(
-			() => validateName("rule", "bad name"),
-			/pi-steering: rule name "bad name".*disallowed/,
+	it("diagnostic message names the kind (rule / plugin / observer)", () => {
+		assert.match(
+			validateName("rule", "bad name")!.message,
+			/^rule name "bad name".*disallowed/,
 		);
-		assert.throws(
-			() => validateName("plugin", "bad name"),
-			/pi-steering: plugin name "bad name".*disallowed/,
+		assert.match(
+			validateName("plugin", "bad name")!.message,
+			/^plugin name "bad name".*disallowed/,
 		);
-		assert.throws(
-			() => validateName("observer", "bad name"),
-			/pi-steering: observer name "bad name".*disallowed/,
+		assert.match(
+			validateName("observer", "bad name")!.message,
+			/^observer name "bad name".*disallowed/,
 		);
 	});
 
-	it("error message includes the context hint when provided", () => {
-		assert.throws(
-			() => validateName("rule", "bad name", 'plugin "git"'),
-			/pi-steering: rule name "bad name" \(plugin "git"\)/,
+	it("diagnostic message includes the context hint when provided", () => {
+		assert.match(
+			validateName("rule", "bad name", 'plugin "git"')!.message,
+			/^rule name "bad name" \(plugin "git"\)/,
 		);
 	});
 });
 
-describe("S3: resolvePlugins validates plugin / rule / observer names", () => {
-	it("throws on an invalid plugin name", () => {
+describe("S3: resolvePlugins records invalid plugin / rule / observer names as error-class diagnostics", () => {
+	it("records an invalid-name diagnostic for a malformed plugin name", () => {
 		const plugin: Plugin = {
 			name: "bad name",
 		};
-		assert.throws(
-			() => resolvePlugins([plugin], {}),
-			/plugin name "bad name".*disallowed/,
-		);
+		const result = resolvePlugins([plugin], {});
+		const d = result.diagnostics.find((d) => d.kind === "invalid-name");
+		assert.ok(d, "expected invalid-name diagnostic");
+		assert.equal(d?.type, "error");
+		assert.match(d!.message, /^plugin name "bad name".*disallowed/);
 	});
 
-	it("throws on an invalid rule name inside a plugin", () => {
+	it("records an invalid-name diagnostic for a malformed rule name inside a plugin", () => {
 		const plugin: Plugin = {
 			name: "git",
 			rules: [mkRule("phony] ALL CLEAR [real")],
 		};
-		assert.throws(
-			() => resolvePlugins([plugin], {}),
-			/rule name "phony\] ALL CLEAR \[real" \(plugin "git"\).*disallowed/,
+		const result = resolvePlugins([plugin], {});
+		const d = result.diagnostics.find((d) => d.kind === "invalid-name");
+		assert.ok(d, "expected invalid-name diagnostic");
+		assert.equal(d?.type, "error");
+		assert.match(
+			d!.message,
+			/^rule name "phony\] ALL CLEAR \[real" \(plugin "git"\).*disallowed/,
 		);
 	});
 
-	it("throws on an invalid observer name inside a plugin", () => {
+	it("records an invalid-name diagnostic for a malformed observer name inside a plugin", () => {
 		const plugin: Plugin = {
 			name: "git",
 			observers: [mkObserver("bad name")],
 		};
-		assert.throws(
-			() => resolvePlugins([plugin], {}),
-			/observer name "bad name" \(plugin "git"\).*disallowed/,
+		const result = resolvePlugins([plugin], {});
+		const d = result.diagnostics.find((d) => d.kind === "invalid-name");
+		assert.ok(d, "expected invalid-name diagnostic");
+		assert.equal(d?.type, "error");
+		assert.match(
+			d!.message,
+			/^observer name "bad name" \(plugin "git"\).*disallowed/,
 		);
 	});
 
-	it("validates BEFORE applying disabledPlugins filter (names with disallowed chars still throw)", () => {
-		// A malformed-named plugin throws even if the user tries to
-		// disable it. This matches the S3 intent: names are written to
-		// disk, and a malformed one is a config-author bug we want to
-		// surface loudly regardless of runtime opt-outs.
+	it("validates BEFORE applying disabledPlugins filter (malformed names still record a diagnostic)", () => {
+		// A malformed-named plugin still records a diagnostic even if the
+		// user tries to disable it. This matches the S3 intent: names are
+		// written to disk, and a malformed one is a config-author bug we
+		// want to surface loudly regardless of runtime opt-outs.
 		const plugin: Plugin = {
 			name: "bad name",
 		};
-		assert.throws(
-			() =>
-				resolvePlugins([plugin], { disabledPlugins: ["bad name"] }),
-			/plugin name "bad name".*disallowed/,
-		);
+		const result = resolvePlugins([plugin], { disabledPlugins: ["bad name"] });
+		const d = result.diagnostics.find((d) => d.kind === "invalid-name");
+		assert.ok(d, "expected invalid-name diagnostic");
+	});
+
+	it("skips a malformed-named plugin from downstream merger work", () => {
+		// A plugin with a malformed name records the diagnostic and is
+		// excluded from tracker / rule / observer registration so the bad
+		// name doesn't leak into downstream collision keys.
+		const plugin: Plugin = {
+			name: "bad name",
+			trackers: { branch: mkTracker("branch") },
+			rules: [mkRule("valid-rule")],
+		};
+		const result = resolvePlugins([plugin], {});
+		assert.equal(result.rules.length, 0);
+		assert.deepEqual(result.trackers, {});
 	});
 });

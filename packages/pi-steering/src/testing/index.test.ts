@@ -452,6 +452,27 @@ describe("loadHarness", () => {
 		);
 		assert.equal(hit.type, "error");
 	});
+
+	it("does NOT throw on a malformed plugin name; surfaces it as an invalid-name error-class diagnostic", () => {
+		// `validateName` flows through the diagnostic stream rather than
+		// throwing so plugin-author tests can read the failure surface
+		// from `harness.diagnostics` instead of catching a thrown Error.
+		const plugin: Plugin = {
+			// Spaces in a plugin name forge the `[steering:<name>@<source>]`
+			// block-reason tag (S3 boundary).
+			name: "bad name",
+		};
+		const harness = loadHarness({ config: { plugins: [plugin] } });
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "invalid-name",
+		);
+		assert.ok(
+			hit,
+			`expected an invalid-name diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /^plugin name "bad name".*disallowed/);
+	});
 });
 
 // ---------------------------------------------------------------------------

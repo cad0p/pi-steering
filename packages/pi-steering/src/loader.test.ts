@@ -946,4 +946,84 @@ describe("loader: loadSteeringConfig", () => {
 			`expected a rule-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
 		);
 	});
+
+	it("surfaces plugin-merger-side warnings (predicate-collision)", async () => {
+		// External embedders calling `loadSteeringConfig` for their own
+		// pre-flight check or bridge wiring need to see merger-side
+		// diagnostics, not just loader-side ones — otherwise their lint
+		// pass false-greens on configs that production refuses to start.
+		const cwd = join(tmp, "p");
+		mkdirSync(cwd, { recursive: true });
+		writeConfig(
+			join(cwd, ".pi", "steering.ts"),
+			configModule(
+				`{ plugins: [
+					{ name: "p1", predicates: { branch: () => true } },
+					{ name: "p2", predicates: { branch: () => false } },
+				] }`,
+			),
+		);
+		const { diagnostics } = await loadSteeringConfig(cwd);
+		const hit = diagnostics.find((d) => d.kind === "predicate-collision");
+		assert.ok(
+			hit,
+			`expected a predicate-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "warning");
+	});
+
+	it("surfaces plugin-merger-side errors (reserved-tracker-name)", async () => {
+		// reserved-tracker-name is an error-class diagnostic produced
+		// inside `resolvePlugins`. Without the plugin merger wired in, an
+		// embedder using `loadSteeringConfig` as a pre-flight would never
+		// see it — production's `buildSessionRuntime` would refuse to
+		// start on the same config.
+		const cwd = join(tmp, "p");
+		mkdirSync(cwd, { recursive: true });
+		writeConfig(
+			join(cwd, ".pi", "steering.ts"),
+			configModule(
+				`{ plugins: [
+					{
+						name: "reserved-name-plugin",
+						trackers: { events: { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" } },
+					},
+				] }`,
+			),
+		);
+		const { diagnostics } = await loadSteeringConfig(cwd);
+		const hit = diagnostics.find(
+			(d) => d.kind === "reserved-tracker-name",
+		);
+		assert.ok(
+			hit,
+			`expected a reserved-tracker-name diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+	});
+
+	it("surfaces malformed user-config rule names as invalid-name diagnostics (does NOT throw)", async () => {
+		// User-config name validation runs inside the shared merge-pipeline
+		// helper between `buildConfig` and `resolvePlugins`, so external
+		// embedders calling `loadSteeringConfig` get the same `invalid-name`
+		// diagnostic stream as the runtime / harness / CLI surfaces.
+		const cwd = join(tmp, "p");
+		mkdirSync(cwd, { recursive: true });
+		writeConfig(
+			join(cwd, ".pi", "steering.ts"),
+			configModule(
+				`{ rules: [
+					{ name: "phony] BAD", tool: "bash", field: "command", pattern: /^never$/, reason: "r" },
+				] }`,
+			),
+		);
+		const { diagnostics } = await loadSteeringConfig(cwd);
+		const hit = diagnostics.find((d) => d.kind === "invalid-name");
+		assert.ok(
+			hit,
+			`expected an invalid-name diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /\(user config\)/);
+	});
 });

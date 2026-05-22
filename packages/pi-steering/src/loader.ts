@@ -41,6 +41,8 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
+import { runMergerWithLoaderShortCircuit } from "./internal/session-runtime.ts";
 import type {
 	Observer,
 	Plugin,
@@ -607,30 +609,40 @@ export function buildConfig(
 }
 
 /**
- * Convenience: load all layers for `cwd`, then merge with optional
- * `defaults`. Equivalent to running {@link loadConfigs} then
- * {@link buildConfig} and concatenating their diagnostics arrays
- * — returns the same `{ config, diagnostics }` shape "the loader saw
- * EVERYTHING up to the runtime hand-off" so callers don't have to
- * stitch the two diagnostic streams together themselves.
+ * Convenience: load all layers for `cwd`, run the loader-side merge
+ * (`buildConfig`), then the plugin merger (`resolvePlugins`) with
+ * user-config rule + observer name validation between the two passes.
+ * Diagnostics from every surface flow into a single returned array,
+ * so an external embedder writing their own bridge or pre-flight
+ * check sees the SAME diagnostic stream the production runtime sees
+ * — no surface is silently skipped.
+ *
+ * The merge pipeline short-circuits on error-class merge diagnostics
+ * (e.g. `tracker-name-collision`) before running `resolvePlugins`,
+ * mirroring `buildSessionRuntime`. On short-circuit the returned
+ * diagnostics array contains only the merge-side stream; otherwise
+ * it carries every loader / merger / user-config-name diagnostic in
+ * declaration order.
  *
  * The runtime (`buildSessionRuntime`) does NOT use this wrapper
- * directly because it needs the raw layer list for the two-pass
- * disable-defaults probe. External callers building their own
- * extensions or CLIs that want the full merged config + diagnostics
- * in one call should reach for this.
+ * directly because it needs the raw layer list for the
+ * disable-defaults peek. External callers building their own
+ * extensions or CLIs that want the full effective config + every
+ * diagnostic in one call should reach for this.
  */
 export async function loadSteeringConfig(
 	cwd: string,
 	defaults?: SteeringConfig,
 ): Promise<{ config: SteeringConfig; diagnostics: SteeringDiagnostic[] }> {
 	const { layers, diagnostics: loaderDiagnostics } = await loadConfigs(cwd);
-	const { config, diagnostics: mergeDiagnostics } = buildConfig(
-		layers,
-		defaults,
-	);
+	const { merged, diagnostics: mergeAndResolveDiagnostics } =
+		runMergerWithLoaderShortCircuit(
+			layers,
+			defaults,
+			EVALUATOR_BUILTIN_TRACKERS,
+		);
 	return {
-		config,
-		diagnostics: [...loaderDiagnostics, ...mergeDiagnostics],
+		config: merged,
+		diagnostics: [...loaderDiagnostics, ...mergeAndResolveDiagnostics],
 	};
 }

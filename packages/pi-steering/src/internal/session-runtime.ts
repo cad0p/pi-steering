@@ -25,6 +25,7 @@
 import { DEFAULT_PLUGINS, DEFAULT_RULES } from "../defaults.ts";
 import {
 	buildEvaluator,
+	EVALUATOR_BUILTIN_TRACKERS,
 	type EvaluatorRuntime,
 	type EvaluatorHost,
 } from "../evaluator.ts";
@@ -166,11 +167,7 @@ export async function buildSessionRuntime(
 	const resolved = resolvePlugins(
 		filteredConfig.plugins ?? [],
 		filteredConfig,
-		// `cwd` and `env` are injected by the evaluator (built-in
-		// cwdTracker + envTracker); extensions targeting them are valid
-		// and must not be treated as orphans. Any other built-in tracker
-		// the evaluator introduces later should be added here.
-		["cwd", "env"],
+		EVALUATOR_BUILTIN_TRACKERS,
 	);
 	aggregated.push(...resolved.diagnostics);
 

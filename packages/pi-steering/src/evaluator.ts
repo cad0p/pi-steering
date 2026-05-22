@@ -95,6 +95,23 @@ import type {
 } from "./schema.ts";
 
 // ---------------------------------------------------------------------------
+// Built-in trackers
+// ---------------------------------------------------------------------------
+
+/**
+ * Names of trackers the evaluator wires in directly (not via a plugin).
+ * `resolvePlugins` accepts this list as `knownBuiltinTrackers`: plugin
+ * `trackerExtensions` targeting these names are kept (so plugins can
+ * compose modifiers onto them) without emitting an `extension-orphan`
+ * diagnostic.
+ *
+ * Both call sites — `buildSessionRuntime` and `loadHarness` — import
+ * this constant so a future addition (e.g. an `argv` tracker) lights up
+ * uniformly across production and the test harness.
+ */
+export const EVALUATOR_BUILTIN_TRACKERS = ["cwd", "env"] as const;
+
+// ---------------------------------------------------------------------------
 // Public surface
 // ---------------------------------------------------------------------------
 

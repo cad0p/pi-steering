@@ -71,6 +71,7 @@ import {
 } from "../evaluator-internals/context.ts";
 import {
 	buildEvaluator,
+	EVALUATOR_BUILTIN_TRACKERS,
 	type EvaluatorHost,
 	type EvaluatorRuntime,
 } from "../evaluator.ts";
@@ -257,11 +258,7 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 	const resolved = resolvePlugins(
 		filteredConfig.plugins ?? [],
 		filteredConfig,
-		// `cwd` and `env` are injected by the evaluator (built-in
-		// cwdTracker + envTracker); extensions targeting them are valid
-		// and must not be treated as orphans. Keep in sync with
-		// `buildSessionRuntime`.
-		["cwd", "env"],
+		EVALUATOR_BUILTIN_TRACKERS,
 	);
 
 	// Mirror session-runtime's unused-observer drop so loadHarness

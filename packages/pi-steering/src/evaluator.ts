@@ -178,9 +178,18 @@ export function buildEvaluator(
 	// `loadHarness` / `loadSteeringConfig`. Plugin-shipped rule /
 	// plugin / observer names are validated inside `resolvePlugins`
 	// and surface through the diagnostic stream.
+	//
+	// Latent mis-attribution risk: this loop iterates `config.rules`,
+	// which on a default-defaults run includes `DEFAULT_RULES`. If a
+	// future DEFAULT_RULES entry ever lands with a malformed name,
+	// this throw will mis-label it as `(user config)`. The
+	// `validateUserConfigNames` helper at the production pipeline
+	// correctly partitions user vs. plugin/default; this defensive
+	// path does not. Defaults are package-controlled and reviewed,
+	// so the case is currently unreachable.
 	for (const rule of config.rules ?? []) {
 		const d = validateName("rule", rule.name, "user config");
-		if (d !== undefined) throw new Error(`pi-steering: ${d.message}`);
+		if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);
 	}
 
 	// Validate every rule's `when:` clause shape at config-resolve time.

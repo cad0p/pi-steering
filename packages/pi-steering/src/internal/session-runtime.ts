@@ -48,9 +48,7 @@ import { dropUnusedObservers } from "./drop-unused-observers.ts";
  *   - Severity ordering: errors first, then warnings. Within each
  *     severity, declaration order is preserved.
  *
- * No footer. The aggregated message is wrapped by pi's automatic
- * `Failed to load extension:` prefix when the throw surfaces in pi's
- * `[Extension issues]` block.
+ * No footer.
  */
 export function formatAggregatedDiagnostics(
 	diagnostics: readonly SteeringDiagnostic[],

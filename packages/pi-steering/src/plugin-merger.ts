@@ -226,10 +226,12 @@ function composeTracker(
  * Collision semantics per the ADR:
  *   - predicate / observer / plugin-shipped-rule name collision — first
  *     wins, recorded as a warning-class diagnostic.
- *   - tracker name collision — still throws (the loader-side
- *     buildConfig records this as an error-class diagnostic before
- *     reaching this function; the throw is defense-in-depth for
- *     direct resolvePlugins callers that bypass buildConfig).
+ *   - tracker name collision — recorded as an error-class diagnostic
+ *     (the loader-side `buildConfig` records this first; the merger's
+ *     own check is defense-in-depth for direct resolvePlugins callers
+ *     that bypass `buildConfig`). Direct callers should check
+ *     `result.diagnostics.some(d => d.type === "error")` before using
+ *     the resolved state — same contract as `loadHarness`.
  *   - reserved tracker name (`events`) and reserved predicate keys
  *     (operator/modifier surface) — recorded as error-class
  *     diagnostics; the runtime escalates to a thrown error regardless
@@ -315,13 +317,17 @@ export function resolvePlugins(
 			}
 			const prior = trackerOwner.get(name);
 			if (prior !== undefined) {
-				throw new Error(
-					`[pi-steering] tracker name collision: ` +
+				diagnostics.push({
+					type: "error",
+					kind: "tracker-name-collision",
+					message:
+						`tracker name collision: ` +
 						`both plugins "${prior}" and "${plugin.name}" register ` +
 						`a tracker called "${name}". Two plugins claiming the ` +
 						`same state dimension is always a bug — rename one ` +
 						`tracker or disable one plugin.`,
-				);
+				});
+				continue;
 			}
 			trackerOwner.set(name, plugin.name);
 			trackers[name] = tracker;

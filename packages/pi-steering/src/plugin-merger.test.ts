@@ -157,8 +157,8 @@ describe("resolvePlugins: rule collision (soft)", () => {
 	});
 });
 
-describe("resolvePlugins: tracker collision (hard error)", () => {
-	it("throws when two plugins register the same tracker name", () => {
+describe("resolvePlugins: tracker collision (error-class diagnostic)", () => {
+	it("records an error-class tracker-name-collision diagnostic when two plugins register the same tracker name", () => {
 		const p1: Plugin = {
 			name: "first",
 			trackers: { branch: mkTracker("one") as Tracker<unknown> },
@@ -168,9 +168,54 @@ describe("resolvePlugins: tracker collision (hard error)", () => {
 			trackers: { branch: mkTracker("two") as Tracker<unknown> },
 		};
 
-		assert.throws(
-			() => resolvePlugins([p1, p2], {}),
-			/tracker name collision/,
+		const state = resolvePlugins([p1, p2], {});
+		const hit = state.diagnostics.find(
+			(d) => d.kind === "tracker-name-collision",
+		);
+		assert.ok(
+			hit,
+			`expected a tracker-name-collision diagnostic; got: ${JSON.stringify(state.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /tracker name collision/);
+		assert.match(hit.message, /"first".*"second"/);
+		// Direct callers (those that bypass `buildConfig`) check
+		// `result.diagnostics.some(d => d.type === "error")` before using
+		// the resolved state — same contract as `loadHarness`.
+		assert.ok(
+			state.diagnostics.some((d) => d.type === "error"),
+			"expected at least one error-class diagnostic",
+		);
+		// The colliding tracker is dropped from the second plugin; the first
+		// plugin's registration wins (matches the loader's first-wins ordering).
+		assert.equal((state.trackers.branch as Tracker<string>).initial, "one:init");
+	});
+
+	it("preserves warning-class diagnostics from earlier plugins alongside the tracker-name-collision error", () => {
+		// Convert-to-diagnostic guarantees: a tracker-name collision no
+		// longer aborts the merger. Earlier plugins' warning-class
+		// diagnostics (e.g. duplicate predicate names) survive on the
+		// returned `diagnostics` array, so direct callers of
+		// `resolvePlugins` see the full picture in one read instead of
+		// catching a throw and losing visibility into prior issues.
+		const p1: Plugin = {
+			name: "first",
+			predicates: { dup: () => true },
+			trackers: { branch: mkTracker("one") as Tracker<unknown> },
+		};
+		const p2: Plugin = {
+			name: "second",
+			predicates: { dup: () => false },
+			trackers: { branch: mkTracker("two") as Tracker<unknown> },
+		};
+		const state = resolvePlugins([p1, p2], {});
+		assert.ok(
+			state.diagnostics.some((d) => d.kind === "predicate-collision"),
+			"expected the predicate-collision warning to survive alongside the tracker error",
+		);
+		assert.ok(
+			state.diagnostics.some((d) => d.kind === "tracker-name-collision"),
+			"expected the tracker-name-collision error",
 		);
 	});
 

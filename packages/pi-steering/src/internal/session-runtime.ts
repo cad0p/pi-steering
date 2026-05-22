@@ -142,11 +142,11 @@ export async function buildSessionRuntime(
 	const treatWarningsAsErrors = failOnWarnings !== false;
 
 	// Short-circuit on error-class diagnostics produced by the loader
-	// or buildConfig BEFORE running resolvePlugins. The plugin merger
-	// has its own defensive throw on tracker-name collision; if we
-	// reach it with an unsafe config, that throw shadows the
-	// aggregated message we want to surface. Bail out here with the
-	// aggregated render so users see every diagnostic at once.
+	// or buildConfig BEFORE running resolvePlugins. The loader and the
+	// merger both detect tracker-name collisions; running the merger
+	// after the loader has already flagged one would emit a duplicate
+	// diagnostic. Bail out here with the aggregated render so users see
+	// every diagnostic at once without double-reporting.
 	if (aggregated.some((d) => d.type === "error")) {
 		throw new Error(formatAggregatedDiagnostics(aggregated));
 	}

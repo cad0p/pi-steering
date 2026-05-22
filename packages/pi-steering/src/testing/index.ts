@@ -239,13 +239,17 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 		else delete filteredConfig.rules;
 	}
 
-	// Short-circuit on loader-side error-class diagnostics before
-	// running `resolvePlugins`. The plugin merger's defensive throw on
-	// tracker-name collision would otherwise shadow the aggregated
-	// diagnostic stream the harness exposes. Mirrors the early-throw
-	// short-circuit in `buildSessionRuntime`, but instead of throwing
-	// we return a no-op harness so plugin-author tests can assert on
-	// the diagnostics array directly.
+	// Short-circuit on merge-side error-class diagnostics (e.g.
+	// tracker-name collision flagged by `detectTrackerNameCollisions`)
+	// before running `resolvePlugins`. The merger also detects
+	// tracker-name collisions, and running it after the loader has
+	// already flagged one would emit a duplicate diagnostic. Bail out
+	// here — instead of throwing we return a no-op harness so
+	// plugin-author tests can assert on the diagnostics array directly.
+	// Plugin-merger-side error-class diagnostics (`reserved-tracker-name`,
+	// `reserved-predicate-key`) flow through the regular path because
+	// `resolvePlugins` already records them as diagnostics rather than
+	// throwing.
 	if (mergeDiagnostics.some((d) => d.type === "error")) {
 		return buildNoopHarness(filteredConfig, mergeDiagnostics);
 	}

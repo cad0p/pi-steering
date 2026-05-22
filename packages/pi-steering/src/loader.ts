@@ -302,9 +302,19 @@ export async function loadConfigs(cwd: string): Promise<{
  * Collect plugins across layers, recording a diagnostic for each
  * cross-layer duplicate plugin name. First-registered wins (inner
  * layer is first — matches pi's project-local → global convention).
+ *
+ * Plugins whose name appears in the union of every layer's
+ * `disabledPlugins` are still merged into the output (so downstream
+ * surfaces like `pi-steering list` can render them tagged as
+ * disabled), but they're EXEMPT from collision detection. A user
+ * resolving a duplicate-plugin warning by adding the plugin to
+ * `disabledPlugins` should see the warning go away in the same
+ * config edit; detect-then-disable would still surface the warning
+ * even though the disable already settled the conflict.
  */
 function mergePlugins(
 	layers: readonly SteeringConfig[],
+	disabledPlugins: ReadonlySet<string>,
 	diagnostics: SteeringDiagnostic[],
 ): Plugin[] {
 	const seen = new Set<string>();
@@ -313,11 +323,13 @@ function mergePlugins(
 		if (!layer.plugins) continue;
 		for (const plugin of layer.plugins) {
 			if (seen.has(plugin.name)) {
-				diagnostics.push({
-					type: "warning",
-					kind: "plugin-name-collision",
-					message: `duplicate plugin "${plugin.name}"; keeping first-registered entry.`,
-				});
+				if (!disabledPlugins.has(plugin.name)) {
+					diagnostics.push({
+						type: "warning",
+						kind: "plugin-name-collision",
+						message: `duplicate plugin "${plugin.name}"; keeping first-registered entry.`,
+					});
+				}
 				continue;
 			}
 			seen.add(plugin.name);
@@ -336,9 +348,16 @@ function mergePlugins(
  * (authoring mistake) — mirrors {@link mergeObservers}. Cross-layer
  * collisions stay silent: overriding a rule by name is the documented
  * customization path.
+ *
+ * Rules whose name appears in the union of every layer's
+ * `disabledRules` are still merged into the output (so downstream
+ * surfaces like `pi-steering list` can render them tagged as
+ * disabled), but they're EXEMPT from collision detection. Mirrors
+ * the disabledPlugins handling in {@link mergePlugins}.
  */
 function mergeRules(
 	layers: readonly SteeringConfig[],
+	disabledRules: ReadonlySet<string>,
 	diagnostics: SteeringDiagnostic[],
 ): Rule[] {
 	const byName = new Map<string, Rule>();
@@ -347,13 +366,15 @@ function mergeRules(
 		const seenInLayer = new Set<string>();
 		for (const rule of layer.rules) {
 			if (seenInLayer.has(rule.name)) {
-				diagnostics.push({
-					type: "warning",
-					kind: "rule-name-collision",
-					message:
-						`duplicate rule "${rule.name}" within single config layer; ` +
-						"keeping first, dropping subsequent",
-				});
+				if (!disabledRules.has(rule.name)) {
+					diagnostics.push({
+						type: "warning",
+						kind: "rule-name-collision",
+						message:
+							`duplicate rule "${rule.name}" within single config layer; ` +
+							"keeping first, dropping subsequent",
+					});
+				}
 				continue;
 			}
 			seenInLayer.add(rule.name);
@@ -504,10 +525,25 @@ export function buildConfig(
 	if (defaults !== undefined) effective.push(defaults);
 
 	const diagnostics: SteeringDiagnostic[] = [];
-	const plugins = mergePlugins(effective, diagnostics);
+
+	// Compute the disable-sets up-front so the merge passes can drop
+	// disabled entities BEFORE running collision detection. A user
+	// resolving a duplicate-plugin warning by adding the plugin to
+	// `disabledPlugins` should see the warning go away in the same
+	// config edit — detect-then-disable would still surface the
+	// warning even though the disable already settled the conflict.
+	const disabledPluginsList = mergeStringUnion(effective, "disabledPlugins");
+	const disabledRulesList = mergeStringUnion(effective, "disabledRules");
+	const disabledPluginsSet = new Set(disabledPluginsList ?? []);
+	const disabledRulesSet = new Set(disabledRulesList ?? []);
+
+	// Predicate + tracker-extension collisions are detected in
+	// resolvePlugins, not here. buildConfig handles cross-layer and
+	// within-layer name-collision shapes only.
+	const plugins = mergePlugins(effective, disabledPluginsSet, diagnostics);
 	detectTrackerNameCollisions(plugins, diagnostics);
 
-	const rules = mergeRules(effective, diagnostics);
+	const rules = mergeRules(effective, disabledRulesSet, diagnostics);
 	const observers = mergeObservers(effective, diagnostics);
 
 	const out: SteeringConfig = {};
@@ -515,10 +551,10 @@ export function buildConfig(
 	if (rules.length > 0) out.rules = rules;
 	if (observers.length > 0) out.observers = observers;
 
-	const disabledRules = mergeStringUnion(effective, "disabledRules");
-	if (disabledRules !== undefined) out.disabledRules = disabledRules;
-	const disabledPlugins = mergeStringUnion(effective, "disabledPlugins");
-	if (disabledPlugins !== undefined) out.disabledPlugins = disabledPlugins;
+	if (disabledRulesList !== undefined) out.disabledRules = disabledRulesList;
+	if (disabledPluginsList !== undefined) {
+		out.disabledPlugins = disabledPluginsList;
+	}
 
 	const defaultNoOverride = mergeBool(effective, "defaultNoOverride");
 	if (defaultNoOverride !== undefined) {

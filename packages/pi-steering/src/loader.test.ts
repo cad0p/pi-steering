@@ -646,6 +646,84 @@ describe("loader: buildConfig", () => {
 		assert.match(hit.message, /branch/);
 	});
 
+	it("drops a colliding plugin from collision detection when disabledPlugins covers it", () => {
+		// Disabling 'git' in any layer should suppress the cross-layer
+		// duplicate-plugin diagnostic for 'git'. The user's natural
+		// workflow on seeing the warning is to add the plugin to
+		// disabledPlugins; that edit alone should resolve the warning.
+		// The plugin still appears in the merged output (downstream
+		// surfaces tag it as disabled); collision detection is the only
+		// thing that gets suppressed.
+		const gitInner: Plugin = { name: "git", rules: [] };
+		const gitOuter: Plugin = { name: "git", rules: [] };
+		const { config: merged, diagnostics } = buildConfig([
+			{ plugins: [gitInner], disabledPlugins: ["git"] },
+			{ plugins: [gitOuter] },
+		]);
+		assert.equal(
+			merged.plugins?.length,
+			1,
+			"first-seen plugin should still survive into the merged plugin list",
+		);
+		assert.equal(merged.plugins?.[0]?.name, "git");
+		assert.deepEqual(merged.disabledPlugins, ["git"]);
+		assert.equal(
+			diagnostics.filter((d) => d.kind === "plugin-name-collision").length,
+			0,
+			`expected no plugin-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+	});
+
+	it("still emits a plugin-name-collision diagnostic without the disable", () => {
+		// Inverse of the previous test — same colliding plugins, no
+		// disabledPlugins, the cross-layer diagnostic still fires.
+		const gitInner: Plugin = { name: "git", rules: [] };
+		const gitOuter: Plugin = { name: "git", rules: [] };
+		const { diagnostics } = buildConfig([
+			{ plugins: [gitInner] },
+			{ plugins: [gitOuter] },
+		]);
+		assert.equal(
+			diagnostics.filter((d) => d.kind === "plugin-name-collision").length,
+			1,
+		);
+	});
+
+	it("drops a within-layer duplicate rule from collision detection when disabledRules covers it", () => {
+		const { config: merged, diagnostics } = buildConfig([
+			{
+				disabledRules: ["dup"],
+				rules: [
+					{
+						name: "dup",
+						tool: "bash",
+						field: "command",
+						pattern: /^FIRST/,
+						reason: "first",
+					},
+					{
+						name: "dup",
+						tool: "bash",
+						field: "command",
+						pattern: /^SECOND/,
+						reason: "second",
+					},
+				],
+			},
+		]);
+		assert.equal(
+			merged.rules?.length,
+			1,
+			"first-seen rule should still survive into the merged rule list",
+		);
+		assert.equal(merged.rules?.[0]?.name, "dup");
+		assert.equal(
+			diagnostics.filter((d) => d.kind === "rule-name-collision").length,
+			0,
+			`expected no rule-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+	});
+
 	it("applies `defaults` as the outermost layer", () => {
 		const { config: merged } = buildConfig(
 			[{ rules: [{ name: "user", tool: "bash", field: "command", pattern: /u/, reason: "u" }] }],

@@ -1718,6 +1718,13 @@ export interface SteeringConfig {
 	 * Walk-up merge: inner layer wins when specified, identical to
 	 * {@link disableDefaults}.
 	 *
+	 * Note: `failOnWarnings: false` cannot recover from a layer whose
+	 * own import fails (a broken ancestor that produces
+	 * `layer-import-failed` cannot itself communicate the opt-out).
+	 * Either fix the broken file, or place a working inner layer with
+	 * `failOnWarnings: false` so the inner-wins merge picks up the
+	 * opt-out before the broken layer's diagnostic escalates.
+	 *
 	 * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
 	 */
 	failOnWarnings?: boolean;
@@ -1932,14 +1939,15 @@ export interface SteeringDiagnostic {
 	 *     (`.pi/steering.ts` AND `.pi/steering/index.ts`); the dir is
 	 *     intentional rather than picking one of the two coexisting files
 	 *     arbitrarily.
-	 *   - All plugin-merger kinds (`plugin-name-collision`,
-	 *     `rule-name-collision`, `observer-name-collision`,
-	 *     `tracker-name-collision`, `predicate-collision`,
-	 *     `observer-collision`, `rule-collision`, `extension-orphan`,
-	 *     `reserved-tracker-name`, `reserved-predicate-key`): unset.
-	 *     Cross-layer or plugin-shipped diagnostics name the participants
-	 *     (layer paths or plugin names) inside `message` instead — there
-	 *     is no single source path for them.
+	 *   - Cross-layer collisions and plugin-shipped diagnostics
+	 *     (`plugin-name-collision`, `rule-name-collision`,
+	 *     `observer-name-collision`, `tracker-name-collision`,
+	 *     `predicate-collision`, `observer-collision`, `rule-collision`,
+	 *     `extension-orphan`, `reserved-tracker-name`,
+	 *     `reserved-predicate-key`, `invalid-name`): unset. These
+	 *     diagnostics name the participants (layer paths or plugin
+	 *     names) inside `message` instead — there is no single source
+	 *     path for them.
 	 */
 	path?: string;
 }

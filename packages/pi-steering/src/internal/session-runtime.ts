@@ -90,6 +90,9 @@ function formatLegacyConsoleWarn(
  *      across raw layers without paying for a full merge.
  *   3. `buildConfig(layers, defaults?)` with defaults conditional on
  *      the disableDefaults peek, producing the effective config.
+ *   3a. Short-circuit on error-class loader / merge diagnostics
+ *      before running plugin merger — avoids double-reporting
+ *      tracker-name-collision when both surfaces detect it.
  *   4. Apply `config.disabledRules` to the merged `rules` — the plugin
  *      merger handles this for plugin-shipped rules, but
  *      `buildConfig` leaves user/default rules in `config.rules`
@@ -181,6 +184,11 @@ export async function buildSessionRuntime(
 		// legacy console.warn channel so users running with the opt-out
 		// still see the message stream that pre-strict-mode code
 		// produced.
+		// filter+predicate narrows the intersection type through the
+		// function-call boundary; an inline `for...of` + `if (d.type ===
+		// "warning")` fails to typecheck under exactOptionalPropertyTypes
+		// because the narrowing doesn't carry into
+		// `formatLegacyConsoleWarn`'s parameter type.
 		const warnings = aggregated.filter(
 			(d): d is SteeringDiagnostic & { type: "warning" } =>
 				d.type === "warning",

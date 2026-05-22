@@ -489,10 +489,11 @@ describe("loadHarness", () => {
 	});
 
 	it("does NOT throw on a tracker-name collision; surfaces it as an error-class diagnostic", () => {
-		// The plugin merger's defensive throw on tracker-name collision
-		// would otherwise shadow the diagnostic stream the harness exposes.
-		// loadHarness short-circuits to a no-op evaluator/dispatcher and
-		// surfaces the diagnostic instead.
+		// loadHarness aggregates loader + buildConfig + resolvePlugins
+		// diagnostics and short-circuits to a no-op evaluator/dispatcher
+		// when any error-class diagnostic fires, so plugin-author tests
+		// can read the diagnostic from `harness.diagnostics` instead of
+		// catching a thrown Error.
 		const t = {
 			initial: "?" as const,
 			unknown: "unknown" as const,

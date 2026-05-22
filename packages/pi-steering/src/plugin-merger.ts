@@ -236,12 +236,13 @@ function composeTracker(
  * Collision semantics per the ADR:
  *   - predicate / observer / plugin-shipped-rule name collision — first
  *     wins, recorded as a warning-class diagnostic.
- *   - tracker name collision — recorded as an error-class diagnostic
- *     (the loader-side `buildConfig` records this first; the merger's
- *     own check is defense-in-depth for direct resolvePlugins callers
- *     that bypass `buildConfig`). Direct callers should check
- *     `result.diagnostics.some(d => d.type === "error")` before using
- *     the resolved state — same contract as `loadHarness`.
+ *   - tracker name collision — recorded as an error-class diagnostic.
+ *     The loader-side `buildConfig` (`detectTrackerNameCollisions`)
+ *     records this same kind for callers going through the standard
+ *     pipeline; this in-merger check covers direct `resolvePlugins`
+ *     callers (testing, external embed) that bypass `buildConfig`.
+ *     Direct callers should check `result.diagnostics.some(d => d.type === "error")`
+ *     before using the resolved state — same contract as `loadHarness`.
  *   - reserved tracker name (`events`) and reserved predicate keys
  *     (operator/modifier surface) — recorded as error-class
  *     diagnostics; the runtime escalates to a thrown error regardless

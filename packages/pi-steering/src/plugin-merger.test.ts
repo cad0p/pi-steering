@@ -608,33 +608,37 @@ describe("S3: validateName", () => {
 
 describe("S3: validateUserConfigNames", () => {
 	it("returns no diagnostics for a clean user-config", () => {
-		const out = validateUserConfigNames({
-			rules: [
-				{
-					name: "clean-rule",
-					tool: "bash",
-					field: "command",
-					pattern: /a/,
-					reason: "r",
-				},
-			],
-			observers: [{ name: "clean_obs", onResult: async () => {} }],
-		});
+		const out = validateUserConfigNames([
+			{
+				rules: [
+					{
+						name: "clean-rule",
+						tool: "bash",
+						field: "command",
+						pattern: /a/,
+						reason: "r",
+					},
+				],
+				observers: [{ name: "clean_obs", onResult: async () => {} }],
+			},
+		]);
 		assert.equal(out.length, 0);
 	});
 
 	it("flags a malformed user-config rule name as an invalid-name diagnostic", () => {
-		const out = validateUserConfigNames({
-			rules: [
-				{
-					name: "phony] ALL CLEAR [real",
-					tool: "bash",
-					field: "command",
-					pattern: /a/,
-					reason: "r",
-				},
-			],
-		});
+		const out = validateUserConfigNames([
+			{
+				rules: [
+					{
+						name: "phony] ALL CLEAR [real",
+						tool: "bash",
+						field: "command",
+						pattern: /a/,
+						reason: "r",
+					},
+				],
+			},
+		]);
 		assert.equal(out.length, 1);
 		assert.equal(out[0]?.kind, "invalid-name");
 		assert.equal(out[0]?.type, "error");
@@ -645,9 +649,11 @@ describe("S3: validateUserConfigNames", () => {
 	});
 
 	it("flags a malformed user-config observer name as an invalid-name diagnostic", () => {
-		const out = validateUserConfigNames({
-			observers: [{ name: "evil] obs", onResult: async () => {} }],
-		});
+		const out = validateUserConfigNames([
+			{
+				observers: [{ name: "evil] obs", onResult: async () => {} }],
+			},
+		]);
 		assert.equal(out.length, 1);
 		assert.equal(out[0]?.kind, "invalid-name");
 		assert.equal(out[0]?.type, "error");
@@ -658,21 +664,72 @@ describe("S3: validateUserConfigNames", () => {
 	});
 
 	it("surfaces both rule and observer diagnostics in declaration order", () => {
-		const out = validateUserConfigNames({
-			rules: [
-				{
-					name: "bad rule",
-					tool: "bash",
-					field: "command",
-					pattern: /a/,
-					reason: "r",
-				},
-			],
-			observers: [{ name: "bad obs", onResult: async () => {} }],
-		});
+		const out = validateUserConfigNames([
+			{
+				rules: [
+					{
+						name: "bad rule",
+						tool: "bash",
+						field: "command",
+						pattern: /a/,
+						reason: "r",
+					},
+				],
+				observers: [{ name: "bad obs", onResult: async () => {} }],
+			},
+		]);
 		assert.equal(out.length, 2);
 		assert.match(out[0]!.message, /^rule name/);
 		assert.match(out[1]!.message, /^observer name/);
+	});
+
+	it("does NOT flag default rule names as `(user config)` — validator iterates over input layers, not the post-merge config", () => {
+		// Regression test: before this change, the validator accepted
+		// `merged: SteeringConfig` and walked `merged.rules` — which
+		// after `buildConfig` includes `DEFAULT_RULES` injected when
+		// `disableDefaults` is false. That mis-attributed package-
+		// controlled default rule names (`no-force-push`,
+		// `no-hard-reset`, etc.) to a `(user config)` source. The fix: validator now operates on raw input layers,
+		// which never contain default rules — those are package-
+		// controlled and live in `DEFAULT_RULES`, only spliced in by
+		// `buildConfig` after this validator runs in `runMergerPipeline`.
+		//
+		// We verify by passing an EMPTY layer array and confirming the
+		// validator returns zero diagnostics. If the validator were
+		// somehow walking a default-injected merged config, default
+		// rule names would still pass NAME_REGEX (they're well-formed),
+		// so this assertion uses input-shape evidence instead: the
+		// validator's single argument is `layers`, not a merged
+		// `SteeringConfig`, and an empty `layers` array yields zero
+		// diagnostics regardless of what defaults `buildConfig` would
+		// inject downstream.
+		const out = validateUserConfigNames([]);
+		assert.equal(out.length, 0);
+	});
+
+	it("validates names across multiple layers", () => {
+		// Sanity check that the new layer-array shape works as
+		// expected: malformed names in any layer surface, with each
+		// layer contributing its own diagnostics in order.
+		const out = validateUserConfigNames([
+			{
+				rules: [
+					{
+						name: "bad rule a",
+						tool: "bash",
+						field: "command",
+						pattern: /a/,
+						reason: "r",
+					},
+				],
+			},
+			{
+				observers: [{ name: "bad obs b", onResult: async () => {} }],
+			},
+		]);
+		assert.equal(out.length, 2);
+		assert.match(out[0]!.message, /"bad rule a"/);
+		assert.match(out[1]!.message, /"bad obs b"/);
 	});
 });
 

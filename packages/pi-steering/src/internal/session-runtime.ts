@@ -97,16 +97,18 @@ export function runMergerPipeline(
 	// User-config name validation runs unconditionally — BEFORE the
 	// merge short-circuit — so a config with a merge-side error AND a
 	// malformed user-config name surfaces both diagnostics in one
-	// run. The pass reads `merged.rules[*].name` and
-	// `merged.observers[*].name`, both populated by `buildConfig`
-	// even on merge error; the validation does not depend on any
+	// run. The pass reads each input layer's `rules[*].name` and
+	// `observers[*].name` (NOT the post-merge `merged` config, which
+	// can include `DEFAULT_RULES` injected by `buildConfig` —
+	// validating those would mis-attribute package-controlled names
+	// to a `(user config)` source). Validation does not depend on any
 	// `resolvePlugins` state, so there's no risk of cascading false-
 	// positives from a partially-merged config. Resolve-side
 	// (`resolvePlugins`) IS still gated behind the short-circuit
 	// because running it over a config with e.g. a tracker-name
 	// collision could surface confusing diagnostics from the
 	// inconsistent state.
-	const userConfigNameDiagnostics = validateUserConfigNames(merged);
+	const userConfigNameDiagnostics = validateUserConfigNames(layers);
 	if (mergeDiagnostics.some((d) => d.type === "error")) {
 		return {
 			merged,

@@ -159,21 +159,31 @@ export function validateName(
  * malformed user-config rule name renders as a valid listing on
  * stdout, then production refuses to start on the same config.
  *
- * Note: \`config.observers\` covers user-authored observers only.
- * Plugin-shipped observers live under \`config.plugins[].observers\`
+ * Operates on the raw user-authored `layers` array — NOT on the
+ * post-merge `SteeringConfig`. The merged config can include
+ * default rules injected by `buildConfig` (when `disableDefaults`
+ * is false); validating those would attribute package-controlled
+ * names to a `(user config)` source, which is a misnomer. Default
+ * rule names ship in `DEFAULT_RULES` and are package-controlled —
+ * they don't pass through this validator.
+ *
+ * Note: `layer.observers` covers user-authored observers only.
+ * Plugin-shipped observers live under `layer.plugins[].observers`
  * and are validated by {@link resolvePlugins}.
  */
 export function validateUserConfigNames(
-	config: SteeringConfig,
+	layers: readonly SteeringConfig[],
 ): SteeringDiagnostic[] {
 	const diagnostics: SteeringDiagnostic[] = [];
-	for (const rule of config.rules ?? []) {
-		const d = validateName("rule", rule.name, "user config");
-		if (d !== undefined) diagnostics.push(d);
-	}
-	for (const observer of config.observers ?? []) {
-		const d = validateName("observer", observer.name, "user config");
-		if (d !== undefined) diagnostics.push(d);
+	for (const layer of layers) {
+		for (const rule of layer.rules ?? []) {
+			const d = validateName("rule", rule.name, "user config");
+			if (d !== undefined) diagnostics.push(d);
+		}
+		for (const observer of layer.observers ?? []) {
+			const d = validateName("observer", observer.name, "user config");
+			if (d !== undefined) diagnostics.push(d);
+		}
 	}
 	return diagnostics;
 }

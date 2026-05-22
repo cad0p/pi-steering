@@ -587,4 +587,85 @@ describe("pi-steering list: diagnostics on stderr", () => {
 			`expected ERROR-tagged tracker collision on stderr; got: ${r.stderr}`,
 		);
 	});
+
+	it("writes an ERROR-tagged reserved-tracker-name diagnostic from the plugin merger to stderr", async () => {
+		// Reserved-name violations fire only at the plugin-merger surface;
+		// without the merger pass in `runList`, a user running
+		// `pi-steering list` on a config with a reserved tracker name
+		// would see no error, then hit the same violation at session_start.
+		writeScratchConfig(
+			scratch,
+			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
+			export default {
+				plugins: [
+					{ name: "reserved-plugin", trackers: { events: t } },
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: tracker name "events" is reserved/,
+			`expected reserved-tracker-name diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("writes an ERROR-tagged invalid-name diagnostic from the plugin merger to stderr", async () => {
+		// Malformed plugin / rule / observer names flow through the
+		// merger's diagnostic stream after the validateName refactor.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				plugins: [
+					{
+						name: "forge-plugin",
+						rules: [
+							{
+								name: "bad name",
+								tool: "bash",
+								field: "command",
+								pattern: /^never$/,
+								reason: "r",
+							},
+						],
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: rule name "bad name" \(plugin "forge-plugin"\).*disallowed/,
+			`expected invalid-name diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("a clean config produces no diagnostic lines on stderr", async () => {
+		writeScratchConfig(
+			scratch,
+			`export default {
+				rules: [
+					{
+						name: "clean-rule",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		const diagnosticLines = r.stderr
+			.split("\n")
+			.filter((line) => line.startsWith("[pi-steering]"));
+		assert.equal(
+			diagnosticLines.length,
+			0,
+			`expected zero diagnostic lines; got: ${JSON.stringify(diagnosticLines)}`,
+		);
+	});
 });

@@ -20,10 +20,12 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { FromJSONError, fromJSON } from "../compat.ts";
+import { EVALUATOR_BUILTIN_TRACKERS } from "../evaluator.ts";
 import {
 	buildConfig,
 	loadConfigs,
 } from "../loader.ts";
+import { resolvePlugins } from "../plugin-merger.ts";
 import type {
 	Observer,
 	Rule,
@@ -279,6 +281,34 @@ async function runList(args: string[]): Promise<number> {
 
 	const { config, diagnostics: mergeDiagnostics } = buildConfig(layers);
 	for (const d of mergeDiagnostics) {
+		process.stderr.write(`${formatCliDiagnostic(d)}\n`);
+	}
+
+	// Run the plugin merger so reserved-name violations, plugin /
+	// predicate / observer / rule collisions, and malformed plugin /
+	// rule / observer names surface on stderr too. Without this, a user
+	// running `pi-steering list` to debug their config would see no
+	// error for issues that fire only at session_start — the CLI's
+	// pre-flight role would silently skip the merger surface.
+	//
+	// Route the merger's `console.info` breadcrumbs (disabled plugins,
+	// dropped observers) to stderr for the duration of the call so
+	// `--format=json` consumers see clean JSON on stdout.
+	const originalInfo = console.info;
+	console.info = (...args: unknown[]) => {
+		process.stderr.write(`${args.map((a) => String(a)).join(" ")}\n`);
+	};
+	let resolved;
+	try {
+		resolved = resolvePlugins(
+			config.plugins ?? [],
+			config,
+			EVALUATOR_BUILTIN_TRACKERS,
+		);
+	} finally {
+		console.info = originalInfo;
+	}
+	for (const d of resolved.diagnostics) {
 		process.stderr.write(`${formatCliDiagnostic(d)}\n`);
 	}
 

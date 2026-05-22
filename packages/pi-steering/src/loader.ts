@@ -621,9 +621,27 @@ export function buildConfig(
  * The merge pipeline short-circuits on error-class merge diagnostics
  * (e.g. `tracker-name-collision`) before running `resolvePlugins`,
  * mirroring `buildSessionRuntime`. On short-circuit the returned
- * diagnostics array contains only the merge-side stream; otherwise
- * it carries every loader / merger / user-config-name diagnostic in
- * declaration order.
+ * diagnostics array contains the merge-side stream PLUS the user-
+ * config name validation stream (which runs unconditionally so a
+ * config with both classes of error surfaces both in one read);
+ * otherwise it carries every loader / merger / user-config-name
+ * diagnostic in declaration order.
+ *
+ * Production-strictness divergence: `loadSteeringConfig` does NOT
+ * apply the strict-mode `failOnWarnings` throw policy that
+ * `buildSessionRuntime` does. The function never throws on
+ * warning-class diagnostics regardless of `merged.failOnWarnings` —
+ * it returns the diagnostics array and lets the embedder decide.
+ * Embedders wanting production-faithful pre-flight semantics must
+ * apply the rule themselves:
+ *
+ *     const wouldRefuse = diagnostics.some(
+ *       (d) =>
+ *         d.type === "error" ||
+ *         (config.failOnWarnings !== false && d.type === "warning"),
+ *     );
+ *
+ * Same shape as the divergence note on `Harness.diagnostics`.
  *
  * The runtime (`buildSessionRuntime`) does NOT use this wrapper
  * directly because it needs the raw layer list for the

@@ -158,16 +158,31 @@ export interface Harness {
 	 * The effective config the harness was built from (after default
 	 * injection and `disable` filtering).
 	 *
-	 * No-op short-circuit caveat: when an error-class diagnostic
-	 * fires (the harness returns the no-op evaluator/dispatcher pair),
-	 * `config` is the input config as merged — NOT a guarantee that
-	 * production would accept it. Consumers must check
-	 * `harness.diagnostics.some(d => d.type === "error")` before
-	 * reading `config` if they intend to interpret it as "production
-	 * would have run on this shape."
+	 * No-op short-circuit caveat: when `harness.diagnostics` has an
+	 * error-class entry, treat `harness.config` as a debugging
+	 * artifact — it represents the input state pi-steering tried to
+	 * merge, NOT an executable config production would accept. Inspect
+	 * `harness.diagnostics` first to learn which surface flagged a
+	 * problem, then fix the source config and re-load before reading
+	 * `config` for any "production would have run on this shape"
+	 * interpretation.
 	 */
 	readonly config: SteeringConfig;
-	/** The plugin merger's resolved state, for introspection / assertions. */
+	/**
+	 * The plugin merger's resolved state, for introspection /
+	 * assertions.
+	 *
+	 * No-op short-circuit caveat: when an error-class diagnostic fires
+	 * and the harness returns the no-op evaluator/dispatcher pair,
+	 * `resolved.diagnostics` carries the FULL diagnostic list (merge-
+	 * side + user-config-name + resolve-side) to mirror
+	 * `harness.diagnostics`. In the regular path, `resolved.diagnostics`
+	 * carries only the resolve-side stream (predicate-collision,
+	 * observer-collision, rule-collision, extension-orphan, reserved-
+	 * tracker-name, reserved-predicate-key, plugin-shipped
+	 * invalid-name, tracker-name-collision). Consumers should prefer
+	 * `harness.diagnostics` for the canonical full list.
+	 */
 	readonly resolved: ResolvedPluginState;
 	/**
 	 * Every {@link SteeringDiagnostic} produced while building the

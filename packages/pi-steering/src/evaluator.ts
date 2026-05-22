@@ -167,12 +167,16 @@ export function buildEvaluator(
 ): EvaluatorRuntime {
 	// S3: validate user-authored rule names up front so a name like
 	// "phony] ALL CLEAR [real" can't slip into the block-reason tag
-	// shown to the LLM. Plugin-shipped rule / plugin / observer names
-	// are validated inside `resolvePlugins` and surface through the
-	// diagnostic stream; user-config rules reach this point after the
-	// strict-mode aggregation throw, so a malformed name here is
-	// translated into a thrown `Error` that short-circuits evaluator
-	// wiring before the first tool_call.
+	// shown to the LLM. Production callers go through
+	// `runMergerPipeline`, which produces an `invalid-name` diagnostic
+	// for malformed user-config names and aggregates it into the
+	// strict-mode throw — so this throw is unreachable from the
+	// standard pipeline. It remains as defense-in-depth for direct
+	// callers (unit tests, future SDK embedders) that build an
+	// evaluator without going through `buildSessionRuntime` /
+	// `loadHarness` / `loadSteeringConfig`. Plugin-shipped rule /
+	// plugin / observer names are validated inside `resolvePlugins`
+	// and surface through the diagnostic stream.
 	for (const rule of config.rules ?? []) {
 		const d = validateName("rule", rule.name, "user config");
 		if (d !== undefined) throw new Error(`pi-steering: ${d.message}`);

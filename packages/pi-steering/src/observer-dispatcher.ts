@@ -107,12 +107,16 @@ export function buildObserverDispatcher(
 	userObservers: readonly Observer[],
 	host: EvaluatorHost,
 ): ObserverDispatcher {
-	// S3: validate user-supplied observer names. Plugin observer names
-	// are validated inside `resolvePlugins` and surface through the
-	// diagnostic stream; user-config observers reach this point after
-	// the strict-mode aggregation throw, so a malformed name here is
-	// translated into a thrown `Error` that short-circuits dispatcher
-	// wiring before the first tool_result.
+	// S3: validate user-supplied observer names. Production callers
+	// go through `runMergerPipeline`, which produces an
+	// `invalid-name` diagnostic for malformed user-config names and
+	// aggregates it into the strict-mode throw — so this throw is
+	// unreachable from the standard pipeline. It remains as defense-
+	// in-depth for direct callers (unit tests, future SDK embedders)
+	// that build an observer dispatcher without going through
+	// `buildSessionRuntime` / `loadHarness` / `loadSteeringConfig`.
+	// Plugin observer names are validated inside `resolvePlugins`
+	// and surface through the diagnostic stream.
 	for (const o of userObservers) {
 		const d = validateName("observer", o.name, "user config");
 		if (d !== undefined) throw new Error(`pi-steering: ${d.message}`);

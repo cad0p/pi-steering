@@ -240,26 +240,33 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 		else delete filteredConfig.rules;
 	}
 
-	// Short-circuit on merge-side error-class diagnostics (e.g.
-	// tracker-name collision flagged by `detectTrackerNameCollisions`)
-	// before running `resolvePlugins`. The merger also detects
-	// tracker-name collisions, and running it after the loader has
-	// already flagged one would emit a duplicate diagnostic. Bail out
-	// here — instead of throwing we return a no-op harness so
-	// plugin-author tests can assert on the diagnostics array directly.
-	// Plugin-merger-side error-class diagnostics (`reserved-tracker-name`,
-	// `reserved-predicate-key`) flow through the regular path because
-	// `resolvePlugins` already records them as diagnostics rather than
-	// throwing.
-	if (mergeDiagnostics.some((d) => d.type === "error")) {
-		return buildNoopHarness(filteredConfig, mergeDiagnostics);
-	}
-
 	const resolved = resolvePlugins(
 		filteredConfig.plugins ?? [],
 		filteredConfig,
 		EVALUATOR_BUILTIN_TRACKERS,
 	);
+
+	// Aggregate every diagnostic produced during construction. Unlike
+	// `buildSessionRuntime`, loadHarness does NOT throw on error-class
+	// diagnostics — plugin-author tests assert on the array directly so
+	// they can see every diagnostic that fired in one read.
+	const diagnostics: SteeringDiagnostic[] = [
+		...mergeDiagnostics,
+		...resolved.diagnostics,
+	];
+
+	// Short-circuit on ANY error-class diagnostic — from the loader
+	// (tracker-name collision flagged by `detectTrackerNameCollisions`),
+	// from the cross-config merge (`buildConfig`), or from the plugin
+	// merger (`reserved-tracker-name`, `reserved-predicate-key`,
+	// `invalid-name`, `tracker-name-collision`). All error-class
+	// diagnostics produce the same no-op harness so plugin-author tests
+	// see uniform behavior regardless of which surface flagged the
+	// problem. Mirrors production's bridge-disabled state under the
+	// same conditions.
+	if (diagnostics.some((d) => d.type === "error")) {
+		return buildNoopHarness(filteredConfig, diagnostics);
+	}
 
 	// Mirror session-runtime's unused-observer drop so loadHarness
 	// tests produce the same verdicts as production for rules that
@@ -283,15 +290,6 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 		userDrop.kept,
 		host,
 	);
-
-	// Aggregate every diagnostic produced during construction. Unlike
-	// `buildSessionRuntime`, loadHarness does NOT throw on error-class
-	// diagnostics — plugin-author tests assert on the array directly so
-	// they can see every diagnostic that fired in one read.
-	const diagnostics: SteeringDiagnostic[] = [
-		...mergeDiagnostics,
-		...resolved.diagnostics,
-	];
 
 	return {
 		evaluate: evaluator.evaluate,

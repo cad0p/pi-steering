@@ -362,6 +362,96 @@ describe("loadHarness", () => {
 			"disabled plugin rule must not appear in resolved state",
 		);
 	});
+
+	it("surfaces an empty diagnostics array for a clean config", () => {
+		const rule = {
+			name: "clean",
+			tool: "bash" as const,
+			field: "command" as const,
+			pattern: /^never$/,
+			reason: "clean",
+		};
+		const harness = loadHarness({ config: { rules: [rule] } });
+		assert.deepEqual(harness.diagnostics, []);
+	});
+
+	it("surfaces an error-class diagnostic when a plugin claims a reserved tracker name", () => {
+		// Plugin authors writing tests against `loadHarness` should see
+		// reserved-name violations in their diagnostics array, NOT a thrown
+		// error that hides which other diagnostics fired alongside.
+		const t = {
+			initial: "?" as const,
+			unknown: "unknown" as const,
+			modifiers: {},
+			subshellSemantics: "isolated" as const,
+		};
+		const plugin: Plugin = {
+			name: "reserved-name-plugin",
+			// `events` is reserved for the evaluator's speculative-entry
+			// synthesis; plugins must not register a tracker under that name.
+			trackers: { events: t as never },
+		};
+		const harness = loadHarness({ config: { plugins: [plugin] } });
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "reserved-tracker-name",
+		);
+		assert.ok(
+			hit,
+			`expected a reserved-tracker-name diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+	});
+
+	it("surfaces a warning-class diagnostic when two plugins register the same predicate key", () => {
+		const plugin1: Plugin = {
+			name: "p1",
+			predicates: { branch: () => true },
+		};
+		const plugin2: Plugin = {
+			name: "p2",
+			predicates: { branch: () => false },
+		};
+		const harness = loadHarness({
+			config: { plugins: [plugin1, plugin2] },
+		});
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "predicate-collision",
+		);
+		assert.ok(
+			hit,
+			`expected a predicate-collision diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "warning");
+	});
+
+	it("does NOT throw on a tracker-name collision; surfaces it as an error-class diagnostic", () => {
+		// The plugin merger's defensive throw on tracker-name collision
+		// would otherwise shadow the diagnostic stream the harness exposes.
+		// loadHarness short-circuits to a no-op evaluator/dispatcher and
+		// surfaces the diagnostic instead.
+		const t = {
+			initial: "?" as const,
+			unknown: "unknown" as const,
+			modifiers: {},
+			subshellSemantics: "isolated" as const,
+		};
+		const harness = loadHarness({
+			config: {
+				plugins: [
+					{ name: "pa", trackers: { branch: t as never } },
+					{ name: "pb", trackers: { branch: t as never } },
+				],
+			},
+		});
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "tracker-name-collision",
+		);
+		assert.ok(
+			hit,
+			`expected a tracker-name-collision diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+	});
 });
 
 // ---------------------------------------------------------------------------

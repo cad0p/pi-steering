@@ -845,4 +845,50 @@ describe("pi-steering list: diagnostics on stderr", () => {
 			`expected observer-drop breadcrumb on stderr; got: ${r.stderr}`,
 		);
 	});
+
+	it("surfaces an `observer dropped` breadcrumb when the consumer rule is disabled via `disabledRules` (parity with runtime)", async () => {
+		// Regression test for the CLI/runtime divergence in
+		// `runCliMergeWithInfoCapture`. The runtime
+		// (`buildSessionRuntime`) filters `merged.rules` against
+		// `disabledRules` BEFORE handing the union to
+		// `dropUnusedObservers`, so an observer whose only consumer is
+		// disabled gets dropped at session_start. The CLI must mirror
+		// that filter: otherwise `pi-steering list` shows the observer
+		// as kept, the production runtime drops it, and the author has
+		// no breadcrumb explaining why their observer doesn't fire.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				disabledRules: ["consumer"],
+				observers: [
+					{
+						name: "obs-x",
+						writes: ["X"],
+						onResult: () => {},
+					},
+				],
+				rules: [
+					{
+						name: "consumer",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+						when: { happened: { event: "X" } },
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(
+			r.code,
+			0,
+			`expected exit 0 (info-level breadcrumb only); got code=${r.code}, stderr=${r.stderr}`,
+		);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] observer 'obs-x' dropped; its writes \(X\) are not consumed by any rule/,
+			`expected observer-drop breadcrumb on stderr (consumer rule was disabled, observer should be reported as dropped to match runtime); got: ${r.stderr}`,
+		);
+	});
 });

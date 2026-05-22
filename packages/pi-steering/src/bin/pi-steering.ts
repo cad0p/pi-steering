@@ -343,7 +343,20 @@ function runCliMergeWithInfoCapture(
 		// suppresses downstream surfaces uniformly.
 		if (resolved !== null) {
 			const userObservers = merged.observers ?? [];
-			const allRules = [...(merged.rules ?? []), ...resolved.rules];
+			// Mirror the runtime's `disabledRules` filter (see
+			// `buildSessionRuntime` in `internal/session-runtime.ts`)
+			// before passing to `dropUnusedObservers`. Without this
+			// filter, observers whose only consumer is a disabled rule
+			// would appear consumed in the CLI but get dropped by the
+			// runtime — a divergence between `pi-steering list` and what
+			// production sees. `dropUnusedObservers`'s contract
+			// (`internal/drop-unused-observers.ts`) requires callers to
+			// pre-filter disabled rules.
+			const disabledRules = new Set(merged.disabledRules ?? []);
+			const userRules = (merged.rules ?? []).filter(
+				(r) => !disabledRules.has(r.name),
+			);
+			const allRules = [...userRules, ...resolved.rules];
 			const pluginDrop = dropUnusedObservers(resolved.observers, allRules);
 			const userDrop = dropUnusedObservers(userObservers, allRules);
 			for (const d of [...pluginDrop.dropped, ...userDrop.dropped]) {

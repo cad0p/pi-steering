@@ -598,6 +598,57 @@ describe("loadHarness", () => {
 		assert.match(hit.message, /^observer name "bad observer name".*disallowed/);
 		assert.match(hit.message, /\(user config\)/);
 	});
+
+	it("surfaces BOTH a tracker-name-collision AND a malformed user-config rule name in one harness load", () => {
+		// Combined-error case: a config with both a merge-side error
+		// (tracker-name-collision) AND a user-config-side error
+		// (malformed rule name) should produce both diagnostics in a
+		// single load. Before this change, `runMergerPipeline`'s short-circuit
+		// gated `validateUserConfigNames` behind the merge-error
+		// branch — the user fixed the tracker, re-loaded, and only
+		// THEN saw the malformed name. After this change, user-config name
+		// validation runs unconditionally (it doesn't depend on
+		// `resolvePlugins` state), so both classes of error surface
+		// together and the user fixes them in one edit.
+		const t = {
+			initial: "?" as const,
+			unknown: "unknown" as const,
+			modifiers: {},
+			subshellSemantics: "isolated" as const,
+		};
+		const harness = loadHarness({
+			config: {
+				plugins: [
+					{ name: "pa", trackers: { branch: t as never } },
+					{ name: "pb", trackers: { branch: t as never } },
+				],
+				rules: [
+					{
+						name: "phony] BAD",
+						tool: "bash" as const,
+						field: "command" as const,
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			},
+		});
+		assert.ok(
+			harness.diagnostics.some(
+				(d) => d.kind === "tracker-name-collision",
+			),
+			`expected a tracker-name-collision diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.ok(
+			harness.diagnostics.some(
+				(d) =>
+					d.kind === "invalid-name" &&
+					/phony\] BAD/.test(d.message) &&
+					/\(user config\)/.test(d.message),
+			),
+			`expected an invalid-name diagnostic for the malformed user-config rule; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------

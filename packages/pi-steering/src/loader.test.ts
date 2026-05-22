@@ -1026,4 +1026,47 @@ describe("loader: loadSteeringConfig", () => {
 		assert.equal(hit.type, "error");
 		assert.match(hit.message, /\(user config\)/);
 	});
+
+	it("surfaces BOTH a tracker-name-collision AND a malformed user-config rule name in one load", async () => {
+		// Combined-error case: a config with both a merge-side error
+		// (tracker-name-collision) AND a user-config-side error
+		// (malformed rule name) should produce both diagnostics in a
+		// single `loadSteeringConfig` call. Before this change,
+		// `runMergerPipeline`'s short-circuit gated
+		// `validateUserConfigNames` behind the merge-error branch — the
+		// embedder fixed the tracker, re-loaded, and only THEN saw the
+		// malformed name. After this change, user-config name validation runs
+		// unconditionally, so embedders see both classes of error in
+		// one read.
+		const cwd = join(tmp, "p");
+		mkdirSync(cwd, { recursive: true });
+		writeConfig(
+			join(cwd, ".pi", "steering.ts"),
+			configModule(
+				`{
+					plugins: [
+						{ name: "pa", trackers: { branch: { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" } } },
+						{ name: "pb", trackers: { branch: { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" } } },
+					],
+					rules: [
+						{ name: "phony] BAD", tool: "bash", field: "command", pattern: /^never$/, reason: "r" },
+					],
+				}`,
+			),
+		);
+		const { diagnostics } = await loadSteeringConfig(cwd);
+		assert.ok(
+			diagnostics.some((d) => d.kind === "tracker-name-collision"),
+			`expected a tracker-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.ok(
+			diagnostics.some(
+				(d) =>
+					d.kind === "invalid-name" &&
+					/phony\] BAD/.test(d.message) &&
+					/\(user config\)/.test(d.message),
+			),
+			`expected an invalid-name diagnostic for the malformed user-config rule; got: ${JSON.stringify(diagnostics)}`,
+		);
+	});
 });

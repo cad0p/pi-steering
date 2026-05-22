@@ -54,18 +54,27 @@ import { dropUnusedObservers } from "./drop-unused-observers.ts";
  * (`buildSessionRuntime`, `loadHarness`, the `pi-steering list` CLI)
  * emits each error-class diagnostic exactly once.
  *
- * User-config rule and observer name validation happens between
- * `buildConfig` and `resolvePlugins` so every surface gets the same
- * `invalid-name` diagnostic stream — no surface routes user-config
- * malformed names through the plain-Error throw inside
+ * User-config rule and observer name validation runs
+ * unconditionally between `buildConfig` and the merge short-circuit
+ * — so every surface gets the same `invalid-name` diagnostic stream
+ * including the case where a merge-side error fires alongside a
+ * malformed user-config name. The validation reads
+ * `merged.rules[*].name` and `merged.observers[*].name`, both
+ * populated by `buildConfig` even on merge error, and does not
+ * depend on any `resolvePlugins` state. No surface routes user-
+ * config malformed names through the plain-Error throw inside
  * `buildEvaluator` / `buildObserverDispatcher`. Plugin-shipped names
- * are still validated inside `resolvePlugins`.
+ * are still validated inside `resolvePlugins` (gated behind the
+ * short-circuit, since `resolvePlugins` is the surface that consumes
+ * them).
  *
  * Returns the merged `SteeringConfig`, the `ResolvedPluginState` (or
  * `null` when the short-circuit fired), and the aggregated
  * diagnostics array (merge-side, then user-config name validation,
  * then resolve-side, in order). On short-circuit `diagnostics`
- * contains only the merge-side stream.
+ * contains the merge-side stream PLUS the user-config name
+ * validation stream — resolve-side is skipped together with
+ * `resolvePlugins`.
  *
  * Loader-side diagnostics from `loadConfigs` are NOT included here —
  * callers that walked up from a cwd (`buildSessionRuntime`, the CLI)
@@ -85,10 +94,26 @@ export function runMergerPipeline(
 		layers,
 		defaults,
 	);
-	if (mergeDiagnostics.some((d) => d.type === "error")) {
-		return { merged, resolved: null, diagnostics: mergeDiagnostics };
-	}
+	// User-config name validation runs unconditionally — BEFORE the
+	// merge short-circuit — so a config with a merge-side error AND a
+	// malformed user-config name surfaces both diagnostics in one
+	// run. The pass reads `merged.rules[*].name` and
+	// `merged.observers[*].name`, both populated by `buildConfig`
+	// even on merge error; the validation does not depend on any
+	// `resolvePlugins` state, so there's no risk of cascading false-
+	// positives from a partially-merged config. Resolve-side
+	// (`resolvePlugins`) IS still gated behind the short-circuit
+	// because running it over a config with e.g. a tracker-name
+	// collision could surface confusing diagnostics from the
+	// inconsistent state.
 	const userConfigNameDiagnostics = validateUserConfigNames(merged);
+	if (mergeDiagnostics.some((d) => d.type === "error")) {
+		return {
+			merged,
+			resolved: null,
+			diagnostics: [...mergeDiagnostics, ...userConfigNameDiagnostics],
+		};
+	}
 	const resolved = resolvePlugins(
 		merged.plugins ?? [],
 		merged,

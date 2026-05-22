@@ -602,6 +602,54 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		);
 	});
 
+	it("surfaces BOTH a tracker-name-collision AND a malformed user-config rule name on stderr in one run", async () => {
+		// Combined-error case: a config with both a merge-side error
+		// (tracker-name-collision) AND a user-config-side error
+		// (malformed rule name) should produce both diagnostics on
+		// stderr in a single `pi-steering list` invocation. Before this change,
+		// `runMergerPipeline`'s short-circuit gated
+		// `validateUserConfigNames` behind the merge-error branch — the
+		// CLI user fixed the tracker, re-ran, and only THEN saw the
+		// malformed name. After this change, user-config name validation runs
+		// unconditionally so both classes of error surface together,
+		// matching the production runtime's aggregated throw.
+		writeScratchConfig(
+			scratch,
+			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
+			export default {
+				plugins: [
+					{ name: "pa", trackers: { branch: t } },
+					{ name: "pb", trackers: { branch: t } },
+				],
+				rules: [
+					{
+						name: "phony] BAD",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(
+			r.code,
+			1,
+			`expected exit 1 on combined error stream; got: code=${r.code}, stderr=${r.stderr}`,
+		);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: tracker name collision/,
+			`expected ERROR-tagged tracker-name-collision on stderr; got: ${r.stderr}`,
+		);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: rule name "phony\] BAD" \(user config\).*disallowed/,
+			`expected ERROR-tagged invalid-name on stderr; got: ${r.stderr}`,
+		);
+	});
+
 	it("writes an ERROR-tagged reserved-tracker-name diagnostic from the plugin merger to stderr", async () => {
 		// Reserved-name violations fire only at the plugin-merger surface;
 		// without the merger pass in `runList`, a user running

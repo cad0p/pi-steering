@@ -329,6 +329,58 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 			},
 		);
 	});
+
+	it("aggregates a tracker-name-collision merge error AND a malformed user-config rule name into one throw", async () => {
+		// Combined-error case: a config with both a merge-side error
+		// (tracker-name-collision) AND a user-config-side error
+		// (malformed rule name) should aggregate both diagnostics into
+		// a single throw. Before this change, `runMergerPipeline`'s short-circuit
+		// gated `validateUserConfigNames` behind the merge-error
+		// branch — the user fixed the tracker, re-ran, and only THEN
+		// saw the malformed name. After this change, user-config name validation
+		// runs unconditionally so both classes of error surface
+		// together with errors-first ordering.
+		writeSteeringConfig(
+			tmpHome,
+			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
+			export default {
+				disableDefaults: true,
+				plugins: [
+					{ name: "pa", trackers: { branch: t } },
+					{ name: "pb", trackers: { branch: t } },
+				],
+				rules: [
+					{
+						name: "phony] BAD",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			};`,
+		);
+		await assert.rejects(
+			() => buildSessionRuntime(tmpHome, noopHost),
+			(err: Error) => {
+				assert.match(err.message, /^2 config issues:/);
+				assert.match(err.message, /tracker name collision/);
+				assert.match(
+					err.message,
+					/rule name "phony\] BAD" \(user config\) contains disallowed/,
+				);
+				// Both errors render under [error] tags — errors-first
+				// ordering is trivially satisfied (no warnings in this case).
+				const errorTags = err.message.match(/\[error\]/g) ?? [];
+				assert.equal(
+					errorTags.length,
+					2,
+					`expected two [error] tags; got: ${err.message}`,
+				);
+				return true;
+			},
+		);
+	});
 });
 
 describe("formatAggregatedDiagnostics: rule-based spec", () => {

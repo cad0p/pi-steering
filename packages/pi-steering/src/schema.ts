@@ -1871,10 +1871,21 @@ export interface SteeringDiagnostic {
 	message: string;
 
 	/**
-	 * Source path. Set when the diagnostic originates from a single
-	 * config layer (per-layer import failure, dual-form coexistence,
-	 * stray file under `.pi/steering/`). Unset for cross-layer
-	 * collisions where multiple layers contribute.
+	 * Source path, when applicable. Per kind:
+	 *   - `layer-import-failed`: the source file the loader couldn't import.
+	 *   - `layer-stray-file`: the stray file under `.pi/steering/`.
+	 *   - `layer-form-coexistence`: the directory holding both forms
+	 *     (`.pi/steering.ts` AND `.pi/steering/index.ts`); the dir is
+	 *     intentional rather than picking one of the two coexisting files
+	 *     arbitrarily.
+	 *   - All plugin-merger kinds (`plugin-name-collision`,
+	 *     `rule-name-collision`, `observer-name-collision`,
+	 *     `tracker-name-collision`, `predicate-collision`,
+	 *     `observer-collision`, `rule-collision`, `extension-orphan`,
+	 *     `reserved-tracker-name`, `reserved-predicate-key`): unset.
+	 *     Cross-layer or plugin-shipped diagnostics name the participants
+	 *     (layer paths or plugin names) inside `message` instead — there
+	 *     is no single source path for them.
 	 */
 	path?: string;
 }

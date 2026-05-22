@@ -1757,8 +1757,11 @@ export interface SteeringConfig {
  *     `tracker-name-collision`) — produced while walking up the
  *     filesystem, importing per-layer config files, and merging
  *     layers into a single effective config. The collision kinds in
- *     this group flag duplicates among user-authored declarations
- *     across the discovered config layers.
+ *     this group flag duplicates surfaced during layer merge — most
+ *     are user-authored (`plugin-name-collision`, `rule-name-collision`,
+ *     `observer-name-collision`), but `tracker-name-collision` flags
+ *     duplicate plugin-shipped trackers when those plugins surface
+ *     together via the merge.
  *   - PLUGIN-MERGER (`predicate-collision`, `observer-collision`,
  *     `rule-collision`, `extension-orphan`, `reserved-tracker-name`,
  *     `reserved-predicate-key`, `invalid-name`) — produced while

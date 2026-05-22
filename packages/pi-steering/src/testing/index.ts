@@ -337,7 +337,12 @@ function buildNoopHarness(
 		composedTrackers: {},
 		rules: [],
 		rulePluginOwners: {},
-		diagnostics: [],
+		// Mirror harness.diagnostics so consumers reading either surface
+		// (harness.resolved.diagnostics or harness.diagnostics) see the
+		// same list. Otherwise harness.resolved.diagnostics would be
+		// silently empty in the no-op short-circuit branch while the
+		// outer harness.diagnostics carries the real entries.
+		diagnostics: [...diagnostics],
 	};
 	return {
 		evaluate: async () => {},

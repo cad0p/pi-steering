@@ -437,6 +437,18 @@ describe("loadHarness", () => {
 		assert.equal(harness.resolved.rules.length, 0);
 		assert.equal(harness.resolved.observers.length, 0);
 		assert.deepEqual(harness.resolved.trackers, {});
+		// Consistency: resolved.diagnostics mirrors the outer
+		// harness.diagnostics in the no-op short-circuit branch so
+		// consumers reading either surface get the same list.
+		assert.equal(
+			harness.resolved.diagnostics.length,
+			harness.diagnostics.length,
+		);
+		assert.ok(
+			harness.resolved.diagnostics.some(
+				(d) => d.kind === "reserved-tracker-name",
+			),
+		);
 	});
 
 	it("surfaces an error-class diagnostic when a plugin claims a reserved tracker name", () => {

@@ -563,12 +563,29 @@ describe("defaults: disabledPlugins: [\"git\"] opts out of the real git plugin",
 			"cwd.git tracker extension leaked past disabledPlugins: [\"git\"]",
 		);
 
-		// Plugin-merger emits a warning for every opted-out plugin; the
-		// CLI surfaces these in `list`. Spot-check that the warning fires
-		// here too, so a regression that silently accepts an unknown name
-		// also trips this test.
-		const warn = resolved.diagnostics.find((w) => w.kind === "plugin-disabled");
-		assert.ok(warn, "expected plugin-disabled warning for git");
-		assert.match(warn?.message ?? "", /"git"/);
+		// Plugin-merger surfaces a `console.info` breadcrumb for every
+		// opted-out plugin; the CLI surfaces these for plugin authors
+		// debugging "why isn't my plugin firing?". Spot-check that the
+		// breadcrumb fires here too, so a regression that silently accepts
+		// an unknown name also trips this test.
+		const origInfo = console.info;
+		const infos: string[] = [];
+		console.info = (msg: unknown) => {
+			infos.push(String(msg));
+		};
+		try {
+			resolvePlugins(DEFAULT_PLUGINS, { disabledPlugins: ["git"] });
+		} finally {
+			console.info = origInfo;
+		}
+		assert.ok(
+			infos.some(
+				(m) =>
+					m.includes("[pi-steering]") &&
+					m.includes('plugin "git"') &&
+					m.includes("disabled via config.disabledPlugins"),
+			),
+			`expected a console.info breadcrumb for the disabled git plugin; got: ${JSON.stringify(infos)}`,
+		);
 	});
 });

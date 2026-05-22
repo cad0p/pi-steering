@@ -19,7 +19,9 @@
  *     Extensions targeting an unregistered tracker are warned about and
  *     ignored.
  *   - config.disabledRules / config.disabledPlugins — filter rules and
- *     whole plugins by name. `config.disableDefaults` is the caller's
+ *     whole plugins by name. Disabled entries are surfaced via
+ *     `console.info` breadcrumbs (NOT diagnostics, since disabling is
+ *     by-design behavior). `config.disableDefaults` is the caller's
  *     problem:
  *     the caller chooses whether to include DEFAULT_PLUGINS in the input
  *     list (handled upstream by the extension runtime).
@@ -270,17 +272,19 @@ export function resolvePlugins(
 		}
 	}
 
-	// Filter plugins honoring `disabledPlugins`. Record disabled ones so
-	// callers see them in the diagnostics array (handy for debugging a
-	// rule that inexplicably stopped firing).
+	// Filter plugins honoring `disabledPlugins`. Disabled plugins are a
+	// by-design behavior, not a configuration issue, so they don't
+	// contribute to the diagnostic stream (escalating them to a throw
+	// under strict mode would make `disabledPlugins` unusable). Surface
+	// them via `console.info` for plugin authors debugging "why isn't
+	// my plugin firing?" — mirrors the breadcrumb pattern used for
+	// dropped observers in `internal/session-runtime.ts`.
 	const activePlugins: Plugin[] = [];
 	for (const plugin of plugins) {
 		if (disabledPlugins.has(plugin.name)) {
-			diagnostics.push({
-				type: "warning",
-				kind: "plugin-disabled",
-				message: `plugin "${plugin.name}" disabled via config.disabledPlugins`,
-			});
+			console.info(
+				`[pi-steering] plugin "${plugin.name}" disabled via config.disabledPlugins`,
+			);
 			continue;
 		}
 		activePlugins.push(plugin);
@@ -471,11 +475,15 @@ export function resolvePlugins(
 		if (!plugin.rules) continue;
 		for (const rule of plugin.rules) {
 			if (disabledRules.has(rule.name)) {
-				diagnostics.push({
-					type: "warning",
-					kind: "rule-disabled",
-					message: `rule "${rule.name}" (from plugin "${plugin.name}") disabled via config.disabledRules`,
-				});
+				// Disabled plugin-shipped rules are by-design behavior, not a
+				// configuration issue. Mirror the `disabledPlugins` breadcrumb
+				// above: `console.info` for plugin authors debugging "why
+				// isn't my rule firing?" without escalating to the diagnostic
+				// stream (which strict mode would throw on).
+				console.info(
+					`[pi-steering] rule "${rule.name}" (from plugin "${plugin.name}") ` +
+						`disabled via config.disabledRules`,
+				);
 				continue;
 			}
 			const prior = ruleOwner.get(rule.name);

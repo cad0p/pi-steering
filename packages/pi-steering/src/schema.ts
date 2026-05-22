@@ -1723,10 +1723,17 @@ export interface SteeringConfig {
  *     filesystem, importing per-layer config files, and merging
  *     layers into a single effective config.
  *   - PLUGIN-MERGER (`predicate-collision`, `observer-collision`,
- *     `rule-collision`, `plugin-disabled`, `extension-orphan`,
- *     `rule-disabled`, `reserved-tracker-name`,
+ *     `rule-collision`, `extension-orphan`, `reserved-tracker-name`,
  *     `reserved-predicate-key`) — produced while resolving plugin
  *     shapes into the runtime registry.
+ *
+ * Disabling a plugin via `config.disabledPlugins` or a plugin-shipped
+ * rule via `config.disabledRules` is by-design behavior, not a
+ * configuration issue, so neither contributes to the diagnostic
+ * stream. Both surface as `console.info` breadcrumbs from
+ * `resolvePlugins` for plugin authors debugging "why isn't my plugin
+ * firing?" — mirrors the unused-observer drop pattern in
+ * `internal/session-runtime.ts`.
  */
 export type SteeringDiagnosticKind =
 	/**
@@ -1796,24 +1803,11 @@ export type SteeringDiagnosticKind =
 	 */
 	| "rule-collision"
 	/**
-	 * A plugin was skipped because its name appears in the merged
-	 * config's `disabledPlugins`. Informational — surfaced so a user
-	 * debugging "why isn't my plugin firing?" can see the disable take
-	 * effect.
-	 */
-	| "plugin-disabled"
-	/**
 	 * A plugin's `trackerExtensions` references a tracker name that
 	 * no plugin (and no built-in walker tracker) registers. The
 	 * extension is ignored.
 	 */
 	| "extension-orphan"
-	/**
-	 * A plugin-shipped rule was removed from the merged rule list
-	 * because its name appears in the merged config's `disabledRules`.
-	 * Informational — mirrors `plugin-disabled`.
-	 */
-	| "rule-disabled"
 	/**
 	 * A plugin attempts to register a tracker under a reserved name
 	 * (e.g. `events`). Always an error — reserved names are owned by

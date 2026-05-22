@@ -341,6 +341,21 @@ describe("resolvePlugins: tracker extensions", () => {
 });
 
 describe("resolvePlugins: config filters", () => {
+	let origInfo: typeof console.info;
+	let infos: string[];
+
+	function captureInfos(): void {
+		origInfo = console.info;
+		infos = [];
+		console.info = (msg: unknown) => {
+			infos.push(String(msg));
+		};
+	}
+
+	function restoreInfos(): void {
+		console.info = origInfo;
+	}
+
 	it("applies config.disabledRules to plugin-shipped rules", () => {
 		const kept = mkRule("keep-me");
 		const dropped = mkRule("drop-me");
@@ -348,11 +363,32 @@ describe("resolvePlugins: config filters", () => {
 			name: "p",
 			rules: [kept, dropped],
 		};
-		const state = resolvePlugins([plugin], { disabledRules: ["drop-me"] });
-		assert.equal(state.rules.length, 1);
-		assert.equal(state.rules[0]?.name, "keep-me");
-		const warn = state.diagnostics.find((w) => w.kind === "rule-disabled");
-		assert.ok(warn, "expected rule-disabled warning");
+		captureInfos();
+		try {
+			const state = resolvePlugins([plugin], { disabledRules: ["drop-me"] });
+			assert.equal(state.rules.length, 1);
+			assert.equal(state.rules[0]?.name, "keep-me");
+			// Disabling a plugin-shipped rule is by-design behavior, not a
+			// diagnostic-stream entry. Surfaced via console.info so authors
+			// debugging "why isn't my rule firing?" still get a breadcrumb.
+			assert.deepEqual(
+				state.diagnostics.filter((d) =>
+					d.message.includes("disabled"),
+				),
+				[],
+			);
+			assert.ok(
+				infos.some(
+					(m) =>
+						m.includes("[pi-steering]") &&
+						m.includes('rule "drop-me"') &&
+						m.includes("disabled via config.disabledRules"),
+				),
+				`expected a console.info breadcrumb for the disabled rule; got: ${JSON.stringify(infos)}`,
+			);
+		} finally {
+			restoreInfos();
+		}
 	});
 
 	it("applies config.disabledPlugins to skip an entire plugin", () => {
@@ -366,15 +402,50 @@ describe("resolvePlugins: config filters", () => {
 			name: "kept",
 			predicates: { other: () => true },
 		};
-		const state = resolvePlugins([p1, p2], { disabledPlugins: ["git"] });
+		captureInfos();
+		try {
+			const state = resolvePlugins([p1, p2], { disabledPlugins: ["git"] });
 
-		assert.deepEqual(state.observers, []);
-		assert.deepEqual(state.rules, []);
-		assert.ok(!("branch" in state.predicates));
-		assert.ok("other" in state.predicates);
-		const warn = state.diagnostics.find((w) => w.kind === "plugin-disabled");
-		assert.ok(warn, "expected plugin-disabled warning");
-		assert.match(warn?.message ?? "", /"git"/);
+			assert.deepEqual(state.observers, []);
+			assert.deepEqual(state.rules, []);
+			assert.ok(!("branch" in state.predicates));
+			assert.ok("other" in state.predicates);
+			// No diagnostic for the disabled plugin — by-design behavior.
+			assert.deepEqual(
+				state.diagnostics.filter((d) =>
+					d.message.includes("disabled"),
+				),
+				[],
+			);
+			assert.ok(
+				infos.some(
+					(m) =>
+						m.includes("[pi-steering]") &&
+						m.includes('plugin "git"') &&
+						m.includes("disabled via config.disabledPlugins"),
+				),
+				`expected a console.info breadcrumb for the disabled plugin; got: ${JSON.stringify(infos)}`,
+			);
+		} finally {
+			restoreInfos();
+		}
+	});
+
+	it("disabledPlugins covering a default plugin does NOT throw under strict default", () => {
+		// Regression for the case where `disabledPlugins: ["git"]`
+		// previously emitted a `plugin-disabled` warning that strict
+		// mode (the new default) escalated to a thrown error, breaking
+		// the most common opt-out path on first activation.
+		captureInfos();
+		try {
+			const state = resolvePlugins(
+				[{ name: "git", predicates: { branch: () => true } }],
+				{ disabledPlugins: ["git"] },
+			);
+			assert.deepEqual(state.diagnostics, []);
+		} finally {
+			restoreInfos();
+		}
 	});
 });
 

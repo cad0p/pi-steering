@@ -110,12 +110,240 @@ export type ReasonFn = (
  * responsible for validating its shape. `ctx` is the same
  * {@link PredicateContext} the escape-hatch form receives.
  *
+ * Returns a {@link PredicateVerdict} (`true | false | "unknown"`).
+ * Pre-trinary handlers returning plain `boolean` remain source-compatible:
+ * `boolean` is a subtype of `PredicateVerdict`, so existing handlers assign
+ * unchanged. Handlers that need to surface walker-unknown state to the
+ * engine return the literal string `"unknown"`; the engine then applies
+ * the leaf's `onUnknown:` modifier (or, inside `not:`, the block-level
+ * `onUnknown:`) to produce the leaf's verdict for downstream composition.
+ *
+ * Throwing inside a handler is equivalent to returning `"unknown"`: the
+ * engine catches and treats the leaf as unknown, then applies the
+ * `onUnknown:` policy. Prefer explicit returns; the catch exists so a
+ * buggy handler can't silently fail-OPEN by skipping its rule.
+ *
  * See ADR "Design → Rule schema" → PredicateHandler.
  */
 export type PredicateHandler<A = unknown> = (
 	args: A,
 	ctx: PredicateContext,
-) => boolean | Promise<boolean>;
+) => PredicateVerdict | Promise<PredicateVerdict>;
+
+// ---------------------------------------------------------------------------
+// Per-predicate typing — registry, modifiers, mapped types
+// ---------------------------------------------------------------------------
+
+/**
+ * Trinary verdict surfaced by predicate handlers. `true` / `false` are
+ * the definite answers; the literal string `"unknown"` signals the
+ * predicate could not resolve its value (typically because some piece
+ * of walker-tracked state — cwd, branch, etc. — wasn't statically
+ * resolvable). The engine then applies the leaf's `onUnknown:` policy
+ * (or, inside `not:`, the block-level policy) to project the trinary
+ * verdict back to a definite boolean for rule-level composition.
+ */
+export type PredicateVerdict = boolean | "unknown";
+
+/**
+ * Predicate modifiers — optional fields that can be added to a
+ * predicate's spread form (outer leaf level) OR to the not-block top
+ * level. Single source of truth for what predicate authors and users
+ * can configure beyond the bare value. Adding a new modifier here
+ * propagates everywhere in the schema (every predicate's spread form,
+ * every not-block top level) and automatically reserves its key name
+ * via {@link ReservedPredicateKey}.
+ */
+export interface PredicateModifiers {
+	/**
+	 * Walker-unknown policy. When the predicate's value can't be
+	 * resolved at walker time (dynamic cwd / branch via `cd "$VAR"`,
+	 * `git checkout $VAR`, etc.), this policy decides the predicate's
+	 * verdict:
+	 *   - `"block"` (default): treat as fail-CLOSED — predicate fires.
+	 *   - `"allow"`: treat as fail-OPEN — predicate skips.
+	 *
+	 * At the leaf level (outer when-clause), this is per-predicate.
+	 * At the not-block top level, this applies to ALL leaves in the
+	 * not-block — leaf-level `onUnknown:` is forbidden inside `not:`
+	 * (type-level error) so the user can't write the silent
+	 * fail-OPEN `not: { cwd: P }` shape.
+	 */
+	onUnknown?: "allow" | "block";
+}
+
+/**
+ * Default spread BASE (without modifiers) inferred from `Bare`'s shape:
+ *   - `Bare extends object`   → `Bare` directly (intersection at use site).
+ *   - `Bare extends Patterns` → `{ pattern: Bare }` wrapper.
+ *   - else (primitive)        → `{ value: Bare }` wrapper.
+ *
+ * Note the order: object check FIRST so a pure-object predicate
+ * auto-detects to intersection (clean sibling-modifier UX). Pattern
+ * check second to capture the built-in `string | RegExp | array`
+ * family. Primitive fallback for `boolean`, `number`, etc.
+ *
+ * The tuple-wrap (`[Bare] extends [...]`) prevents distributive
+ * conditional behavior across union members of `Bare`.
+ */
+export type DefaultSpreadBase<Bare> =
+	[Bare] extends [object]
+		? Bare
+		: [Bare] extends [Pattern | Pattern[]]
+			? { pattern: Bare }
+			: { value: Bare };
+
+/**
+ * Shape of a single entry in the {@link PiSteeringPredicates} registry.
+ * Each predicate declares its `bare` form and (optionally) an explicit
+ * `spreadBase` — the spread's object form WITHOUT modifiers.
+ *
+ * - `bare`: the value users write at the leaf (Pattern, boolean,
+ *           number, etc.).
+ * - `SpreadBase` (param): the spread's object form WITHOUT modifiers;
+ *           defaults to {@link DefaultSpreadBase} from `Bare`.
+ * - `spread` (derived at use site): `spreadBase & PredicateModifiers`
+ *           — the form users write at the leaf to specify modifiers.
+ *           Inner `not:` form omits modifiers (leaf-level `onUnknown:`
+ *           inside `not:` is forbidden); outer leaf form intersects
+ *           with `PredicateModifiers`.
+ *
+ * @see PredicateModifiers for the modifier surface available on every
+ *      predicate's spread form.
+ * @see DefaultSpreadBase for how the SpreadBase auto-detects from Bare.
+ */
+export interface PredicateShape<Bare, SpreadBase = DefaultSpreadBase<Bare>> {
+	/** The bare value users write at the leaf (no wrapper, no modifiers). */
+	bare: Bare;
+	/**
+	 * The object form WITHOUT modifiers. Modifiers are added at use site
+	 * via `& PredicateModifiers` (outer leaf level) or at the not-block
+	 * top level (inside `not:`).
+	 */
+	spreadBase: SpreadBase;
+}
+
+declare global {
+	/**
+	 * Plugin-registered predicate registry. Empty by default; plugins
+	 * extend via TypeScript module augmentation (`declare global { interface
+	 * PiSteeringPredicates { ... } }`) to register typed predicates with
+	 * autocomplete + JSDoc.
+	 *
+	 * Keys must NOT collide with {@link ReservedPredicateKey} (the
+	 * operator-field union plus modifier keys); the type-level filter
+	 * via {@link Exclude} drops collisions silently, and the engine
+	 * throws at plugin-registration time with a concrete error message
+	 * pointing the plugin author at the collision.
+	 *
+	 * Do NOT add an index signature (e.g. `[k: string]: PredicateShape<unknown>`)
+	 * to this interface — it would widen `keyof PiSteeringPredicates` to
+	 * `string`, defeating the reserved-key filter (`Exclude<string,
+	 * "not" | "onUnknown">` is just `string` again).
+	 */
+	interface PiSteeringPredicates {
+		// Empty by default. Plugins augment via `declare global`.
+	}
+}
+
+/**
+ * Operator fields on `TopLevelWhenClause`. Currently just `"not"`;
+ * future v0.2 may add `"or"` / `"and"` operators. Kept as a separate
+ * union so reserved-key derivation stays lockstep with operator
+ * additions.
+ */
+export type OperatorField = "not";
+
+/**
+ * Reserved predicate keys derived from `OperatorField | keyof
+ * PredicateModifiers`. Plugin authors cannot register predicates with
+ * these names — they collide with the schema's `not?:` operator field
+ * and the `& PredicateModifiers` intersection on spread forms.
+ *
+ * Adding a new modifier to {@link PredicateModifiers} automatically
+ * reserves its key (lockstep via `keyof`); adding a new operator
+ * requires extending {@link OperatorField}.
+ *
+ * The type-level filter via {@link PluginPredicateKey} removes these
+ * names from the mapped types; the runtime constant
+ * `RESERVED_PREDICATE_KEYS` (in `evaluator-internals/predicates.ts`)
+ * mirrors this set so the engine throws at plugin-registration time
+ * with a concrete error message.
+ */
+export type ReservedPredicateKey = OperatorField | keyof PredicateModifiers;
+
+/**
+ * Plugin-registered predicate keys with reserved names filtered out.
+ * Used as the iteration domain for `TopLevelWhenClause` and
+ * `TopLevelWhenClauseNoRecurse`'s mapped types.
+ */
+export type PluginPredicateKey = Exclude<
+	keyof PiSteeringPredicates,
+	ReservedPredicateKey
+>;
+
+/**
+ * Outer leaf value: the bare form OR the spreadBase intersected with
+ * {@link PredicateModifiers}. Used at the top-level `when:` clause
+ * where each plugin-registered predicate accepts modifiers per-leaf.
+ */
+export type OuterValue<K extends PluginPredicateKey> =
+	| PiSteeringPredicates[K]["bare"]
+	| (PiSteeringPredicates[K]["spreadBase"] & PredicateModifiers);
+
+/**
+ * Inner leaf value (inside `not:`): bare form OR spreadBase WITHOUT
+ * modifiers. Modifiers live at the not-block top level — leaf-level
+ * modifiers inside `not:` are forbidden so the silent fail-OPEN
+ * `not: { cwd: P }` shape can't be reproduced via leaf-level
+ * `onUnknown:` placement.
+ */
+export type InnerValue<K extends PluginPredicateKey> =
+	| PiSteeringPredicates[K]["bare"]
+	| PiSteeringPredicates[K]["spreadBase"];
+
+/**
+ * Top-level when-clause attached to a Rule. Each plugin-registered
+ * predicate (filtered for reserved keys) gets a leaf-level field
+ * accepting the bare or spread form. The `not?:` operator allows one
+ * level of negation (no recursion).
+ *
+ * @see TopLevelWhenClauseNoRecurse for the body of `not:`.
+ * @see PredicateModifiers for available leaf-level modifier fields.
+ */
+export type TopLevelWhenClause = {
+	[K in PluginPredicateKey]?: OuterValue<K>;
+} & {
+	/**
+	 * Logical NOT: rule fires when the inner predicates' AND is false.
+	 *
+	 * Multi-leaf semantics: leaves AND together with Kleene 3-valued
+	 * logic. Walker-unknown leaves resolve via the block-level
+	 * `onUnknown:` modifier (default `"block"` = fail-CLOSED, rule
+	 * fires).
+	 *
+	 * No leaf-level `onUnknown:` here (forbidden at type level —
+	 * modifiers live at the not-block level). No `not:` recursion
+	 * (forbidden at type level — semantically equivalent to the
+	 * unwrapped form).
+	 *
+	 * @see TopLevelWhenClauseNoRecurse
+	 * @see PredicateModifiers
+	 */
+	not?: TopLevelWhenClauseNoRecurse;
+};
+
+/**
+ * Body of a `not:` block: predicates with their bare / spreadBase
+ * forms (NO leaf-level modifiers — modifiers live at this block's top
+ * level via `& PredicateModifiers`). No nested `not:` (no recursion).
+ *
+ * @see TopLevelWhenClause for the rule-attached when-clause.
+ * @see PredicateModifiers for block-level modifier fields.
+ */
+export type TopLevelWhenClauseNoRecurse = {
+	[K in PluginPredicateKey]?: InnerValue<K>;
+} & PredicateModifiers;
 
 /**
  * Type-erased alias for {@link PredicateHandler} used at registry

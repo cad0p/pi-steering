@@ -1074,7 +1074,7 @@ export async function testPredicate<A = unknown>(
 	predicate: PredicateHandler<A>,
 	args: A,
 	options: MockContextOptions = {},
-): Promise<boolean> {
+): Promise<boolean | "unknown"> {
 	const ctx = mockContext(options);
 	return predicate(args, ctx);
 }

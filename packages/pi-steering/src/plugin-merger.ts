@@ -37,6 +37,10 @@ import type {
 	Rule,
 	SteeringConfig,
 } from "./schema.ts";
+import {
+	isReservedPredicateKey,
+	RESERVED_PREDICATE_KEYS,
+} from "./evaluator-internals/predicates.ts";
 
 // ---------------------------------------------------------------------------
 // Name validation (S3)
@@ -377,6 +381,23 @@ export function resolvePlugins(
 	for (const plugin of activePlugins) {
 		if (!plugin.predicates) continue;
 		for (const [key, handler] of Object.entries(plugin.predicates)) {
+			// Reserved-key check fires at registration time so plugin authors
+			// get immediate feedback instead of an opaque type error at the
+			// user's rule site (the type-level filter via `Exclude` silently
+			// drops reserved keys from the registry surface). Adding a new
+			// modifier to `PredicateModifiers` automatically reserves its key
+			// via `RESERVED_PREDICATE_KEYS`; the type-vs-runtime sync is
+			// pinned by the `_RESERVED_PREDICATE_KEYS_COVERS_TYPE` assertion
+			// in `evaluator-internals/predicates.ts`.
+			if (isReservedPredicateKey(key)) {
+				throw new Error(
+					`[pi-steering] Plugin "${plugin.name}" attempted to register ` +
+						`reserved predicate key "${key}". This name conflicts with ` +
+						`the schema's operator/modifier surface ` +
+						`(${RESERVED_PREDICATE_KEYS.join(", ")}). Choose a different ` +
+						`name (e.g., "isNot", "negate").`,
+				);
+			}
 			const prior = predicateOwner.get(key);
 			if (prior !== undefined) {
 				warnings.push({

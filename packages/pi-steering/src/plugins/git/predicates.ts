@@ -27,13 +27,16 @@
  *                           --show-current`.
  *   - `upstream`         - no tracker today; always shell out via
  *                           `git rev-parse --abbrev-ref @{upstream}`.
- *                           Wrapped with `requireKnownCwd` so
- *                           walker-unknown cwd fires the predicate
- *                           rather than shelling against the pi
- *                           session cwd.
+ *                           Inlines a {@link cwdIsWalkerUnknown} guard
+ *                           so walker-unknown cwd surfaces trinary
+ *                           `"unknown"` instead of shelling against
+ *                           the pi session cwd — the engine's
+ *                           `onUnknown:` policy then projects to a
+ *                           definite verdict (default `"block"` =
+ *                           fail-CLOSED).
  *   - `commitsAhead`     - shell out via `git rev-list --count`.
- *                           Wrapped with `requireKnownCwd` for the
- *                           same reason as `upstream`.
+ *                           Inlines the same walker-unknown guard as
+ *                           `upstream`.
  *   - `hasStagedChanges` - shell out via `git diff --cached --quiet`.
  *   - `isClean`          - shell out via `git status --porcelain`.
  *   - `remote`           - shell out via `git config --get
@@ -56,8 +59,8 @@ import type {
 	Pattern,
 	PredicateContext,
 	PredicateHandler,
+	PredicateVerdict,
 } from "../../schema.ts";
-import { requireKnownCwd } from "../../helpers/require-known-state.ts";
 import { isPattern } from "../../internal/pattern-utils.ts";
 import { NO_CHECKOUT_IN_CHAIN } from "./branch-tracker.ts";
 import {
@@ -67,6 +70,35 @@ import {
 	getUpstream,
 	getWorkingTreeClean,
 } from "./git-ops.ts";
+
+// ---------------------------------------------------------------------------
+// Walker-unknown cwd guard (inline trinary)
+// ---------------------------------------------------------------------------
+
+/**
+ * Inline trinary guard for runtime-cwd predicates: returns `true` when
+ * the walker couldn't statically resolve the command's effective cwd
+ * (the cwd-tracker `"unknown"` sentinel is on `ctx.walkerState.cwd`),
+ * which signals to the caller that the handler should bail with
+ * `"unknown"` instead of querying the wrong repo.
+ *
+ * Replaces the deleted `requireKnownCwd` wrapper. Each runtime-cwd
+ * handler in this module starts with:
+ *
+ *   ```ts
+ *   if (cwdIsWalkerUnknown(ctx)) return "unknown";
+ *   ```
+ *
+ * The guard surfaces walker-unknown as trinary `"unknown"` instead of
+ * the wrap's old fail-CLOSED `true` collapse. The engine then applies
+ * the leaf-level (or block-level, inside `not:`) `onUnknown:` policy
+ * — default `"block"` keeps the fail-CLOSED behavior the wrap
+ * provided, while a user with `onUnknown: "allow"` opts into
+ * fail-OPEN handling. Self-documenting + composable.
+ */
+function cwdIsWalkerUnknown(ctx: PredicateContext): boolean {
+	return ctx.walkerState?.cwd === "unknown";
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -338,24 +370,25 @@ export const branch: PredicateHandler = async (value, ctx) => {
  * walker surfaces `ctx.walkerState.cwd === "unknown"` (dynamic
  * `cd "$VAR/pkg"` the walker couldn't resolve), the exec would run
  * against the pi session cwd — the wrong repo — and a user who opted
- * into `onUnknown: "allow"` would get a silent fail-OPEN. {@link
- * requireKnownCwd} fires the predicate instead, mirroring the engine's
- * `onUnknown: "block"` default. See `hasStagedChanges` JSDoc.
+ * into `onUnknown: "allow"` would get a silent fail-OPEN. The handler
+ * inlines a {@link cwdIsWalkerUnknown} check at the top and surfaces
+ * trinary `"unknown"`; the engine's leaf-level (outer) or block-level
+ * (inside `not:`) `onUnknown:` policy then projects to the right
+ * boolean (default `"block"` = fail-CLOSED).
  *
- * @see {@link walkerUnknownCwdReason} - compose the agent-facing
- *      reason text for the walker-unknown-cwd fail-closed branch in
- *      your rule's ReasonFn.
+ * @see walkerUnknownCwdReason — compose the agent-facing reason text
+ *      for the walker-unknown-cwd fail-closed branch in your rule's
+ *      ReasonFn.
  */
-export const upstream: PredicateHandler = requireKnownCwd(
-	async (value, ctx) => {
-		const arg = unwrapPatternArg(value);
-		if (arg === null) return false;
+export const upstream: PredicateHandler = async (value, ctx) => {
+	if (cwdIsWalkerUnknown(ctx)) return "unknown";
+	const arg = unwrapPatternArg(value);
+	if (arg === null) return false;
 
-		const out = await getUpstream(ctx);
-		if (out === null) return unknownVerdict(arg.onUnknown);
-		return arg.patterns.some((p) => matchPattern(p, out));
-	},
-);
+	const out = await getUpstream(ctx);
+	if (out === null) return unknownVerdict(arg.onUnknown);
+	return arg.patterns.some((p) => matchPattern(p, out));
+};
 
 // ---------------------------------------------------------------------------
 // commitsAhead
@@ -409,31 +442,35 @@ export interface CommitsAheadArgs {
  * the walker surfaces `ctx.walkerState.cwd === "unknown"`, the exec
  * would run against the pi session cwd — wrong repo — and the
  * `count === null` failure path returns `false`, silently skipping
- * the rule (fail-OPEN). {@link requireKnownCwd} fires the predicate
- * instead, matching the fail-closed policy used by the other
- * runtime-cwd predicates in this plugin.
+ * the rule (fail-OPEN). The handler inlines a
+ * {@link cwdIsWalkerUnknown} check at the top and surfaces trinary
+ * `"unknown"`; the engine's `onUnknown:` policy then projects to the
+ * right boolean (default `"block"` = fail-CLOSED, matching the policy
+ * used by the other runtime-cwd predicates in this plugin).
  *
- * @see {@link walkerUnknownCwdReason} - compose the agent-facing
- *      reason text for the walker-unknown-cwd fail-closed branch in
- *      your rule's ReasonFn.
+ * @see walkerUnknownCwdReason — compose the agent-facing reason text
+ *      for the walker-unknown-cwd fail-closed branch in your rule's
+ *      ReasonFn.
  */
-export const commitsAhead: PredicateHandler<CommitsAheadArgs> = requireKnownCwd(
-	async (args, ctx) => {
-		if (args === null || typeof args !== "object") return false;
-		const { wrt = "@{upstream}", eq, gt, lt } = args;
-		if (eq === undefined && gt === undefined && lt === undefined) {
-			return false;
-		}
+export const commitsAhead: PredicateHandler<CommitsAheadArgs> = async (
+	args,
+	ctx,
+) => {
+	if (cwdIsWalkerUnknown(ctx)) return "unknown";
+	if (args === null || typeof args !== "object") return false;
+	const { wrt = "@{upstream}", eq, gt, lt } = args;
+	if (eq === undefined && gt === undefined && lt === undefined) {
+		return false;
+	}
 
-		const count = await getCommitsAhead(ctx, wrt);
-		if (count === null) return false;
+	const count = await getCommitsAhead(ctx, wrt);
+	if (count === null) return false;
 
-		if (eq !== undefined && count !== eq) return false;
-		if (gt !== undefined && !(count > gt)) return false;
-		if (lt !== undefined && !(count < lt)) return false;
-		return true;
-	},
-);
+	if (eq !== undefined && count !== eq) return false;
+	if (gt !== undefined && !(count > gt)) return false;
+	if (lt !== undefined && !(count < lt)) return false;
+	return true;
+};
 
 // ---------------------------------------------------------------------------
 // hasStagedChanges
@@ -456,23 +493,22 @@ export const commitsAhead: PredicateHandler<CommitsAheadArgs> = requireKnownCwd(
  * at `ctx.cwd`. When the walker surfaces `ctx.walkerState.cwd ===
  * "unknown"` (dynamic `cd "$VAR/pkg"` the walker couldn't resolve),
  * `ctx.cwd` falls back to the pre-cd ambient cwd — the PI session
- * cwd, not the intended subpackage. {@link requireKnownCwd} wraps
- * the handler to fire instead of silently querying the wrong repo,
- * mirroring the engine's `onUnknown: "block"` default. See
- * `helpers/require-known-state.ts` for the full rationale.
+ * cwd, not the intended subpackage. The handler inlines a
+ * {@link cwdIsWalkerUnknown} check at the top and surfaces trinary
+ * `"unknown"`; the engine's `onUnknown:` policy then projects to the
+ * right boolean (default `"block"` = fail-CLOSED).
  *
- * @see {@link walkerUnknownCwdReason} - compose the agent-facing
- *      reason text for the walker-unknown-cwd fail-closed branch in
- *      your rule's ReasonFn.
+ * @see walkerUnknownCwdReason — compose the agent-facing reason text
+ *      for the walker-unknown-cwd fail-closed branch in your rule's
+ *      ReasonFn.
  */
-export const hasStagedChanges: PredicateHandler<boolean> = requireKnownCwd(
-	async (args, ctx) => {
-		if (typeof args !== "boolean") return false;
-		const state = await getStagedChanges(ctx);
-		if (state === null) return false; // unknown — don't fire
-		return args === state;
-	},
-);
+export const hasStagedChanges: PredicateHandler<boolean> = async (args, ctx) => {
+	if (cwdIsWalkerUnknown(ctx)) return "unknown";
+	if (typeof args !== "boolean") return false;
+	const state = await getStagedChanges(ctx);
+	if (state === null) return false; // unknown — don't fire
+	return args === state;
+};
 
 // ---------------------------------------------------------------------------
 // isClean
@@ -491,23 +527,23 @@ export const hasStagedChanges: PredicateHandler<boolean> = requireKnownCwd(
  * returns `false` (unknown); pair with an `upstream` check for
  * fail-closed behavior.
  *
- * Runtime-cwd guard: same rationale as {@link hasStagedChanges} —
- * {@link requireKnownCwd} fires the predicate when the walker couldn't
- * statically resolve the command's effective cwd, rather than
- * silently running `git status` at the pi session cwd.
+ * Runtime-cwd guard: same rationale as {@link hasStagedChanges} — the
+ * handler inlines a {@link cwdIsWalkerUnknown} check at the top and
+ * surfaces trinary `"unknown"` when the walker couldn't statically
+ * resolve the command's effective cwd, rather than silently running
+ * `git status` at the pi session cwd.
  *
- * @see {@link walkerUnknownCwdReason} - compose the agent-facing
- *      reason text for the walker-unknown-cwd fail-closed branch in
- *      your rule's ReasonFn.
+ * @see walkerUnknownCwdReason — compose the agent-facing reason text
+ *      for the walker-unknown-cwd fail-closed branch in your rule's
+ *      ReasonFn.
  */
-export const isClean: PredicateHandler<boolean> = requireKnownCwd(
-	async (args, ctx) => {
-		if (typeof args !== "boolean") return false;
-		const clean = await getWorkingTreeClean(ctx);
-		if (clean === null) return false;
-		return args === clean;
-	},
-);
+export const isClean: PredicateHandler<boolean> = async (args, ctx) => {
+	if (cwdIsWalkerUnknown(ctx)) return "unknown";
+	if (typeof args !== "boolean") return false;
+	const clean = await getWorkingTreeClean(ctx);
+	if (clean === null) return false;
+	return args === clean;
+};
 
 // ---------------------------------------------------------------------------
 // remote
@@ -523,25 +559,25 @@ export const isClean: PredicateHandler<boolean> = requireKnownCwd(
  * Resolves via `git config --get remote.origin.url`. Non-zero exit
  * (no origin configured) falls back to `onUnknown`.
  *
- * Runtime-cwd guard: {@link requireKnownCwd} fires the predicate when
- * the walker couldn't statically resolve the command's effective cwd
- * — querying the wrong repo's remote would silently mis-route a
- * repo-gated rule. Same rationale as {@link hasStagedChanges}.
+ * Runtime-cwd guard: the handler inlines a {@link cwdIsWalkerUnknown}
+ * check at the top and surfaces trinary `"unknown"` when the walker
+ * couldn't statically resolve the command's effective cwd — querying
+ * the wrong repo's remote would silently mis-route a repo-gated rule.
+ * Same rationale as {@link hasStagedChanges}.
  *
- * @see {@link walkerUnknownCwdReason} - compose the agent-facing
- *      reason text for the walker-unknown-cwd fail-closed branch in
- *      your rule's ReasonFn.
+ * @see walkerUnknownCwdReason — compose the agent-facing reason text
+ *      for the walker-unknown-cwd fail-closed branch in your rule's
+ *      ReasonFn.
  */
-export const remote: PredicateHandler = requireKnownCwd(
-	async (value, ctx) => {
-		const arg = unwrapPatternArg(value);
-		if (arg === null) return false;
+export const remote: PredicateHandler = async (value, ctx) => {
+	if (cwdIsWalkerUnknown(ctx)) return "unknown";
+	const arg = unwrapPatternArg(value);
+	if (arg === null) return false;
 
-		const out = await getRemoteUrl(ctx);
-		if (out === null) return unknownVerdict(arg.onUnknown);
-		return arg.patterns.some((p) => matchPattern(p, out));
-	},
-);
+	const out = await getRemoteUrl(ctx);
+	if (out === null) return unknownVerdict(arg.onUnknown);
+	return arg.patterns.some((p) => matchPattern(p, out));
+};
 
 // ---------------------------------------------------------------------------
 // Plugin-level export

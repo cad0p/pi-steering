@@ -2737,6 +2737,513 @@ describe("buildEvaluator: when multi-key AND + short-circuit", () => {
 	});
 });
 
+// ---------------------------------------------------------------------------
+// not-block onUnknown semantics: trinary leaf composition + corrected
+// evaluateNot pseudocode + leaf adapter contract.
+// ---------------------------------------------------------------------------
+//
+// These tests pin the engine's behavior when a `not:` block contains
+// leaves that surface trinary `"unknown"` (built-in `cwd` on a
+// walker-unknown sentinel, or a plugin handler returning `"unknown"`).
+// The corrected pseudocode composes leaves with Kleene 3-valued AND,
+// then applies the block-level `onUnknown:` policy on the unknown-leaf
+// case BEFORE the not-flip. The flip is skipped on unknown so authors
+// who write `onUnknown: "block"` directly mean "rule fires" without
+// having to write the double-inversion `"allow"` workaround.
+
+describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
+	// Helper: a plugin that registers two trinary predicates whose
+	// verdicts we control per call.
+	function trinaryPlugin(
+		flagA: () => boolean | "unknown",
+		flagB: () => boolean | "unknown",
+	): Plugin {
+		return {
+			name: "trinary-test",
+			predicates: {
+				triA: () => flagA(),
+				triB: () => flagB(),
+			},
+		};
+	}
+
+	function makeRule(
+		when: NonNullable<Rule["when"]>,
+		name: string = "r",
+	): Rule {
+		return {
+			name,
+			tool: "bash",
+			field: "command",
+			pattern: "^git\\s+push",
+			reason: name,
+			when,
+		};
+	}
+
+	function buildWith(
+		when: NonNullable<Rule["when"]>,
+		plugin: Plugin,
+		name: string = "r",
+	) {
+		return buildEvaluator(
+			{ rules: [makeRule(when, name)] },
+			resolvePlugins([plugin], {}),
+			makeHost(),
+		);
+	}
+
+	it("Kleene AND: all-true leaves → not(true) = false (rule skips)", async () => {
+		const plugin = trinaryPlugin(
+			() => true,
+			() => true,
+		);
+		const ev = buildWith(
+			{ not: { triA: "x", triB: "y" } },
+			plugin,
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			r,
+			undefined,
+			"all-true → inner AND = true → not(true) = false → rule does not fire",
+		);
+	});
+
+	it("Kleene AND: any-false leaf absorbs → not(false) = true (rule fires)", async () => {
+		const plugin = trinaryPlugin(
+			() => true,
+			() => false,
+		);
+		const ev = buildWith(
+			{ not: { triA: "x", triB: "y" } },
+			plugin,
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			r && r.block === true,
+			"any-false → false absorbs in Kleene AND → not(false) = true → rule fires",
+		);
+	});
+
+	it("Kleene AND: all-false leaves → not(false) = true (rule fires)", async () => {
+		const plugin = trinaryPlugin(
+			() => false,
+			() => false,
+		);
+		const ev = buildWith(
+			{ not: { triA: "x", triB: "y" } },
+			plugin,
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(r && r.block === true, "all-false → not(false) = true");
+	});
+
+	it("Kleene AND: mixed known true + false → false absorbs (rule fires)", async () => {
+		const plugin = trinaryPlugin(
+			() => true,
+			() => false,
+		);
+		const ev = buildWith(
+			{ not: { triA: "x", triB: "y" } },
+			plugin,
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(r && r.block === true, "true & false = false in Kleene AND");
+	});
+
+	it("Kleene AND: known true + unknown → unknown → block-level onUnknown:'block' fires (default)", async () => {
+		const plugin = trinaryPlugin(
+			() => true,
+			() => "unknown",
+		);
+		// No explicit onUnknown: — defaults to "block" (fail-CLOSED).
+		const ev = buildWith(
+			{ not: { triA: "x", triB: "y" } },
+			plugin,
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			r && r.block === true,
+			"true & unknown = unknown → default block-level 'block' → rule fires (no flip)",
+		);
+	});
+
+	it("Kleene AND: known true + unknown → unknown → block-level onUnknown:'allow' skips", async () => {
+		const plugin = trinaryPlugin(
+			() => true,
+			() => "unknown",
+		);
+		const ev = buildWith(
+			{ not: { triA: "x", triB: "y", onUnknown: "allow" } },
+			plugin,
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			r,
+			undefined,
+			"unknown → explicit block-level 'allow' → not-clause = false → rule skips",
+		);
+	});
+
+	it("Kleene AND: all-unknown leaves → unknown → default 'block' fires fail-CLOSED", async () => {
+		const plugin = trinaryPlugin(
+			() => "unknown",
+			() => "unknown",
+		);
+		const ev = buildWith(
+			{ not: { triA: "x", triB: "y" } },
+			plugin,
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			r && r.block === true,
+			"all-unknown → default 'block' fires the rule (no double-inversion required)",
+		);
+	});
+
+	it("Kleene AND: all-unknown leaves → unknown → explicit 'allow' skips fail-OPEN", async () => {
+		const plugin = trinaryPlugin(
+			() => "unknown",
+			() => "unknown",
+		);
+		const ev = buildWith(
+			{ not: { triA: "x", triB: "y", onUnknown: "allow" } },
+			plugin,
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			r,
+			undefined,
+			"all-unknown → explicit 'allow' skips the rule (opt-in fail-OPEN)",
+		);
+	});
+
+	it("Kleene AND: false absorbs unknown (any-false short-circuits the not-flip directly)", async () => {
+		const plugin = trinaryPlugin(
+			() => false,
+			() => "unknown",
+		);
+		const ev = buildWith(
+			{ not: { triA: "x", triB: "y", onUnknown: "allow" } },
+			plugin,
+		);
+		const r = await ev.evaluate(
+			bashEvent("git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		// Even with onUnknown: "allow", the false leaf absorbs in Kleene
+		// AND → combined = false → not(false) = true → rule fires. The
+		// onUnknown: "allow" only applies on the unknown branch, not the
+		// false-absorbs branch.
+		assert.ok(
+			r && r.block === true,
+			"false absorbs in Kleene AND; onUnknown: 'allow' is irrelevant when the combined verdict is definite false",
+		);
+	});
+
+	it("corrected evaluateNot: cwd-only not-block under walker-unknown fires fail-CLOSED (default)", async () => {
+		// Closes the silent fail-OPEN class: `not: { cwd: P }` under
+		// walker-unknown cwd surfaces unknown via the trinary cwd
+		// predicate; default block-level onUnknown: "block" projects
+		// directly to rule-fires WITHOUT the not-flip applying to true.
+		const rule = makeRule(
+			{ not: { cwd: /github/ } },
+			"no-git-worktree",
+		);
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolve(),
+			makeHost(),
+		);
+		const r = await ev.evaluate(
+			bashEvent('cd "$VAR" && git push'),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			r && r.block === true,
+			"walker-unknown cwd inside not: → default 'block' fires the rule",
+		);
+	});
+
+	it("corrected evaluateNot: cwd-only not-block under walker-unknown skips with onUnknown:'allow'", async () => {
+		const rule = makeRule(
+			{ not: { cwd: /github/, onUnknown: "allow" } },
+			"no-git-worktree-allow",
+		);
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolve(),
+			makeHost(),
+		);
+		const r = await ev.evaluate(
+			bashEvent('cd "$VAR" && git push'),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			r,
+			undefined,
+			"walker-unknown cwd inside not: → explicit 'allow' skips the rule",
+		);
+	});
+
+	it("corrected evaluateNot: cwd-only not-block on KNOWN cwd matches → not(true) = false", async () => {
+		const rule = makeRule(
+			{ not: { cwd: /github/ } },
+			"no-git-worktree",
+		);
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolve(),
+			makeHost(),
+		);
+		const r = await ev.evaluate(
+			bashEvent("cd /github/repo && git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			r,
+			undefined,
+			"known cwd matches /github/ → inner true → not(true) = false → rule skips",
+		);
+	});
+
+	it("corrected evaluateNot: cwd-only not-block on KNOWN cwd misses → not(false) = true", async () => {
+		const rule = makeRule(
+			{ not: { cwd: /github/ } },
+			"no-git-worktree",
+		);
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolve(),
+			makeHost(),
+		);
+		const r = await ev.evaluate(
+			bashEvent("cd /elsewhere && git push"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			r && r.block === true,
+			"known cwd doesn't match /github/ → inner false → not(false) = true → rule fires",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Outer-leaf trinary projection: leaf-level `onUnknown:` modifier on the
+// spread form projects unknown → boolean per the leaf adapter.
+// ---------------------------------------------------------------------------
+
+describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
+	function trinaryPlugin(verdict: () => boolean | "unknown"): Plugin {
+		return {
+			name: "trinary-leaf",
+			predicates: { tri: () => verdict() },
+		};
+	}
+
+	it("plugin handler returning 'unknown' → default leaf-level 'block' fires the rule", async () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git\\s+push",
+			reason: "r",
+			when: { tri: "x" }, // bare — no leaf-level onUnknown:
+		};
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolvePlugins([trinaryPlugin(() => "unknown")], {}),
+			makeHost(),
+		);
+		const r = await ev.evaluate(bashEvent("git push"), makeCtx("/repo"), 0);
+		assert.ok(
+			r && r.block === true,
+			"bare leaf → default leaf-level 'block' fires the rule",
+		);
+	});
+
+	it("plugin handler returning 'unknown' → explicit leaf-level 'allow' skips the rule", async () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git\\s+push",
+			reason: "r",
+			when: { tri: { value: "x", onUnknown: "allow" } as any },
+		};
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolvePlugins([trinaryPlugin(() => "unknown")], {}),
+			makeHost(),
+		);
+		const r = await ev.evaluate(bashEvent("git push"), makeCtx("/repo"), 0);
+		assert.equal(
+			r,
+			undefined,
+			"explicit leaf-level 'allow' projects unknown → false → rule skips",
+		);
+	});
+
+	it("plugin handler that throws → treated as 'unknown'; default 'block' fires the rule", async () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git\\s+push",
+			reason: "r",
+			when: { tri: "x" },
+		};
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolvePlugins(
+				[
+					trinaryPlugin(() => {
+					throw new Error("plugin handler bug");
+				}),
+				],
+				{},
+			),
+			makeHost(),
+		);
+		const r = await ev.evaluate(bashEvent("git push"), makeCtx("/repo"), 0);
+		assert.ok(
+			r && r.block === true,
+			"throw → unknown → default 'block' projection → rule fires (preserves fail-CLOSED-by-default for buggy plugin handlers)",
+		);
+	});
+
+	it("plugin handler that throws inside not-block → unknown leaf composes via Kleene → default block-level 'block' fires", async () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git\\s+push",
+			reason: "r",
+			when: { not: { tri: "x" } },
+		};
+		const ev = buildEvaluator(
+			{ rules: [rule] },
+			resolvePlugins(
+				[
+					trinaryPlugin(() => {
+					throw new Error("plugin handler bug");
+				}),
+				],
+				{},
+			),
+			makeHost(),
+		);
+		const r = await ev.evaluate(bashEvent("git push"), makeCtx("/repo"), 0);
+		assert.ok(
+			r && r.block === true,
+			"throw inside not-block → unknown leaf → Kleene unknown → default block-level 'block' → rule fires",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Empty-clause validation at config-resolve time.
+// ---------------------------------------------------------------------------
+
+describe("buildEvaluator: empty-clause validation at config-resolve", () => {
+	it("throws on empty when: {}", () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git",
+			reason: "r",
+			when: {},
+		};
+		assert.throws(
+			() =>
+				buildEvaluator(
+					{ rules: [rule] },
+					resolve(),
+					makeHost(),
+				),
+			/contains no predicate leaves/,
+		);
+	});
+
+	it("throws on not-block with only modifier keys (e.g. not: { onUnknown: 'block' })", () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git",
+			reason: "r",
+			when: { not: { onUnknown: "block" } as any },
+		};
+		assert.throws(
+			() =>
+				buildEvaluator(
+					{ rules: [rule] },
+					resolve(),
+					makeHost(),
+				),
+			/\.not contains no predicate leaves/,
+		);
+	});
+
+	it("accepts when: { not: { cwd: P } } — not: counts as a leaf at outer level", () => {
+		const rule: Rule = {
+			name: "r",
+			tool: "bash",
+			field: "command",
+			pattern: "^git",
+			reason: "r",
+			when: { not: { cwd: "/github/" } },
+		};
+		assert.doesNotThrow(
+			() =>
+				buildEvaluator(
+					{ rules: [rule] },
+					resolve(),
+					makeHost(),
+				),
+		);
+	});
+});
+
 describe("buildEvaluator: plugin predicates", () => {
 	it("dispatches to resolved.predicates[key]", async () => {
 		const seenArgs: unknown[] = [];

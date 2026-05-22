@@ -407,14 +407,20 @@ describe("git plugin: walker-driven branch state (the KEY test)", () => {
 //
 // The github-flavored specialization's reason fn has a dedicated
 // walker-unknown branch — under `cd "$VAR" && git commit`, the engine
-// can't verify the user is actually in a github clone or on a
-// protected branch, so the reason switches to the standard
-// `walkerUnknownCwdReason` text instead of claiming github-specific
-// context the engine couldn't confirm. This test pins both sides:
-// the rule still FIRES under walker-unknown cwd AND the reason text
-// doesn't claim verified github context.
+// Walker-unknown cwd: github-flavored rule has
+// `remote: { pattern, onUnknown: "allow" }`. Under the trinary
+// engine, `onUnknown: "allow"` at the leaf level genuinely means
+// "skip the predicate when the value is unresolvable" — the
+// `remote:` leaf surfaces trinary `"unknown"` (via the inline
+// walker-unknown guard at the top of the handler body) and the
+// engine's leaf adapter projects it to `false` (rule skips).
+// The github-flavored rule therefore correctly defers to the
+// generic `noMainCommit` rule under walker-unknown cwd, which
+// consumes only the `branch:` predicate (no walker-unknown guard;
+// stub returns "main\n") and fires fail-CLOSED via its default
+// leaf-level `onUnknown: "block"`.
 //
-// What this test ACTUALLY exercises (counterfactual rationale):
+// What this test exercises (counterfactual rationale):
 //
 //   1. The `branch:` predicate matches `main` via the test stub
 //      (the stub returns "main\n" for `git branch --show-current`
@@ -423,31 +429,32 @@ describe("git plugin: walker-driven branch state (the KEY test)", () => {
 //      and the predicate would fall back to its `onUnknown:
 //      "block"` default — same firing verdict, different code
 //      path).
-//   2. The `remote:` predicate is `requireKnownCwd`-wrapped — under
-//      `walkerState.cwd === "unknown"` the wrap fires fail-closed
-//      (returns `true`) BEFORE the inner predicate's exec or
-//      no-origin path runs. This wrap-level fail-closed is
-//      independent of the inner `onUnknown: "allow"` policy on the
-//      `remote:` arg — the wrap and the inner argument govern
-//      different failure modes (unresolvable cwd vs. resolvable
-//      cwd + exec/no-origin).
-//   3. The reason fn detects `walkerState.cwd === "unknown"` and
-//      routes to `walkerUnknownCwdReason` rather than asserting
-//      protected-branch context the engine hasn't confirmed.
+//   2. The `remote:` predicate inlines a walker-unknown-cwd guard
+//      at the top of its body and surfaces trinary `"unknown"`
+//      under `walkerState.cwd === "unknown"`. The leaf-level
+//      `onUnknown: "allow"` on the github rule's `remote:` arg
+//      then projects unknown → `false` — the github rule SKIPS.
+//   3. The generic `noMainCommit` rule (with only `branch:`)
+//      fires next via its default `onUnknown: "block"`. Block
+//      verdict lands; the reason text is the generic
+//      protected-branch reason, not the github-specific one.
 //
-// Pinned: the steering tag is rendered, the `walkerUnknownCwdReason`
-// helper's `current directory:` anchor is present, and the
-// protected-branch claim is absent.
+// Pinned: the steering tag is rendered, a block verdict lands,
+// and the rule that fires is `no-main-commit` (generic), not
+// `no-main-commit-github` — the github-flavored rule cleanly
+// declines under walker-unknown cwd because its `remote:` leaf
+// opts into "allow" semantics there.
 // ---------------------------------------------------------------------------
 
 describe("git plugin: no-main-commit-github walker-unknown cwd", () => {
-	it("`cd \"$VAR\" && git commit` on main + github remote → fires with walker-unknown reason", async () => {
+	it("`cd \"$VAR\" && git commit` on main + github remote → generic rule fires (github rule allows on walker-unknown via `onUnknown: \"allow\"` on its `remote:` leaf)", async () => {
 		// Explicit exec stubs make the test deterministic regardless
 		// of the runner's actual git state. Without the stubs, the
-		// `branch:` predicate (NOT `requireKnownCwd`-wrapped) would
-		// shell out at the test runner's cwd — the test outcome would
-		// depend on whatever branch / remote that workspace happens
-		// to be on (flaky).
+		// `branch:` predicate (which has no inline walker-unknown-cwd
+		// guard — it tries the branch tracker first, then shells out)
+		// would shell out at the test runner's cwd — the test outcome
+		// would depend on whatever branch / remote that workspace
+		// happens to be on (flaky).
 		const { evaluator } = buildRuntime(
 			{ plugins: [gitPlugin], rules: [] },
 			async (cmd: string, args: string[]): Promise<PiExecResult> => {
@@ -486,22 +493,17 @@ describe("git plugin: no-main-commit-github walker-unknown cwd", () => {
 		);
 		assert.ok(
 			res && res.block === true,
-			"walker-unknown cwd must fire no-main-commit-github",
+			"walker-unknown cwd must still fire a block (generic no-main-commit, after github-flavored rule allows via its `onUnknown: \"allow\"` on `remote:`)",
 		);
 		assert.match(
 			res.reason!,
-			/\[steering:no-main-commit-github@[^\]]+\]/,
-			"github-flavored rule must fire (with the steering tag)",
-		);
-		assert.match(
-			res.reason!,
-			/current directory:/,
-			"reason must include the walkerUnknownCwdReason anchor",
+			/\[steering:no-main-commit@[^\]]+\]/,
+			"generic protected-branch rule fires (the github-flavored rule cleanly declines under walker-unknown via its `onUnknown: \"allow\"` on `remote:`)",
 		);
 		assert.doesNotMatch(
 			res.reason!,
-			/github clone's protected branch/,
-			"reason must NOT claim github-specific context under walker-unknown",
+			/\[steering:no-main-commit-github@/,
+			"github-flavored rule must NOT fire when its `remote:` leaf opts into `onUnknown: \"allow\"` and walker can't resolve cwd",
 		);
 	});
 });

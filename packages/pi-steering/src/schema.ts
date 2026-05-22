@@ -1891,26 +1891,25 @@ export type SteeringDiagnosticKind =
  * stable so tests and future tooling can dispatch on {@link kind}
  * without scanning {@link message} substrings.
  *
- * Render-format matrix — the same diagnostic surfaces in three
- * subtly different shapes depending on which renderer the runtime
- * picks:
+ * Render-format matrix — the same diagnostic surfaces in two
+ * shapes depending on which renderer the runtime picks:
  *
- *   - Strict-mode aggregate (thrown `Error` from `buildSessionRuntime`):
+ *   - Multi-line aggregate (thrown `Error` from `buildSessionRuntime`):
  *     a header line ("N config issues:") followed by a per-line bullet
  *     `  - [type] <path: >?<message>`. One `Error.message`, multi-line.
  *     Used when at least one diagnostic must abort the session.
- *   - `failOnWarnings: false` legacy fall-through (`console.warn`):
- *     single-line `[pi-steering] <path: >?<message>` per surviving
- *     warning. Errors never reach this surface (they always throw).
- *   - CLI `pi-steering list` stderr: same shape as the legacy
- *     fall-through (`[pi-steering] <path: >?<message>`); errors are
- *     prefixed with the literal `ERROR: ` after the bracket prefix.
+ *     Produced by `formatAggregatedDiagnostics`.
+ *   - Single-line per-diagnostic (`formatSingleLineDiagnostic`):
+ *     `[pi-steering] <ERROR: >?<path: >?<message>` per diagnostic.
+ *     Routed to `console.warn` for legacy fail-soft mode
+ *     (`failOnWarnings: false`; warnings only — errors always throw
+ *     via the aggregated form), and to stderr for the CLI
+ *     `pi-steering list` pre-flight surface (warnings and errors
+ *     both render here, with `ERROR: ` distinguishing the latter).
  *
  * The CLI prints diagnostics inline as the loader yields them, rather
- * than aggregating into a thrown error — the legacy single-line shape
- * gives `pi-steering list` users immediate per-issue feedback. The
- * three formats are deliberately distinct (different surfaces, different
- * consumers); a future v0.2 may consolidate.
+ * than aggregating into a thrown error — the single-line shape
+ * gives `pi-steering list` users immediate per-issue feedback.
  */
 export interface SteeringDiagnostic {
 	/**

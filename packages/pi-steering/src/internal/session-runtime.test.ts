@@ -25,6 +25,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	buildSessionRuntime,
 	formatAggregatedDiagnostics,
+	formatSingleLineDiagnostic,
 } from "./session-runtime.ts";
 import type { SteeringDiagnostic } from "../schema.ts";
 
@@ -308,5 +309,57 @@ describe("formatAggregatedDiagnostics: rule-based spec", () => {
 		];
 		const out = formatAggregatedDiagnostics(diagnostics);
 		assert.match(out, /\[warning\] \/u\/\.pi\/steering\/rules\.json:/);
+	});
+});
+
+describe("formatSingleLineDiagnostic: rule-based spec", () => {
+	it("renders a warning with a path prefix and no severity tag", () => {
+		const d: SteeringDiagnostic = {
+			type: "warning",
+			kind: "layer-import-failed",
+			path: "/u/.pi/steering.ts",
+			message: "failed to import: SyntaxError",
+		};
+		assert.equal(
+			formatSingleLineDiagnostic(d),
+			"[pi-steering] /u/.pi/steering.ts: failed to import: SyntaxError",
+		);
+	});
+
+	it("renders a warning without a path prefix when path is unset", () => {
+		const d: SteeringDiagnostic = {
+			type: "warning",
+			kind: "plugin-name-collision",
+			message: 'duplicate plugin "git"; keeping first-registered entry.',
+		};
+		assert.equal(
+			formatSingleLineDiagnostic(d),
+			'[pi-steering] duplicate plugin "git"; keeping first-registered entry.',
+		);
+	});
+
+	it("renders an error with an ERROR: severity prefix and a path prefix", () => {
+		const d: SteeringDiagnostic = {
+			type: "error",
+			kind: "layer-import-failed",
+			path: "/u/.pi/steering.ts",
+			message: "failed to import: SyntaxError",
+		};
+		assert.equal(
+			formatSingleLineDiagnostic(d),
+			"[pi-steering] ERROR: /u/.pi/steering.ts: failed to import: SyntaxError",
+		);
+	});
+
+	it("renders an error with an ERROR: severity prefix and no path prefix", () => {
+		const d: SteeringDiagnostic = {
+			type: "error",
+			kind: "tracker-name-collision",
+			message: 'tracker name collision: plugins "a" and "b"',
+		};
+		assert.equal(
+			formatSingleLineDiagnostic(d),
+			'[pi-steering] ERROR: tracker name collision: plugins "a" and "b"',
+		);
 	});
 });

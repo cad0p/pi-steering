@@ -67,16 +67,31 @@ export function formatAggregatedDiagnostics(
 }
 
 /**
- * Render a single warning-class diagnostic in the legacy single-line
- * shape used when the user opts out of strict mode via
- * `failOnWarnings: false`. Mirrors the previous `console.warn` shape
- * the loader emitted directly.
+ * Render a single {@link SteeringDiagnostic} as a one-line message
+ * suitable for the two single-diagnostic surfaces:
+ *
+ *   - `console.warn` (legacy fail-soft channel under
+ *     `failOnWarnings: false`) — `buildSessionRuntime` only routes
+ *     warnings through here; errors always throw via the aggregated
+ *     form.
+ *   - CLI stderr (`pi-steering list` pre-flight surface) — both
+ *     warnings and errors render through this helper inline as the
+ *     loader / merger yields them.
+ *
+ * Errors get an `ERROR: ` severity prefix after the bracket so a
+ * user grepping CI logs has a clear handle; warnings have none.
+ * Path prefix is conditional on {@link SteeringDiagnostic.path}
+ * being set — cross-layer collisions (no source path) render with
+ * the message alone.
+ *
+ * The aggregated multi-line form (for thrown-Error message bodies
+ * in strict mode) is produced by {@link formatAggregatedDiagnostics},
+ * not this helper.
  */
-function formatLegacyConsoleWarn(
-	d: SteeringDiagnostic & { type: "warning" },
-): string {
+export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
+	const severity = d.type === "error" ? "ERROR: " : "";
 	const pathPrefix = d.path !== undefined ? `${d.path}: ` : "";
-	return `[pi-steering] ${pathPrefix}${d.message}`;
+	return `[pi-steering] ${severity}${pathPrefix}${d.message}`;
 }
 
 /**
@@ -183,18 +198,17 @@ export async function buildSessionRuntime(
 		// failOnWarnings === false; emit surviving warnings on the
 		// legacy console.warn channel so users running with the opt-out
 		// still see the message stream that pre-strict-mode code
-		// produced.
-		// filter+predicate narrows the intersection type through the
-		// function-call boundary; an inline `for...of` + `if (d.type ===
-		// "warning")` fails to typecheck under exactOptionalPropertyTypes
-		// because the narrowing doesn't carry into
-		// `formatLegacyConsoleWarn`'s parameter type.
+		// produced. `formatSingleLineDiagnostic` accepts both severities,
+		// but here we deliberately only route warnings — errors above
+		// already threw via the aggregated form, so reaching this branch
+		// with `d.type === "error"` is unreachable. The filter narrows
+		// to the warning subtype as a defensive check.
 		const warnings = aggregated.filter(
 			(d): d is SteeringDiagnostic & { type: "warning" } =>
 				d.type === "warning",
 		);
 		for (const d of warnings) {
-			console.warn(formatLegacyConsoleWarn(d));
+			console.warn(formatSingleLineDiagnostic(d));
 		}
 	}
 

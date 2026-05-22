@@ -21,6 +21,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { FromJSONError, fromJSON } from "../compat.ts";
 import { EVALUATOR_BUILTIN_TRACKERS } from "../evaluator.ts";
+import { formatSingleLineDiagnostic } from "../internal/session-runtime.ts";
 import {
 	buildConfig,
 	loadConfigs,
@@ -33,27 +34,6 @@ import type {
 	SteeringDiagnostic,
 	TopLevelWhenClause,
 } from "../schema.ts";
-
-/**
- * Render a single diagnostic in the legacy single-line stderr shape
- * the loader emitted via `console.warn` before the strict-mode
- * refactor:
- *
- *   `[pi-steering] /path/to/file: failed to import: ...`           (warning)
- *   `[pi-steering] ERROR: tracker name collision: ...`             (error)
- *
- * Errors are tagged with an `ERROR:` prefix so a user grepping for
- * them in CI logs has a clear handle. Path prefix is conditional on
- * {@link SteeringDiagnostic.path} being set — cross-layer collisions
- * (no source path) render with the message alone.
- *
- * Exported for unit testing the format without spinning up the CLI.
- */
-export function formatCliDiagnostic(d: SteeringDiagnostic): string {
-	const severity = d.type === "error" ? "ERROR: " : "";
-	const pathPrefix = d.path !== undefined ? `${d.path}: ` : "";
-	return `[pi-steering] ${severity}${pathPrefix}${d.message}`;
-}
 
 /**
  * CLI entrypoint. Exported (not just `void main(...)` at module top)
@@ -265,7 +245,7 @@ async function runList(args: string[]): Promise<number> {
 	// them — restores the pre-refactor visibility the loader's direct
 	// `console.warn` calls used to provide.
 	for (const d of loaderDiagnostics) {
-		process.stderr.write(`${formatCliDiagnostic(d)}\n`);
+		process.stderr.write(`${formatSingleLineDiagnostic(d)}\n`);
 	}
 
 	if (layers.length === 0) {
@@ -281,7 +261,7 @@ async function runList(args: string[]): Promise<number> {
 
 	const { config, diagnostics: mergeDiagnostics } = buildConfig(layers);
 	for (const d of mergeDiagnostics) {
-		process.stderr.write(`${formatCliDiagnostic(d)}\n`);
+		process.stderr.write(`${formatSingleLineDiagnostic(d)}\n`);
 	}
 
 	// Run the plugin merger so reserved-name violations, plugin /
@@ -309,7 +289,7 @@ async function runList(args: string[]): Promise<number> {
 		console.info = originalInfo;
 	}
 	for (const d of resolved.diagnostics) {
-		process.stderr.write(`${formatCliDiagnostic(d)}\n`);
+		process.stderr.write(`${formatSingleLineDiagnostic(d)}\n`);
 	}
 
 	if (format === "json") {

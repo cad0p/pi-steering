@@ -750,4 +750,51 @@ describe("pi-steering list: diagnostics on stderr", () => {
 			`expected user-config observer invalid-name diagnostic on stderr; got: ${r.stderr}`,
 		);
 	});
+
+	it("surfaces an `observer dropped` info-level breadcrumb on stderr when an observer's writes are unconsumed", async () => {
+		// `buildSessionRuntime` runs `dropUnusedObservers` over the
+		// resolved + user observer streams at session_start and emits a
+		// `[pi-steering] observer 'X' dropped; its writes (...) are not
+		// consumed by any rule` breadcrumb via `console.info`. The CLI
+		// mirrors that pass after `runMergerPipeline` so an author
+		// running `pi-steering list` to debug "why isn't my observer
+		// firing?" sees the same breadcrumb without first booting an
+		// agent session. The breadcrumb travels via the existing
+		// `console.info` interception in `runCliMergeWithInfoCapture`,
+		// landing on stderr so stdout (which carries the structured
+		// listing) stays clean.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				observers: [
+					{
+						name: "unread",
+						writes: ["never_consumed"],
+						onResult: () => {},
+					},
+				],
+				rules: [
+					{
+						name: "r",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		// Drop pass is informational, not error-class — exit 0.
+		assert.equal(
+			r.code,
+			0,
+			`expected exit 0 (info-level breadcrumb only); got code=${r.code}, stderr=${r.stderr}`,
+		);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] observer 'unread' dropped; its writes \(never_consumed\) are not consumed by any rule/,
+			`expected observer-drop breadcrumb on stderr; got: ${r.stderr}`,
+		);
+	});
 });

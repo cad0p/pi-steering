@@ -22,6 +22,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { FromJSONError, fromJSON } from "../compat.ts";
 import { EVALUATOR_BUILTIN_TRACKERS } from "../evaluator.ts";
+import { dropUnusedObservers } from "../internal/drop-unused-observers.ts";
 import {
 	formatSingleLineDiagnostic,
 	runMergerPipeline,
@@ -301,6 +302,18 @@ async function runList(args: string[]): Promise<number> {
  * contaminating stdout (which carries the structured `--format=json`
  * output). The save/restore is wrapped in `try`/`finally` so a throw
  * inside the helper still restores the original `console.info`.
+ *
+ * After the pipeline completes successfully (no merge short-circuit),
+ * also run `dropUnusedObservers` over the plugin-merger and
+ * user-authored observer streams. The runtime emits an info-level
+ * breadcrumb for each dropped observer ("observer 'X' dropped; its
+ * writes (...) are not consumed by any rule"). The CLI's
+ * `console.info` interception captures those breadcrumbs onto stderr
+ * for the same reason as the disabled-plugin breadcrumbs above:
+ * stdout stays clean for `--format=json` consumers, but a plugin
+ * author running `pi-steering list` to debug "why isn't my observer
+ * firing?" sees the same breadcrumb the production runtime would
+ * have emitted at session_start.
  */
 function runCliMergeWithInfoCapture(
 	layers: readonly SteeringConfig[],
@@ -313,11 +326,30 @@ function runCliMergeWithInfoCapture(
 		process.stderr.write(`${args.map((a) => String(a)).join(" ")}\n`);
 	};
 	try {
-		const { merged, diagnostics } = runMergerPipeline(
+		const { merged, resolved, diagnostics } = runMergerPipeline(
 			layers,
 			undefined,
 			EVALUATOR_BUILTIN_TRACKERS,
 		);
+		// Mirror `buildSessionRuntime`'s observer-drop pass so the CLI
+		// surfaces the same `[pi-steering] observer 'X' dropped` info-
+		// level breadcrumbs the production runtime emits at
+		// session_start. Skipped on merge short-circuit (`resolved ===
+		// null`) — without a resolved plugin state we can't enumerate
+		// plugin-side observers, and the merge-error short-circuit
+		// suppresses downstream surfaces uniformly.
+		if (resolved !== null) {
+			const userObservers = merged.observers ?? [];
+			const allRules = [...(merged.rules ?? []), ...resolved.rules];
+			const pluginDrop = dropUnusedObservers(resolved.observers, allRules);
+			const userDrop = dropUnusedObservers(userObservers, allRules);
+			for (const d of [...pluginDrop.dropped, ...userDrop.dropped]) {
+				console.info(
+					`[pi-steering] observer '${d.name}' dropped; its writes ` +
+						`(${d.writes.join(", ")}) are not consumed by any rule`,
+				);
+			}
+		}
 		return { config: merged, diagnostics };
 	} finally {
 		console.info = originalInfo;

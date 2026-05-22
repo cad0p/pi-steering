@@ -816,10 +816,12 @@ describe("register(): fail-open on config load error", () => {
 	useIsolatedHome();
 
 	it("broken config layer is skipped by the loader (per-layer fail-open)", async () => {
-		// The loader's per-layer error handling (throws inside
-		// import'd module) logs a warn but doesn't stop the session.
-		// Write a syntactically-invalid TS config to prove the session
-		// still starts and the defaults still apply.
+		// The loader records a structured diagnostic for the bad layer
+		// but doesn't stop the session. Write a syntactically-invalid TS
+		// config to prove the session still starts and the defaults
+		// still apply. End-to-end visibility of the diagnostic is
+		// covered separately in the runtime + bridge integration tests
+		// once the runtime owns the throw rule.
 		mkdirSync(join(tmpHome, ".pi"), { recursive: true });
 		writeFileSync(
 			join(tmpHome, ".pi", "steering.ts"),
@@ -827,12 +829,11 @@ describe("register(): fail-open on config load error", () => {
 			"utf8",
 		);
 
-		// Suppress the expected console.warn from the loader.
+		// The loader no longer logs to console.warn directly; an
+		// interceptor stays here only to keep stderr quiet during the
+		// test run if any later layer in the stack does log.
 		const origWarn = console.warn;
-		const warnings: string[] = [];
-		console.warn = (msg: unknown) => {
-			warnings.push(String(msg));
-		};
+		console.warn = () => {};
 
 		try {
 			const mock = makeMockPi();
@@ -846,10 +847,6 @@ describe("register(): fail-open on config load error", () => {
 				tmpHome,
 			);
 			assert.equal(result?.block, true);
-			assert.ok(
-				warnings.some((w) => w.includes("failed to load config")),
-				"expected loader warn about the broken layer",
-			);
 		} finally {
 			console.warn = origWarn;
 		}

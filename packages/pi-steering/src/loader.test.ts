@@ -136,45 +136,58 @@ describe("loader: findConfigFile", () => {
 			join(tmp, ".pi", "steering", "index.ts"),
 			configModule("{}"),
 		);
-		assert.equal(
-			findConfigFile(tmp),
-			join(tmp, ".pi", "steering", "index.ts"),
-		);
+		const { file } = findConfigFile(tmp);
+		assert.equal(file, join(tmp, ".pi", "steering", "index.ts"));
 	});
 
 	it("falls back to .pi/steering.ts when index.ts is absent", () => {
 		writeConfig(join(tmp, ".pi", "steering.ts"), configModule("{}"));
-		assert.equal(findConfigFile(tmp), join(tmp, ".pi", "steering.ts"));
+		const { file, diagnostic } = findConfigFile(tmp);
+		assert.equal(file, join(tmp, ".pi", "steering.ts"));
+		assert.equal(diagnostic, null);
 	});
 
 	it("returns null when neither candidate exists", () => {
-		assert.equal(findConfigFile(tmp), null);
+		assert.deepEqual(findConfigFile(tmp), { file: null, diagnostic: null });
+	});
+
+	it("reports a coexistence diagnostic when both forms exist", () => {
+		writeConfig(join(tmp, ".pi", "steering.ts"), configModule("{}"));
+		writeConfig(
+			join(tmp, ".pi", "steering", "index.ts"),
+			configModule("{}"),
+		);
+		const { file, diagnostic } = findConfigFile(tmp);
+		assert.equal(file, join(tmp, ".pi", "steering", "index.ts"));
+		assert.ok(diagnostic, "expected a diagnostic when both forms coexist");
+		assert.equal(diagnostic.kind, "layer-form-coexistence");
+		assert.equal(diagnostic.type, "warning");
+		assert.equal(
+			diagnostic.path,
+			join(tmp, ".pi", "steering", "index.ts"),
+		);
+		assert.match(
+			diagnostic.message,
+			/both .pi\/steering.ts and .pi\/steering\/index.ts/,
+		);
 	});
 });
 
 // ---------------------------------------------------------------------------
-// loadConfigs — walk-up, stray-file warning, bad layer handling
+// loadConfigs — walk-up, stray-file diagnostic, bad layer handling
 // ---------------------------------------------------------------------------
 
 describe("loader: loadConfigs", () => {
 	let tmp: string;
 	let priorHome: string | undefined;
-	let warnings: string[];
-	let origWarn: typeof console.warn;
 
 	beforeEach(() => {
 		tmp = mkdtempSync(join(tmpdir(), "pi-steering-v2-loadcfgs-"));
 		priorHome = process.env["HOME"];
 		process.env["HOME"] = tmp;
-		warnings = [];
-		origWarn = console.warn;
-		console.warn = (msg: unknown) => {
-			warnings.push(String(msg));
-		};
 	});
 
 	afterEach(() => {
-		console.warn = origWarn;
 		if (priorHome === undefined) delete process.env["HOME"];
 		else process.env["HOME"] = priorHome;
 		rmSync(tmp, { recursive: true, force: true });
@@ -183,8 +196,9 @@ describe("loader: loadConfigs", () => {
 	it("returns empty when no layer has a config", async () => {
 		const cwd = join(tmp, "a", "b");
 		mkdirSync(cwd, { recursive: true });
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(layers, []);
+		assert.deepEqual(diagnostics, []);
 	});
 
 	it("collects ancestor configs inner-first", async () => {
@@ -199,7 +213,7 @@ describe("loader: loadConfigs", () => {
 			join(inner, ".pi", "steering.ts"),
 			configModule("{ disabledRules: ['inner-only'] }"),
 		);
-		const layers = await loadConfigs(inner);
+		const { layers } = await loadConfigs(inner);
 		// Inner (b) → outer (a) order.
 		assert.deepEqual(layers.map((l) => l.disabledRules?.[0]), [
 			"inner-only",
@@ -218,12 +232,12 @@ describe("loader: loadConfigs", () => {
 			join(cwd, ".pi", "steering", "index.ts"),
 			configModule("{ disabledRules: ['directory'] }"),
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers } = await loadConfigs(cwd);
 		assert.equal(layers.length, 1);
 		assert.deepEqual(layers[0]?.disabledRules, ["directory"]);
 	});
 
-	it("warns when BOTH steering.ts and steering/index.ts coexist, uses directory form", async () => {
+	it("reports a layer-form-coexistence diagnostic when both forms exist, uses directory form", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		writeConfig(
@@ -234,24 +248,26 @@ describe("loader: loadConfigs", () => {
 			join(cwd, ".pi", "steering", "index.ts"),
 			configModule("{ disabledRules: ['dir-form'] }"),
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.equal(layers.length, 1);
 		assert.deepEqual(
 			layers[0]?.disabledRules,
 			["dir-form"],
 			"directory form should win on ambiguous coexistence",
 		);
+		const hit = diagnostics.find((d) => d.kind === "layer-form-coexistence");
 		assert.ok(
-			warnings.some(
-				(w) =>
-					w.includes("both .pi/steering.ts and .pi/steering/index.ts") &&
-					w.includes("using directory form"),
-			),
-			`expected coexistence warning; got: ${JSON.stringify(warnings)}`,
+			hit,
+			`expected a layer-form-coexistence diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "warning");
+		assert.match(
+			hit.message,
+			/both .pi\/steering.ts and .pi\/steering\/index.ts/,
 		);
 	});
 
-	it("warns about non-.ts files under .pi/steering/", async () => {
+	it("emits a layer-stray-file diagnostic per non-.ts file under .pi/steering/", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		// Create the steering/ dir with stray non-.ts files AND no
@@ -280,18 +296,18 @@ describe("loader: loadConfigs", () => {
 			"// plain js",
 			"utf8",
 		);
-		await loadConfigs(cwd);
-		const relevant = warnings.filter((w) =>
-			w.includes("ignoring non-.ts file"),
-		);
-		assert.equal(relevant.length, 4);
-		assert.ok(relevant.some((w) => w.endsWith("rules.mjs")));
-		assert.ok(relevant.some((w) => w.endsWith("rules.json")));
-		assert.ok(relevant.some((w) => w.endsWith("rules.mts")));
-		assert.ok(relevant.some((w) => w.endsWith("rules.js")));
+		const { diagnostics } = await loadConfigs(cwd);
+		const stray = diagnostics.filter((d) => d.kind === "layer-stray-file");
+		assert.equal(stray.length, 4);
+		assert.ok(stray.every((d) => d.type === "warning"));
+		const paths = stray.map((d) => d.path ?? "");
+		assert.ok(paths.some((p) => p.endsWith("rules.mjs")));
+		assert.ok(paths.some((p) => p.endsWith("rules.json")));
+		assert.ok(paths.some((p) => p.endsWith("rules.mts")));
+		assert.ok(paths.some((p) => p.endsWith("rules.js")));
 	});
 
-	it("does NOT warn about .ts helpers under .pi/steering/", async () => {
+	it("does NOT report stray-file diagnostics for .ts helpers under .pi/steering/", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		writeConfig(
@@ -302,45 +318,51 @@ describe("loader: loadConfigs", () => {
 			join(cwd, ".pi", "steering", "helpers.ts"),
 			"export const x = 1;",
 		);
-		await loadConfigs(cwd);
+		const { diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(
-			warnings.filter((w) => w.includes("ignoring")),
+			diagnostics.filter((d) => d.kind === "layer-stray-file"),
 			[],
 		);
 	});
 
-	it("logs + skips a layer whose module fails to import", async () => {
+	it("records a layer-import-failed diagnostic and skips a layer whose module fails to import", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		writeConfig(
 			join(cwd, ".pi", "steering.ts"),
 			"export default { rules: {{ not valid ts }} };",
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(layers, []);
+		const hit = diagnostics.find((d) => d.kind === "layer-import-failed");
 		assert.ok(
-			warnings.some((w) => w.includes("failed to load config")),
-			`expected an import-failure warning, got: ${JSON.stringify(warnings)}`,
+			hit,
+			`expected a layer-import-failed diagnostic; got: ${JSON.stringify(diagnostics)}`,
 		);
+		assert.equal(hit.type, "warning");
+		assert.equal(hit.path, join(cwd, ".pi", "steering.ts"));
+		assert.match(hit.message, /failed to load config/);
 	});
 
-	it("logs + skips a module whose default export isn't an object", async () => {
+	it("records a layer-import-failed diagnostic when the default export is not an object", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		writeConfig(
 			join(cwd, ".pi", "steering.ts"),
 			"export default 42;",
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(layers, []);
 		assert.ok(
-			warnings.some((w) =>
-				w.includes("must be a SteeringConfig object"),
+			diagnostics.some(
+				(d) =>
+					d.kind === "layer-import-failed" &&
+					d.message.includes("must be a SteeringConfig object"),
 			),
 		);
 	});
 
-	it("logs + skips a module with no default export", async () => {
+	it("records a layer-import-failed diagnostic when the module has no default export", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		// Named exports only — no `export default`. This used to silently
@@ -350,17 +372,21 @@ describe("loader: loadConfigs", () => {
 			join(cwd, ".pi", "steering.ts"),
 			"export const rules = [];\nexport const plugins = [];\n",
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(layers, []);
 		assert.ok(
-			warnings.some((w) => w.includes("must have a default export")),
-			`expected 'must have a default export' warning; got: ${JSON.stringify(
-				warnings,
+			diagnostics.some(
+				(d) =>
+					d.kind === "layer-import-failed" &&
+					d.message.includes("must have a default export"),
+			),
+			`expected 'must have a default export' diagnostic; got: ${JSON.stringify(
+				diagnostics,
 			)}`,
 		);
 	});
 
-	it("logs + skips a module whose default export is an array", async () => {
+	it("records a layer-import-failed diagnostic when the default export is an array", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		// Arrays pass `typeof === 'object'`; the hardened guard (Fix 3)
@@ -369,15 +395,16 @@ describe("loader: loadConfigs", () => {
 			join(cwd, ".pi", "steering.ts"),
 			"export default [];",
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(layers, []);
 		assert.ok(
-			warnings.some(
-				(w) =>
-					w.includes("must be a SteeringConfig object") &&
-					w.includes("got array"),
+			diagnostics.some(
+				(d) =>
+					d.kind === "layer-import-failed" &&
+					d.message.includes("must be a SteeringConfig object") &&
+					d.message.includes("got array"),
 			),
-			`expected array-rejection warning; got: ${JSON.stringify(warnings)}`,
+			`expected array-rejection diagnostic; got: ${JSON.stringify(diagnostics)}`,
 		);
 	});
 
@@ -397,7 +424,7 @@ describe("loader: loadConfigs", () => {
 			join(outer, ".pi", "steering", "index.ts"),
 			configModule("{ disabledRules: ['outer-dir'] }"),
 		);
-		const layers = await loadConfigs(inner);
+		const { layers } = await loadConfigs(inner);
 		assert.deepEqual(
 			layers.map((l) => l.disabledRules?.[0]),
 			["inner-flat", "outer-dir"],

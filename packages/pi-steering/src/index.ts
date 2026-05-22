@@ -158,6 +158,8 @@ export type {
 	ReservedPredicateKey,
 	Rule,
 	SteeringConfig,
+	SteeringDiagnostic,
+	SteeringDiagnosticKind,
 	ToolResultEvent,
 	TopLevelWhenClause,
 	TopLevelWhenClauseNoRecurse,

@@ -63,7 +63,7 @@ export async function buildSessionRuntime(
 	dispatcher: ObserverDispatcher;
 	config: SteeringConfig;
 }> {
-	const rawLayers = await loadConfigs(cwd);
+	const { layers: rawLayers } = await loadConfigs(cwd);
 	// First merge without defaults: we only need `disableDefaults` at
 	// this point, and layering defaults in would make the check
 	// meaningless (defaults shouldn't themselves opt into

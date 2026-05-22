@@ -1704,3 +1704,84 @@ export interface SteeringConfig {
 	/** Inline observers (rules reference by name). */
 	observers?: readonly Observer[];
 }
+
+// ---------------------------------------------------------------------------
+// SteeringDiagnostic
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminator categorizing what kind of issue a diagnostic
+ * describes. Stable across versions so tooling and tests can dispatch
+ * on `kind` without parsing the human-readable {@link
+ * SteeringDiagnostic.message}.
+ *
+ * The set is split between two surfaces:
+ *   - LOADER (`layer-form-coexistence`, `layer-import-failed`,
+ *     `layer-stray-file`) — produced while walking up the filesystem
+ *     and importing per-layer config files.
+ *   - PLUGIN-MERGER (added in later refactor steps) — produced while
+ *     resolving plugin shapes into the runtime registry.
+ *
+ * Today this union covers only the LOADER kinds. The plugin-merger
+ * categories land in a follow-up refactor that unifies
+ * `PluginResolveWarning` into this shape.
+ */
+export type SteeringDiagnosticKind =
+	/**
+	 * Both `.pi/steering/index.ts` AND `.pi/steering.ts` exist at the
+	 * same directory. The directory form wins; the flat form is
+	 * ignored. Almost always a forgotten cleanup; delete the unused
+	 * file to silence the diagnostic.
+	 */
+	| "layer-form-coexistence"
+	/**
+	 * A layer's `.pi/steering/index.ts` (or `.pi/steering.ts`) was
+	 * found on disk but its dynamic import threw — typically a syntax
+	 * error or a missing default export. The layer is skipped; outer
+	 * layers continue to load.
+	 */
+	| "layer-import-failed"
+	/**
+	 * A non-`.ts` file lives under `<dir>/.pi/steering/` (e.g.
+	 * `rules.json`, `rules.mjs`). Helpers ending in `.ts` are allowed;
+	 * other extensions are flagged so the user can rename or delete
+	 * the stray file.
+	 */
+	| "layer-stray-file";
+
+/**
+ * Structured issue surfaced while loading a steering config.
+ *
+ * Diagnostics flow up from the loader (and, in later refactor steps,
+ * the plugin merger) into the bridge runtime, which decides whether to
+ * throw or log per the user's strict-mode preference. The shape is
+ * stable so tests and future tooling can dispatch on {@link kind}
+ * without scanning {@link message} substrings.
+ */
+export interface SteeringDiagnostic {
+	/**
+	 * Severity of the diagnostic.
+	 *
+	 *   - `"warning"` — informational; safe to ignore in legacy
+	 *     fail-soft mode.
+	 *   - `"error"` — pi-steering cannot operate safely with this
+	 *     issue present (e.g. tracker name collision); always escalates
+	 *     to a thrown error regardless of the user's strict-mode
+	 *     preference.
+	 */
+	type: "warning" | "error";
+
+	/** Discriminator for programmatic dispatch and test assertions. */
+	kind: SteeringDiagnosticKind;
+
+	/** Agent-facing message; includes context like layer path or names. */
+	message: string;
+
+	/**
+	 * Source path. Set when the diagnostic originates from a single
+	 * config layer (per-layer import failure, dual-form coexistence,
+	 * stray file under `.pi/steering/`). Unset for cross-layer
+	 * collisions where multiple layers contribute.
+	 */
+	path?: string;
+}

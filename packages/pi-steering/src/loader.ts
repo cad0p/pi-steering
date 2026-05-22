@@ -46,6 +46,7 @@ import type {
 	Plugin,
 	Rule,
 	SteeringConfig,
+	SteeringDiagnostic,
 } from "./schema.ts";
 
 /**
@@ -151,30 +152,41 @@ export function ancestorChain(cwd: string): string[] {
 }
 
 /**
- * Find the config file (if any) for a single layer. Returns `null`
- * when neither candidate exists at that layer.
+ * Find the config file (if any) for a single layer. Returns the
+ * resolved file path plus an optional diagnostic when both candidate
+ * forms coexist at the same directory.
  *
- * Emits a `console.warn` when BOTH `.pi/steering/index.ts` AND
- * `.pi/steering.ts` exist in the same directory — the directory form
- * wins, but ambiguous coexistence is almost always an authoring
- * mistake (forgotten cleanup, stale file).
+ * When BOTH `.pi/steering/index.ts` AND `.pi/steering.ts` exist in
+ * the same directory the directory form wins, but ambiguous
+ * coexistence is almost always an authoring mistake (forgotten
+ * cleanup, stale file). The returned diagnostic gives callers a
+ * structured handle on that case so they can plumb it into the
+ * aggregate diagnostics array instead of reporting via
+ * `console.warn`.
  *
  * Exported for tests.
  */
-export function findConfigFile(dir: string): string | null {
+export function findConfigFile(dir: string): {
+	file: string | null;
+	diagnostic: SteeringDiagnostic | null;
+} {
 	const [indexForm, flatForm] = configCandidates(dir);
 	const indexExists = indexForm !== undefined && existsSync(indexForm);
 	const flatExists = flatForm !== undefined && existsSync(flatForm);
-	if (indexExists && flatExists) {
-		console.warn(
-			`[pi-steering] both .pi/steering.ts and .pi/steering/index.ts ` +
-				`exist at ${dir}; using directory form. ` +
-				"Delete .pi/steering.ts to remove this warning.",
-		);
+	let diagnostic: SteeringDiagnostic | null = null;
+	if (indexExists && flatExists && indexForm !== undefined) {
+		diagnostic = {
+			type: "warning",
+			kind: "layer-form-coexistence",
+			path: indexForm,
+			message:
+				`both .pi/steering.ts and .pi/steering/index.ts exist at ${dir}; ` +
+				"using directory form. Delete .pi/steering.ts to remove this warning.",
+		};
 	}
-	if (indexExists) return indexForm ?? null;
-	if (flatExists) return flatForm ?? null;
-	return null;
+	if (indexExists) return { file: indexForm ?? null, diagnostic };
+	if (flatExists) return { file: flatForm ?? null, diagnostic };
+	return { file: null, diagnostic };
 }
 
 // ---------------------------------------------------------------------------
@@ -224,45 +236,62 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
  * (caller passes to {@link buildConfig}, which expects inner-first so
  * early entries take precedence on collisions).
  *
+ * Issues encountered along the way (per-layer import failure, dual
+ * form coexistence, stray non-`.ts` file under `.pi/steering/`)
+ * surface as structured {@link SteeringDiagnostic} entries on the
+ * returned object. The loader does not log to `console.warn` directly
+ * — the bridge runtime owns the policy decision (throw vs. log) once
+ * it has collected diagnostics from every source.
+ *
  * Errors within a single layer (bad default export, import failure)
- * are logged via `console.warn` and the layer is skipped. This matches
- * the v1 JSON loader's best-effort posture — a broken ancestor config
- * shouldn't prevent the session from starting with a sensible subset.
+ * are recorded as `kind: "layer-import-failed"` diagnostics and the
+ * layer is skipped — a broken ancestor config shouldn't prevent the
+ * session from starting with a sensible subset.
  *
  * @throws when Node is older than {@link MIN_NODE_MAJOR}.
  */
-export async function loadConfigs(cwd: string): Promise<SteeringConfig[]> {
+export async function loadConfigs(cwd: string): Promise<{
+	layers: SteeringConfig[];
+	diagnostics: SteeringDiagnostic[];
+}> {
 	assertNodeVersion();
 
 	const dirs = ancestorChain(cwd);
-	const out: SteeringConfig[] = [];
+	const layers: SteeringConfig[] = [];
+	const diagnostics: SteeringDiagnostic[] = [];
 	for (const dir of dirs) {
-		const file = findConfigFile(dir);
+		const { file, diagnostic } = findConfigFile(dir);
+		if (diagnostic !== null) diagnostics.push(diagnostic);
 		if (file === null) {
-			// Warn about stray files under `.pi/steering/` that the
-			// loader won't pick up (e.g. `.js`, `.mjs`, `.mts`). Only
-			// surface these when the directory exists but has no
-			// `index.ts` — otherwise a project without any steering
-			// directory would spam the console.
+			// Surface stray files under `.pi/steering/` that the loader
+			// won't pick up (e.g. `.js`, `.mjs`, `.mts`). Only check when
+			// the directory exists but has no `index.ts` — otherwise a
+			// project without any steering directory would emit noise.
 			const steeringDir = join(dir, ".pi", "steering");
 			if (existsSync(steeringDir)) {
 				for (const stray of unexpectedFilesUnderSteering(dir)) {
-					console.warn(
-						`[pi-steering] ignoring non-.ts file under .pi/steering/: ${stray}`,
-					);
+					diagnostics.push({
+						type: "warning",
+						kind: "layer-stray-file",
+						path: stray,
+						message: `ignoring non-.ts file under .pi/steering/: ${stray}`,
+					});
 				}
 			}
 			continue;
 		}
 		try {
-			out.push(await importConfigFile(file));
+			layers.push(await importConfigFile(file));
 		} catch (err) {
-			console.warn(
-				`[pi-steering] failed to load config at ${file}: ${String(err)}`,
-			);
+			diagnostics.push({
+				type: "warning",
+				kind: "layer-import-failed",
+				path: file,
+				message: `failed to load config at ${file}: ${String(err)}`,
+			});
 		}
 	}
-	return out;
+	return { layers, diagnostics };
 }
 
 // ---------------------------------------------------------------------------
@@ -518,12 +547,17 @@ export function buildConfig(
 
 /**
  * Convenience: load all layers for `cwd`, then merge with optional
- * `defaults`. Equivalent to `buildConfig(await loadConfigs(cwd), defaults)`.
+ * `defaults`. Equivalent to
+ * `buildConfig((await loadConfigs(cwd)).layers, defaults)`.
+ *
+ * Diagnostics produced by {@link loadConfigs} are discarded by this
+ * convenience wrapper. Callers that want structured diagnostics
+ * should call {@link loadConfigs} + {@link buildConfig} directly.
  */
 export async function loadSteeringConfig(
 	cwd: string,
 	defaults?: SteeringConfig,
 ): Promise<SteeringConfig> {
-	const layers = await loadConfigs(cwd);
+	const { layers } = await loadConfigs(cwd);
 	return buildConfig(layers, defaults);
 }

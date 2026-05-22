@@ -222,7 +222,7 @@ async function runList(args: string[]): Promise<number> {
 	// a verbose flag we can add later.
 	let layers;
 	try {
-		layers = await loadConfigs(process.cwd());
+		({ layers } = await loadConfigs(process.cwd()));
 	} catch (err) {
 		process.stderr.write(
 			`pi-steering: failed to load config: ${

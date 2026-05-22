@@ -2,7 +2,7 @@
 // Part of pi-steering.
 
 /**
- * v2 config schema — TS-first rules, plugins, observers, predicates.
+ * v2 config schema - TS-first rules, plugins, observers, predicates.
  *
  * Additive to the v1 schema (see `../schema.ts`). The existing evaluator
  * continues to drive the pi extension runtime on the v1 types; v2 types
@@ -11,7 +11,7 @@
  *
  * Design references (see the accepted ADR, linked from PR #2's
  * description):
- *   - "Design → Rule schema"         → {@link Rule}, {@link WhenClause},
+ *   - "Design → Rule schema"         → {@link Rule}, {@link TopLevelWhenClause},
  *                                       {@link Pattern}, {@link PredicateFn},
  *                                       {@link PredicateHandler}.
  *   - "Design → Observer schema"     → {@link Observer},
@@ -25,7 +25,7 @@
  * only defines shapes. Evaluation is Phase 3's concern.
  */
 
-import type { Tracker, Word } from "unbash-walker";
+import type { EnvState, Tracker, Word } from "unbash-walker";
 
 // ---------------------------------------------------------------------------
 // Primitive predicate types
@@ -33,29 +33,90 @@ import type { Tracker, Word } from "unbash-walker";
 
 /**
  * Static or regex pattern accepted by all built-in string-valued
- * predicates (`when.cwd`, `when.branch`, `when.upstream`, …).
+ * predicates (`when.cwd`, `when.branch`, `when.upstream`, ...).
  *
  * A plain string is treated as a regex source (compiled once at load
- * time by the evaluator — users escape literals themselves). A RegExp
+ * time by the evaluator - users escape literals themselves). A RegExp
  * is used as-is.
  *
  * See ADR "Design → Rule schema" → Pattern.
+ *
+ * @see {@link Patterns} for the OR-of-matches shorthand used by
+ * pattern-leaf predicate registry augmentations.
  */
 export type Pattern = string | RegExp;
 
 /**
+ * The OR-of-patterns shorthand for pattern-leaf predicate
+ * registrations: a single {@link Pattern} or an array of
+ * {@link Pattern}s (interpreted as OR-of-matches: any pattern
+ * matching counts as a hit).
+ *
+ * Use as the bare-type parameter of {@link PredicateShape} when
+ * registering a pattern-leaf predicate that accepts both bare
+ * shorthand (`when: { myPredicate: /^foo$/ }`) and explicit object
+ * form (`when: { myPredicate: { pattern: /^foo$/ } }`):
+ *
+ * @example
+ * ```ts
+ * import type { Patterns, PredicateShape } from "pi-steering";
+ *
+ * declare global {
+ *   interface PiSteeringPredicates {
+ *     myPredicate: PredicateShape<Patterns>;
+ *   }
+ * }
+ * ```
+ */
+export type Patterns = Pattern | Pattern[];
+
+/**
  * Escape-hatch predicate: arbitrary user-supplied logic evaluated with a
  * {@link PredicateContext}. Returned value gates whether the surrounding
- * rule fires. Async OK — evaluator awaits it.
+ * rule fires. Async OK - evaluator awaits it.
  *
  * Used as the value of `when.condition`, and as the fallback shape for
- * plugin-registered custom keys on a {@link WhenClause}.
+ * plugin-registered custom keys on a {@link TopLevelWhenClause}.
  *
  * See ADR "Design → Rule schema" → PredicateFn.
  */
 export type PredicateFn = (
 	ctx: PredicateContext,
 ) => boolean | Promise<boolean>;
+
+/**
+ * Dynamic block-reason function. When {@link Rule.reason} is a
+ * function, the evaluator invokes it with the same
+ * {@link PredicateContext} the predicates saw and prefixes the
+ * returned string with `[steering:<rule>@<source>] `. Async OK
+ * (evaluator awaits); thrown errors are logged to `console.warn` and
+ * replaced with a fail-safe fallback (`(reason failed to format;
+ * see log)`) so a broken reason doesn't leak its raw error message
+ * to the LLM.
+ *
+ * Use the function form when the block's human-readable context
+ * depends on runtime state — e.g. "Could not verify upstream at
+ * effective cwd \${ctx.walkerState.cwd}". Plain string reasons are
+ * preferred when the reason is static; they avoid the evaluator's
+ * extra  await + try/catch.
+ *
+ * @example
+ *   // Inject the current branch name into the reason when the walker
+ *   // resolved it statically; fall back to a generic message when the
+ *   // walker bails or the tracker's initial-sentinel flows through.
+ *   reason: (ctx) => {
+ *     const raw = ctx.walkerState?.branch;
+ *     const branch =
+ *       typeof raw === "string" && raw !== "" && raw !== "unknown"
+ *         ? raw
+ *         : undefined;
+ *     const onClause = branch ? ` You are on '${branch}'.` : "";
+ *     return `Don't commit directly to a protected branch.${onClause}`;
+ *   };
+ */
+export type ReasonFn = (
+	ctx: PredicateContext,
+) => string | Promise<string>;
 
 /**
  * Plugin-registered predicate *handler*. Differs from {@link PredicateFn}
@@ -72,71 +133,321 @@ export type PredicateFn = (
  * }
  * ```
  *
- * `args` is whatever the rule author put under that key — the handler is
+ * `args` is whatever the rule author put under that key - the handler is
  * responsible for validating its shape. `ctx` is the same
  * {@link PredicateContext} the escape-hatch form receives.
+ *
+ * Returns a {@link PredicateVerdict} (`true | false | "unknown"`).
+ * Pre-trinary handlers returning plain `boolean` remain source-compatible:
+ * `boolean` is a subtype of `PredicateVerdict`, so existing handlers assign
+ * unchanged. Handlers that need to surface walker-unknown state to the
+ * engine return the literal string `"unknown"`; the engine then applies
+ * the leaf's `onUnknown:` modifier (or, inside `not:`, the block-level
+ * `onUnknown:`) to produce the leaf's verdict for downstream composition.
+ *
+ * Throwing inside a handler is equivalent to returning `"unknown"`: the
+ * engine catches and treats the leaf as unknown, then applies the
+ * `onUnknown:` policy. Prefer explicit returns; the catch exists so a
+ * buggy handler can't silently fail-OPEN by skipping its rule.
  *
  * See ADR "Design → Rule schema" → PredicateHandler.
  */
 export type PredicateHandler<A = unknown> = (
 	args: A,
 	ctx: PredicateContext,
-) => boolean | Promise<boolean>;
+) => PredicateVerdict | Promise<PredicateVerdict>;
 
 // ---------------------------------------------------------------------------
-// When clause
+// Per-predicate typing — registry, modifiers, mapped types
 // ---------------------------------------------------------------------------
 
 /**
- * Recursively-composable predicate block attached to a {@link Rule}.
- *
- * Built-in keys:
- *   - {@link cwd}        — the sole walker-tied predicate the engine ships.
- *                          All other dimensions (`branch`, `upstream`, …)
- *                          come from plugins.
- *   - {@link not}        — boolean NOT over a nested clause; all nested
- *                          predicates must FAIL for `not` to "succeed".
- *   - {@link condition}  — escape hatch for one-off logic that doesn't
- *                          warrant a plugin.
- *
- * Plugin keys: anything else. A plugin registering
- * `predicates: { branch: <handler> }` teaches the engine that `when.branch`
- * is valid; the handler receives whatever value the user put there. Types
- * for plugin-registered predicates aren't inferred at this schema level —
- * they're enforced at config-build time via plugin registration (Phase 3).
- *
- * See ADR "Design → Rule schema" → WhenClause.
+ * Trinary verdict surfaced by predicate handlers. `true` / `false` are
+ * the definite answers; the literal string `"unknown"` signals the
+ * predicate could not resolve its value (typically because some piece
+ * of walker-tracked state — cwd, branch, etc. — wasn't statically
+ * resolvable). The engine then applies the leaf's `onUnknown:` policy
+ * (or, inside `not:`, the block-level policy) to project the trinary
+ * verdict back to a definite boolean for rule-level composition.
  */
-export interface WhenClause<Writes extends string = string> {
-	/**
-	 * Constrain the rule to commands whose *effective* cwd matches
-	 * the given pattern. For bash, the walker's `cwdTracker` resolves
-	 * the effective cwd per extracted command (so
-	 * `cd ~/personal && git commit --amend` evaluates against
-	 * `~/personal`). For write / edit, the session cwd is used directly.
-	 *
-	 * The object form lets authors opt into `onUnknown: "allow"` when a
-	 * command's cwd can't be statically resolved (e.g. `cd $VAR && …`).
-	 * Default is `"block"` — fail-closed.
-	 *
-	 * See ADR "Design → Override default and `onUnknown`".
-	 */
-	cwd?: Pattern | { pattern: Pattern; onUnknown?: "allow" | "block" };
+export type PredicateVerdict = boolean | "unknown";
 
+/**
+ * Predicate modifiers — optional fields that can be added to a
+ * predicate's spread form (outer leaf level) OR to the not-block top
+ * level. Single source of truth for what predicate authors and users
+ * can configure beyond the bare value. Adding a new modifier here
+ * propagates everywhere in the schema (every predicate's spread form,
+ * every not-block top level) and automatically reserves its key name
+ * via {@link ReservedPredicateKey}.
+ */
+export interface PredicateModifiers {
+	/**
+	 * Walker-unknown policy. When the predicate's value can't be
+	 * resolved at walker time (dynamic cwd / branch via `cd "$VAR"`,
+	 * `git checkout $VAR`, etc.), this policy decides the predicate's
+	 * verdict:
+	 *   - `"block"` (default): treat as fail-CLOSED — predicate fires.
+	 *   - `"allow"`: treat as fail-OPEN — predicate skips.
+	 *
+	 * At the leaf level (outer when-clause), this is per-predicate.
+	 * At the not-block top level, this applies to ALL leaves in the
+	 * not-block — leaf-level `onUnknown:` is forbidden inside `not:`
+	 * (type-level error) so the user can't write the silent
+	 * fail-OPEN `not: { cwd: P }` shape.
+	 */
+	onUnknown?: "allow" | "block";
+}
+
+/**
+ * Default spread BASE (without modifiers) inferred from `Bare`'s shape:
+ *   - `Bare extends object`   → `Bare` directly (intersection at use site).
+ *   - `Bare extends Patterns` → `{ pattern: Bare }` wrapper.
+ *   - else (primitive)        → `{ value: Bare }` wrapper.
+ *
+ * Note the order: object check FIRST so a pure-object predicate
+ * auto-detects to intersection (clean sibling-modifier UX). Pattern
+ * check second to capture the built-in `string | RegExp | array`
+ * family. Primitive fallback for `boolean`, `number`, etc.
+ *
+ * The tuple-wrap (`[Bare] extends [...]`) prevents distributive
+ * conditional behavior across union members of `Bare`.
+ */
+export type DefaultSpreadBase<Bare> =
+	[Bare] extends [object]
+		? Bare
+		: [Bare] extends [Patterns]
+			? { pattern: Bare }
+			: { value: Bare };
+
+/**
+ * Shape of a single entry in the {@link PiSteeringPredicates} registry.
+ * Each predicate declares its `bare` form and (optionally) an explicit
+ * `spreadBase` — the spread's object form WITHOUT modifiers.
+ *
+ * - `bare`: the value users write at the leaf (Pattern, boolean,
+ *           number, etc.).
+ * - `SpreadBase` (param): the spread's object form WITHOUT modifiers;
+ *           defaults to {@link DefaultSpreadBase} from `Bare`.
+ * - `spread` (derived at use site): `spreadBase & PredicateModifiers`
+ *           — the form users write at the leaf to specify modifiers.
+ *           Inner `not:` form omits modifiers (leaf-level `onUnknown:`
+ *           inside `not:` is forbidden); outer leaf form intersects
+ *           with `PredicateModifiers`.
+ *
+ * @see PredicateModifiers for the modifier surface available on every
+ *      predicate's spread form.
+ * @see DefaultSpreadBase for how the SpreadBase auto-detects from Bare.
+ */
+export interface PredicateShape<Bare, SpreadBase = DefaultSpreadBase<Bare>> {
+	/**
+	 * The bare value users write at the leaf (no wrapper, no modifiers).
+	 *
+	 * For primitive {@link Bare} types (Pattern, boolean, number) this
+	 * is the shorthand authors reach for first — `cwd: /work/`,
+	 * `isClean: true`, `commitsAhead: 2`. The {@link spreadBase} form
+	 * mirrors the bare value as `{ value: Bare }` (or an explicit
+	 * `SpreadBase` shape for mixed-bare predicates like `commitsAhead`'s
+	 * comparator bag) when authors need to attach leaf-level modifiers
+	 * via `& PredicateModifiers`.
+	 *
+	 * For object {@link Bare} types the bare form IS the object shape
+	 * directly (no `value:` wrapper); the {@link spreadBase} adds
+	 * modifier slots without changing the structural shape.
+	 */
+	bare: Bare;
+	/**
+	 * The object form WITHOUT modifiers. Modifiers are added at use site
+	 * via `& PredicateModifiers` (outer leaf level) or at the not-block
+	 * top level (inside `not:`).
+	 */
+	spreadBase: SpreadBase;
+}
+
+declare global {
+	/**
+	 * Plugin-registered predicate registry. Empty by default; plugins
+	 * extend via TypeScript module augmentation (`declare global { interface
+	 * PiSteeringPredicates { ... } }`) to register typed predicates with
+	 * autocomplete + JSDoc.
+	 *
+	 * Keys must NOT collide with {@link ReservedPredicateKey} (the
+	 * operator-field union plus modifier keys); the type-level filter
+	 * via {@link Exclude} drops collisions silently, and the engine
+	 * throws at plugin-registration time with a concrete error message
+	 * pointing the plugin author at the collision.
+	 *
+	 * Do NOT add an index signature (e.g. `[k: string]: PredicateShape<unknown>`)
+	 * to this interface — it would widen `keyof PiSteeringPredicates` to
+	 * `string`, defeating the reserved-key filter (`Exclude<string,
+	 * "not" | "onUnknown">` is just `string` again).
+	 *
+	 * @example Plugin author registering a typed predicate
+	 * ```ts
+	 * import type { Plugin, PredicateShape } from "pi-steering";
+	 * import { workItemFormat } from "./predicates/work-item-format.ts";
+	 * import type { WorkItemFormatArgs } from "./predicates/work-item-format.ts";
+	 *
+	 * declare global {
+	 *   interface PiSteeringPredicates {
+	 *     workItemFormat: PredicateShape<WorkItemFormatArgs>;
+	 *   }
+	 * }
+	 *
+	 * const myPlugin = {
+	 *   name: "work-item",
+	 *   predicates: { workItemFormat },
+	 * } as const satisfies Plugin;
+	 * ```
+	 *
+	 * @see {@link PredicateShape} for the bare / spreadBase shape contract.
+	 * @see {@link DefaultSpreadBase} for how spreadBase auto-detects from `bare`.
+	 * @see {@link PredicateModifiers} for available leaf-level modifier fields.
+	 * @see The `gitPlugin` declaration in `plugins/git/index.ts` for a
+	 *      multi-predicate registry block (branch, upstream, remote,
+	 *      isClean, hasStagedChanges, commitsAhead).
+	 * @see `examples/work-item-plugin/` for an end-to-end external-plugin
+	 *      reference: handler module, predicate-bare-shape registration,
+	 *      and a worked rule + tests.
+	 */
+	interface PiSteeringPredicates {
+		// Empty by default. Plugins augment via `declare global`.
+	}
+}
+
+/**
+ * Operator fields on `TopLevelWhenClause`. Currently just `"not"`;
+ * future v0.2 may add `"or"` / `"and"` operators. Kept as a separate
+ * union so reserved-key derivation stays lockstep with operator
+ * additions.
+ */
+export type OperatorField = "not";
+
+/**
+ * Reserved predicate keys derived from `OperatorField | keyof
+ * PredicateModifiers`. Plugin authors cannot register predicates with
+ * these names — they collide with the schema's `not?:` operator field
+ * and the `& PredicateModifiers` intersection on spread forms.
+ *
+ * Adding a new modifier to {@link PredicateModifiers} automatically
+ * reserves its key (lockstep via `keyof`); adding a new operator
+ * requires extending {@link OperatorField}.
+ *
+ * The type-level filter via {@link PluginPredicateKey} removes these
+ * names from the mapped types; the runtime constant
+ * `RESERVED_PREDICATE_KEYS` (in `evaluator-internals/predicates.ts`)
+ * mirrors this set so the engine throws at plugin-registration time
+ * with a concrete error message.
+ */
+export type ReservedPredicateKey = OperatorField | keyof PredicateModifiers;
+
+/**
+ * Plugin-registered predicate keys with reserved names filtered out.
+ * Used as the value-position constraint on {@link OuterValue} /
+ * {@link InnerValue}, and as the `K & PluginPredicateKey`
+ * intersection narrowing inside {@link TopLevelWhenClause} /
+ * {@link TopLevelWhenClauseNoRecurse}. NOT used as the mapped-type
+ * iteration source — those mapped types iterate `keyof
+ * PiSteeringPredicates` directly with an `as`-filter, see their
+ * mapping-shape note for why.
+ */
+export type PluginPredicateKey = Exclude<
+	keyof PiSteeringPredicates,
+	ReservedPredicateKey
+>;
+
+/**
+ * Outer leaf value: the bare form OR the spreadBase intersected with
+ * {@link PredicateModifiers}. Used at the top-level `when:` clause
+ * where each plugin-registered predicate accepts modifiers per-leaf.
+ *
+ * @see TopLevelWhenClause for the surface that consumes this mapped
+ *      type.
+ */
+export type OuterValue<K extends PluginPredicateKey> =
+	| PiSteeringPredicates[K]["bare"]
+	| (PiSteeringPredicates[K]["spreadBase"] & PredicateModifiers);
+
+/**
+ * Inner leaf value (inside `not:`): bare form OR spreadBase WITHOUT
+ * modifiers. Modifiers live at the not-block top level — leaf-level
+ * modifiers inside `not:` are forbidden so the silent fail-OPEN
+ * `not: { cwd: P }` shape can't be reproduced via leaf-level
+ * `onUnknown:` placement.
+ *
+ * @see TopLevelWhenClauseNoRecurse for the surface that consumes this
+ *      mapped type.
+ */
+export type InnerValue<K extends PluginPredicateKey> =
+	| PiSteeringPredicates[K]["bare"]
+	| PiSteeringPredicates[K]["spreadBase"];
+
+/**
+ * Built-in non-registry leaves attached to a {@link Rule.when}
+ * clause — outer flavor.
+ *
+ * These predicates ship with the engine itself (not via a plugin),
+ * so they aren't in {@link PiSteeringPredicates} but DO need to
+ * surface on {@link TopLevelWhenClause} as typed fields.
+ *
+ * The `Writes` generic threads through {@link defineConfig} so that
+ * `when.happened.event` / `when.happened.since` references are
+ * compile-time-checked against the union of declared `writes`
+ * arrays across plugins + observers.
+ *
+ * Currently three non-registry leaves: `happened?:`, `condition?:`,
+ * `cwd?:`. The shape is pinned in tests (a future widening — e.g.,
+ * adding a new built-in `tool?:` leaf — fails the type-pin and
+ * forces a deliberate decision).
+ *
+ * ## Outer / Inner split
+ *
+ * `cwd:`'s spread form differs depending on placement:
+ *
+ * - Outer (rule-level `when:`) — leaf-level `onUnknown?:` allowed,
+ *   honored by the engine's `evaluateCwd` + `projectVerdict` flow.
+ * - Inner (inside `not:`) — leaf-level `onUnknown?:` forbidden
+ *   (parity with registry-driven inner predicates per
+ *   {@link InnerValue}). Walker-unknown cwd inside `not:` projects
+ *   via the block-level `onUnknown:` modifier (default `"block"`).
+ *
+ * Two parallel interfaces formalize this split: this type
+ * (`BuiltInWhenLeavesOuter`) and {@link BuiltInWhenLeavesInner}. The
+ * legacy `BuiltInWhenLeaves` symbol is preserved as a deprecated
+ * alias to `Outer` for backward compatibility — new code should
+ * import the explicit Outer / Inner flavor.
+ *
+ * This is the outer-flavor interface. `cwd?:` accepts
+ * `Pattern | Pattern[] | { pattern, onUnknown? }` (leaf-level
+ * `onUnknown:` honored at the outer when-level via `evaluateCwd` /
+ * `projectVerdict`).
+ *
+ * @see BuiltInWhenLeavesInner for the parallel inner-flavor type
+ *      used inside `not:`.
+ */
+export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
 	/**
 	 * Rule fires when the given `event` has NOT happened in the given
-	 * scope. Typical usage: "block `cr` unless sync has happened" —
+	 * scope. Typical usage: "block `cr` unless sync has happened" -
 	 * `happened: { event: "rds-ws-sync-done", in: "agent_loop" }`.
 	 *
 	 * Scopes:
-	 *   - `"agent_loop"` — filter session entries by
+	 *   - `"agent_loop"` - filter session entries by
 	 *     `entry.data._agentLoopIndex === ctx.agentLoopIndex`. The engine
 	 *     auto-injects that tag on every `appendEntry` write, so plugin
 	 *     authors don't have to remember to tag manually.
-	 *   - `"session"`    — no scope filter. Any entry of `event` present
+	 *   - `"session"`    - no scope filter. Any entry of `event` present
 	 *     in the session JSONL satisfies.
+	 *   - `"tool_call"`  - only consider speculative entries synthesized
+	 *     for THIS tool_call's `&&`-chain. Real (persisted) entries are
+	 *     ignored entirely. Use when the rule requires the event to be
+	 *     CHAINED directly before the guarded command (e.g. `sync && cr`)
+	 *     rather than merely "somewhere this agent loop". Pairs naturally
+	 *     with observer `writes:` declarations on observers whose
+	 *     watch-matched refs produce speculative entries; no-op when no
+	 *     observer writes the event.
 	 *
-	 * Inversion: place inside `not` to flip —
+	 * Inversion: place inside `not` to flip the clause-level boolean -
 	 * `not: { happened: { event, in } }` fires when the event HAS
 	 * happened. See ADR §5.
 	 *
@@ -152,6 +463,25 @@ export interface WhenClause<Writes extends string = string> {
 	 *   `happened: { event: SYNC_DONE_EVENT, in: "agent_loop",
 	 *                since: UPSTREAM_FAILED_EVENT }`.
 	 *
+	 * Optional `notIn` (set subtraction over scopes): when present,
+	 * entries in `notIn` scope are excluded from the `in`-scoped entry
+	 * stream BEFORE the `ts_max` comparison runs. Typical use:
+	 * `happened: { event, in: "agent_loop", notIn: "tool_call" }` -
+	 * "happened in a prior tool_call in this agent loop". Excludes
+	 * same-tool_call speculative entries so `someCmd && guardedCmd`
+	 * can't bypass the rule via tool_call-scope speculative synthesis.
+	 *
+	 * Distinct from the clause-level {@link TopLevelWhenClause.not},
+	 * which is boolean negation of a sub-clause. `notIn` is set
+	 * subtraction; separate keyword so the two operators can't be
+	 * confused.
+	 *
+	 * Invalid scope combinations throw at evaluation time with the
+	 * rule name prefixed:
+	 *   - Supersets (e.g. `in: "agent_loop", notIn: "session"`) - the
+	 *     subtraction is always empty.
+	 *   - Identicals (`notIn === in`) - the subtraction is always empty.
+	 *
 	 * Compile-time constraint: inside {@link defineConfig}, both the
 	 * `event` and `since` fields are narrowed to the union of all
 	 * `writes` declared across plugin rules, plugin observers, user
@@ -161,40 +491,326 @@ export interface WhenClause<Writes extends string = string> {
 	 */
 	happened?: {
 		event: Writes;
-		in: "agent_loop" | "session";
+		in: "agent_loop" | "session" | "tool_call";
 		since?: Writes;
+		notIn?: "agent_loop" | "session" | "tool_call";
 	};
-
-	/**
-	 * Boolean NOT: the rule fires only when every nested predicate
-	 * fails. Useful for "mostly block, but allow the safe variant":
-	 * `when: { not: { upstream: /origin\/main/ } }` — block unless the
-	 * upstream is origin/main.
-	 */
-	not?: WhenClause<Writes>;
 
 	/**
 	 * Escape-hatch predicate for one-off logic. Prefer plugin-registered
 	 * predicates when the logic is reusable; use `condition` for
 	 * genuinely local checks that don't warrant a plugin.
+	 *
+	 * Throws (sync or rejected promise) are caught and treated as
+	 * `"unknown"`. Outer-level `condition:` is bare-`PredicateFn`-typed
+	 * (no spread shape), so the projection always uses the default
+	 * `"block"` policy: a throwing condition fires the rule fail-CLOSED.
+	 * Authors needing fail-OPEN wrap inside
+	 * `not: { condition: fn, onUnknown: "allow" }` (block-level
+	 * modifier) OR catch the throw inside the callback body. Mirrors
+	 * the plugin-handler exception contract.
 	 */
 	condition?: PredicateFn;
 
 	/**
-	 * Plugin-registered predicates. Keys are free-form; values must match
-	 * what the registering plugin expects (a {@link Pattern}, an object
-	 * with a `pattern` field, a {@link PredicateFn}, or a plugin-specific
-	 * argument shape validated by the plugin's {@link PredicateHandler}).
+	 * Constrain the rule to commands whose *effective* cwd matches
+	 * the given pattern. For bash, the walker's `cwdTracker` resolves
+	 * the effective cwd per extracted command (so
+	 * `cd ~/personal && git commit --amend` evaluates against
+	 * `~/personal`). For write / edit, the session cwd is used directly.
 	 *
-	 * The index signature is deliberately loose (`unknown`) — compile-
-	 * time argument checking per-predicate is a plugin-level concern,
-	 * not a schema-level one.
+	 * Bare form: a single {@link Pattern} or an OR-of-patterns array.
+	 * Spread form: `{ pattern, onUnknown? }` — the object lets authors
+	 * opt into `onUnknown: "allow"` when a command's cwd can't be
+	 * statically resolved (e.g. `cd $VAR && ...`). Default is `"block"`
+	 * — fail-closed.
+	 *
+	 * Array form (`Pattern[]` or `{ pattern: Pattern[]; onUnknown? }`)
+	 * matches OR-of-patterns: the predicate fires when the resolved cwd
+	 * matches ANY of the listed patterns. Empty arrays are invalid (rule
+	 * skips); arrays containing non-Pattern values are invalid (rule
+	 * skips). Array form sugars vault-path or workspace-tree exemptions:
+	 *
+	 *   ```ts
+	 *   when: { cwd: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//] }
+	 *   when: { cwd: { pattern: [/\.test$/, /\.spec$/], onUnknown: "allow" } }
+	 *   ```
+	 *
+	 * `cwd:` is the sole walker-tied built-in leaf; all other dimensions
+	 * (`branch`, `upstream`, ...) come from plugins. It lives on
+	 * {@link BuiltInWhenLeaves} (not the registry) so authors can write
+	 * `when: { cwd: /work/ }` against pi-steering core without needing
+	 * gitPlugin's module augmentation in scope.
+	 *
+	 * See ADR "Design → Override default and `onUnknown`".
+	 */
+	cwd?:
+		| Pattern
+		| Pattern[]
+		| { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };
+}
+
+/**
+ * Inner-flavor non-registry built-in leaves. Lives on
+ * {@link TopLevelWhenClauseNoRecurse} (the body of `not:`). `cwd?:`
+ * accepts `Pattern | Pattern[] | { pattern }` — NO leaf-level
+ * `onUnknown?:`. Modifiers live at the not-block level via
+ * `& PredicateModifiers`, matching the constraint registry-driven
+ * inner predicates already enforce via `InnerValue<K>`.
+ *
+ * `happened?:` and `condition?:` are identical to
+ * {@link BuiltInWhenLeavesOuter}; only `cwd:` differs. The engine
+ * reads block-level `onUnknown:` inside `not:` regardless of leaf
+ * shape, so this type formalizes that constraint at the authoring
+ * surface (preventing the silent fail-OPEN class where leaf-level
+ * `onUnknown:` looks meaningful but is ignored at runtime).
+ *
+ * @see BuiltInWhenLeavesOuter for the design rationale, the
+ *      Outer/Inner split, and the parallel outer-flavor type.
+ */
+export interface BuiltInWhenLeavesInner<Writes extends string = string> {
+	/** Identical to {@link BuiltInWhenLeavesOuter.happened}. */
+	happened?: BuiltInWhenLeavesOuter<Writes>["happened"];
+
+	/** Identical to {@link BuiltInWhenLeavesOuter.condition}. */
+	condition?: BuiltInWhenLeavesOuter<Writes>["condition"];
+
+	/**
+	 * Same `cwd:` semantics as {@link BuiltInWhenLeavesOuter.cwd} but
+	 * the spread form's `onUnknown?:` is dropped — modifiers live at
+	 * the not-block level via `& PredicateModifiers`. Walker-unknown
+	 * cwd inside `not:` projects via the block-level `onUnknown:`
+	 * (default `"block"` = fail-CLOSED, rule fires).
+	 */
+	cwd?: Pattern | Pattern[] | { pattern: Pattern | Pattern[] };
+}
+
+/**
+ * Backward-compatible alias for {@link BuiltInWhenLeavesOuter}.
+ *
+ * Retained so external code importing `BuiltInWhenLeaves` (and the
+ * public-surface shape pin in `not-block-onunknown.test.ts`) keeps
+ * working after the Outer/Inner split.
+ *
+ * @deprecated Use {@link BuiltInWhenLeavesOuter} for outer-level
+ * authoring or {@link BuiltInWhenLeavesInner} for `not:` block
+ * bodies. This alias is retained for backward compatibility and may
+ * be removed in a future release.
+ */
+export type BuiltInWhenLeaves<Writes extends string = string> =
+	BuiltInWhenLeavesOuter<Writes>;
+
+/**
+ * Top-level when-clause attached to a {@link Rule}. Each
+ * plugin-registered predicate (filtered for reserved keys) gets a
+ * leaf-level field accepting the bare or spread form. The `not?:`
+ * operator allows one level of negation (no recursion).
+ *
+ * Generic over `Writes` so the built-in `happened?:` leaf's `event` /
+ * `since` references narrow to the union of declared `writes` strings
+ * threaded through by {@link defineConfig}.
+ *
+ * Mapping shape note: the constraint is `keyof PiSteeringPredicates`
+ * with an `as`-filter excluding {@link ReservedPredicateKey}, rather
+ * than the pre-computed alias `[K in PluginPredicateKey]`. Both shapes
+ * produce the same keyset, but only the homomorphic-with-filter form
+ * propagates JSDoc on hover from `PiSteeringPredicates.<key>` source
+ * declarations onto the synthesized field. The `& PluginPredicateKey`
+ * intersection in the value position narrows `K` back to the
+ * constraint expected by {@link OuterValue}. Keep both the constraint
+ * and the `as`-filter inlined — extracting either to a type alias
+ * silently regresses the propagation.
+ *
+ * Hover-on-`defineConfig`-inline-rules caveat: passing rule literals
+ * directly into `defineConfig({ rules: [{ ... }] })` bypasses the
+ * mapped-type linkage — the `const R extends readonly Rule[]`
+ * signature narrows the literal to its `const`-inferred shape.
+ * Factor rules out (`const myRule = { ... } as const satisfies Rule`)
+ * when hover-rich authoring matters; see the {@link defineConfig} JSDoc.
+ *
+ * @see TopLevelWhenClauseNoRecurse for the body of `not:`.
+ * @see PredicateModifiers for available leaf-level modifier fields.
+ * @see BuiltInWhenLeaves for the engine's non-registry leaf set.
+ */
+export type TopLevelWhenClause<Writes extends string = string> = {
+	[K in keyof PiSteeringPredicates as K extends ReservedPredicateKey
+		? never
+		: K]?: OuterValue<K & PluginPredicateKey>;
+} & BuiltInWhenLeavesOuter<Writes> & {
+	/**
+	 * Logical NOT: rule fires when the inner predicates' AND is false.
+	 *
+	 * Multi-leaf semantics: leaves AND together with Kleene 3-valued
+	 * logic. Walker-unknown leaves resolve via the block-level
+	 * `onUnknown:` modifier (default `"block"` = fail-CLOSED, rule
+	 * fires).
+	 *
+	 * No leaf-level `onUnknown:` here (forbidden at type level —
+	 * modifiers live at the not-block level). No `not:` recursion
+	 * (forbidden at type level — semantically equivalent to the
+	 * unwrapped form). Nested `not:` is also rejected at runtime by
+	 * `validateWhenClauseShape` for JSON / `as any` escape hatches.
+	 *
+	 * @see TopLevelWhenClauseNoRecurse
+	 * @see PredicateModifiers
+	 */
+	not?: TopLevelWhenClauseNoRecurse<Writes>;
+};
+
+/**
+ * Body of a `not:` block: predicates with their bare / spreadBase
+ * forms (NO leaf-level modifiers — modifiers live at this block's top
+ * level via `& PredicateModifiers`). No nested `not:` (no recursion).
+ *
+ * Generic over `Writes` so the built-in `happened?:` leaf inherits
+ * the same compile-time event-narrowing as the outer level.
+ *
+ * Same homomorphic-with-filter mapping shape as
+ * {@link TopLevelWhenClause} (and the same `defineConfig`-inline
+ * caveat). See the mapping-shape note there for the rationale.
+ *
+ * @see TopLevelWhenClause for the rule-attached when-clause.
+ * @see PredicateModifiers for block-level modifier fields.
+ */
+export type TopLevelWhenClauseNoRecurse<Writes extends string = string> = {
+	[K in keyof PiSteeringPredicates as K extends ReservedPredicateKey
+		? never
+		: K]?: InnerValue<K & PluginPredicateKey>;
+} & BuiltInWhenLeavesInner<Writes> & PredicateModifiers;
+
+/**
+ * Type-erased alias for {@link PredicateHandler} used at registry
+ * boundaries (notably {@link Plugin.predicates}).
+ *
+ * TypeScript treats function-argument types as contravariant: a
+ * `PredicateHandler<CommitsAheadArgs>` is **not** assignable to a
+ * `PredicateHandler<unknown>` because the handler needs to *accept*
+ * `unknown`, while the specialized handler only accepts a narrower
+ * shape. Using `any` at the registry slot leverages TS's bivariance
+ * fallback — specifically-typed handlers assign without a cast, and
+ * the engine's generic call site stays safe because it passes the
+ * matching `when.<name>` value straight through to the handler
+ * (the handler already validates its own arg shape).
+ *
+ * Prefer this alias at any `Record<string, PredicateHandler<…>>`
+ * boundary where the value shape is per-key heterogeneous.
+ *
+ * ## Write-through registry slot, not a safe read type
+ *
+ * This alias exists so heterogeneous handler maps accept typed
+ * handlers cast-free on the WRITE side (plugin author stuffs a
+ * `PredicateHandler<FooArgs>` into `Plugin.predicates`). On the READ
+ * side (a consumer iterating `plugin.predicates`, or a decorator /
+ * middleware layering over a plugin's handlers) the retrieved value
+ * carries `args: any` — no compile-time narrowing. Consumers that
+ * want typed reads should narrow back to `PredicateHandler<TArgs>`
+ * at their call site.
+ *
+ * ## Handler authors: declare `PredicateHandler<YourArgs>`, not this
+ *
+ * Do NOT use `AnyPredicateHandler` as the type annotation for a
+ * handler declaration:
+ *
+ *   // wrong — `args` is `any`, no narrowing inside the body.
+ *   const myHandler: AnyPredicateHandler = (args, ctx) => { ... };
+ *
+ *   // right — narrow `args` at the declaration; the result still
+ *   // assigns cast-free into `Plugin.predicates`.
+ *   const myHandler: PredicateHandler<MyArgs> = (args, ctx) => { ... };
+ *
+ * Also note: because `any` at the boundary disables compile-time
+ * narrowing on the engine's CALL site too, typed handlers MUST
+ * still validate their own `args` shape at the top of the function
+ * body. The engine passes the verbatim `when.<name>` value, so TS
+ * can't protect you from a user writing
+ * `when: { myPredicate: "not-the-shape-you-expected" }`.
+ * (See `isClean`'s `if (typeof args !== "boolean") return false`
+ * pattern for the canonical guard.)
+ */
+export type AnyPredicateHandler = PredicateHandler<any>;
+
+// ---------------------------------------------------------------------------
+// When clause
+// ---------------------------------------------------------------------------
+
+/**
+ * Legacy v0.0.x predicate block; see {@link TopLevelWhenClause} for
+ * the authoring surface attached to {@link Rule.when}.
+ *
+ * The legacy interface is retained as an internal type for the JSON
+ * v1→v2 path in `compat.ts`, where the loose `[customKey: string]:
+ * unknown` index signature is needed to accept arbitrary plugin keys
+ * during deserialization. Plugin authors should NOT type their
+ * helpers against `WhenClause` — use {@link TopLevelWhenClause} for
+ * outer when-clauses or {@link TopLevelWhenClauseNoRecurse} for
+ * not-block bodies (both are registry-driven and enforce the
+ * five compile-time constraints documented on {@link BaseRule.when}).
+ *
+ * Note: even though this legacy interface permits `not: { not: ... }`
+ * recursion at the type level, the engine's runtime
+ * `validateWhenClauseShape` rejects nested-`not` shapes at
+ * `buildEvaluator` time. Authors smuggling depth-2 recursion through
+ * JSON v1 / `as any` casts hit the runtime guard, not silent
+ * acceptance.
+ *
+ * @deprecated Internal v1-compat type. Use {@link TopLevelWhenClause}
+ *             at authoring sites; this interface is preserved only
+ *             for the JSON v1→v2 conversion path in `compat.ts`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-deprecated
+export interface WhenClause<Writes extends string = string> {
+	/**
+	 * @deprecated Use {@link TopLevelWhenClause}'s `cwd?:` leaf (lifted
+	 *             onto {@link BuiltInWhenLeaves}). Retained for v1
+	 *             JSON→v2 conversion compatibility only.
+	 * @see BuiltInWhenLeaves.cwd
+	 */
+	cwd?:
+		| Pattern
+		| Pattern[]
+		| { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };
+
+	/**
+	 * @deprecated Use {@link TopLevelWhenClause}'s `happened?:` leaf
+	 *             (lifted onto {@link BuiltInWhenLeaves}). Retained for
+	 *             v1 JSON→v2 conversion compatibility only.
+	 * @see BuiltInWhenLeaves.happened for the canonical semantics
+	 *      (scopes, `since`, `notIn`, runtime errors).
+	 */
+	happened?: {
+		event: Writes;
+		in: "agent_loop" | "session" | "tool_call";
+		since?: Writes;
+		notIn?: "agent_loop" | "session" | "tool_call";
+	};
+
+	/**
+	 * @deprecated Use {@link TopLevelWhenClause}'s `not?:` operator field.
+	 */
+	not?: WhenClause<Writes>;
+
+	/**
+	 * @deprecated Use {@link TopLevelWhenClause}'s `condition?:` leaf
+	 *             (lifted onto {@link BuiltInWhenLeaves}). Retained for
+	 *             v1 JSON→v2 conversion compatibility only.
+	 * @see BuiltInWhenLeaves.condition
+	 */
+	condition?: PredicateFn;
+
+	/**
+	 * @deprecated v1-compat loose index signature — plugin-registered
+	 *             predicates now live on {@link PiSteeringPredicates}
+	 *             with per-key compile-time typing via
+	 *             {@link OuterValue} / {@link InnerValue}. Retained for
+	 *             v1 JSON→v2 conversion compatibility only.
 	 */
 	[customKey: string]:
 		| Pattern
+		| Pattern[]
 		| PredicateFn
 		| WhenClause
 		| { pattern: Pattern; onUnknown?: "allow" | "block" }
+		| { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" }
 		| unknown;
 }
 
@@ -205,7 +821,7 @@ export interface WhenClause<Writes extends string = string> {
 /**
  * Fields common to every tool-specific rule variant.
  *
- * `BaseRule` is the shared slice — everything except the `tool`
+ * `BaseRule` is the shared slice - everything except the `tool`
  * discriminant and the tool-specific {@link BashRule.field} /
  * {@link WriteRule.field} / {@link EditRule.field} sub-unions. The
  * exported user-facing type is {@link Rule}, the discriminated union
@@ -237,34 +853,100 @@ export interface BaseRule<
 	pattern: Pattern;
 
 	/**
-	 * Optional extra AND predicate — when provided, the rule fires
+	 * Optional extra AND predicate - when provided, the rule fires
 	 * only if this also matches. Accepts a pattern or a function so
 	 * plugins can layer structured checks on top of the main match.
 	 */
 	requires?: Pattern | PredicateFn;
 
 	/**
-	 * Exemption predicate — when provided and matches, the rule does
+	 * Exemption predicate - when provided and matches, the rule does
 	 * NOT fire. Same shape choice as {@link requires}.
 	 */
 	unless?: Pattern | PredicateFn;
 
 	/**
-	 * Composable predicate block. See {@link WhenClause}.
+	 * Composable predicate block. See {@link TopLevelWhenClause}.
 	 *
 	 * `Writes` is the union of session-entry event literals the rule's
 	 * `when.happened.event` is allowed to reference. Threaded through by
 	 * {@link defineConfig} from all declared `writes` arrays in scope.
+	 *
+	 * The five compile-time constraints from the not-block onUnknown
+	 * design land here:
+	 *   1. Each plugin-registered predicate is shape-checked against
+	 *      its `PiSteeringPredicates[K]` registry entry (bare /
+	 *      spreadBase). Typos / unknown predicates surface as
+	 *      compile errors at the rule definition.
+	 *   2. Reserved keys (`not`, `onUnknown`, plus future modifiers)
+	 *      are dropped from the registry-driven mapped type via
+	 *      {@link PluginPredicateKey} so a plugin author can't shadow
+	 *      the operator/modifier surface.
+	 *   3. Leaf-level `onUnknown:` inside `not:` is forbidden (the
+	 *      inner mapped type uses {@link InnerValue} which excludes
+	 *      modifiers — those live at the not-block top level).
+	 *   4. `not: not:` recursion is forbidden
+	 *      ({@link TopLevelWhenClauseNoRecurse} has no `not?:` field).
+	 *      Belt-and-suspenders runtime guard in
+	 *      {@link validateWhenClauseShape} catches JSON / `as any`
+	 *      escape hatches.
+	 *   5. Rule-level `onUnknown:` is forbidden
+	 *      ({@link TopLevelWhenClause} doesn't intersect with
+	 *      {@link PredicateModifiers}; only the inner `not:` body does).
 	 */
-	when?: WhenClause<Writes>;
+	when?: TopLevelWhenClause<Writes>;
 
-	/** Message shown to the agent when blocked. Should be actionable. */
-	reason: string;
+	/**
+	 * Message shown to the agent when blocked.
+	 *
+	 * A plain string is the most common shape and should be actionable
+	 * (e.g. "Use `git commit --no-verify` to bypass"). The evaluator
+	 * prefixes every block reason with `[steering:<rule>@<source>] `
+	 * so the agent sees which rule fired and where it came from
+	 * (ADR §11).
+	 *
+	 * A {@link ReasonFn} is invoked with the same
+	 * {@link PredicateContext} the predicates saw. Use the function
+	 * form when the reason text depends on runtime state - e.g. the
+	 * walker's effective cwd, a resolved branch name, or a count
+	 * pulled from `ctx.findEntries`. The evaluator awaits the return
+	 * and applies the source-tag prefix identically to the string form.
+	 *
+	 * Fail-safe on throw: if the reason function throws synchronously
+	 * or its returned promise rejects, the evaluator logs the error
+	 * with `console.warn` and emits a fallback message
+	 * (`[steering:<rule>@<source>] (reason failed to format; see log)`).
+	 * The block verdict still lands - a broken reason doesn't release
+	 * the rule's guard or leak raw error text to the LLM.
+	 *
+	 * Tag→body separator is paragraph-aware: a body containing `\n\n`
+	 * (or its CRLF equivalent `\r\n\r\n`, defensive against bodies
+	 * imported from Windows line-ending sources — CRLF templating
+	 * layers, hand-typed Windows-IDE strings) renders with the
+	 * `[steering:...]` tag on its own line followed by a paragraph
+	 * break (`\n\n`); otherwise the tag and body share a single
+	 * space-separated line. The trigger is double-newline
+	 * specifically — single `\n` characters inside an otherwise
+	 * single-paragraph body keep the single-space layout. The emitted
+	 * separator is always normalized to `\n\n` regardless of which
+	 * form (`\n\n` or `\r\n\r\n`) triggered it. Multi-paragraph
+	 * reasons get the prefix-on-its-own-line layout automatically
+	 * without the rule author managing leading whitespace.
+	 *
+	 * Body→override-hint separator mirrors the same paragraph-aware
+	 * rule. Single-paragraph bodies keep a single-space prefix on the
+	 * override hint (byte-identical to the pre-paragraph-aware
+	 * rendering); multi-paragraph bodies promote the override hint
+	 * to its own paragraph (`${body}\n\n${hint}`) so a safety
+	 * paragraph stays visually standalone rather than running on
+	 * into an inline "To override" sentence.
+	 */
+	reason: string | ReasonFn;
 
 	/**
 	 * If `true`, no override escape hatch. If `false`, override always
 	 * allowed. Omitted: falls back to
-	 * {@link SteeringConfig.defaultNoOverride} (defaults to `true` —
+	 * {@link SteeringConfig.defaultNoOverride} (defaults to `true` -
 	 * fail-closed).
 	 */
 	noOverride?: boolean;
@@ -287,7 +969,7 @@ export interface BaseRule<
 	 * **Compile-time effect (via {@link defineConfig}):** the union of
 	 * all `writes` literals declared across plugin rules, plugin
 	 * observers, user rules, and user observers constrains the `event`
-	 * field of every {@link WhenClause.happened} inside the same config.
+	 * field of every {@link BuiltInWhenLeavesOuter.happened} inside the same config.
 	 * Declaring a write here makes it referenceable from
 	 * `when.happened.event` anywhere in that config; omitting it leaves
 	 * the string out of the union and downstream references to it are
@@ -304,22 +986,22 @@ export interface BaseRule<
 	 * **Footgun: bare `: Rule` / `: Observer` / `: Plugin` annotations
 	 * widen the literal `writes` array to `readonly string[]`. The engine
 	 * can no longer project string-literal members, so `AllWrites`
-	 * collapses to `never` — meaning EVERY `when.happened.event`
+	 * collapses to `never` - meaning EVERY `when.happened.event`
 	 * reference in the config is rejected as a typo, not silently
 	 * accepted.
 	 *
 	 * **Runtime effect:** none. `writes` is purely documentation +
-	 * type-level plumbing — the engine does NOT verify that `onFire`
+	 * type-level plumbing - the engine does NOT verify that `onFire`
 	 * only calls `ctx.appendEntry` with declared types.
 	 *
 	 * **Opt-out:** authors who build their config via
 	 * `satisfies SteeringConfig` instead of `defineConfig` lose the
-	 * compile-time check — the `SteeringConfig` shape defaults the
+	 * compile-time check - the `SteeringConfig` shape defaults the
 	 * {@link Rule} generics to `string`, so `when.happened.event` is
 	 * unconstrained. `defineConfig` is the entry point that enforces.
 	 *
-	 * The wider warning — "name" / "plugin" literals widening to
-	 * `string` — causes the opposite failure: typos in `disabledRules`
+	 * The wider warning - "name" / "plugin" literals widening to
+	 * `string` - causes the opposite failure: typos in `disabledRules`
 	 * / `disabledPlugins` start compiling silently. Always use
 	 * `as const satisfies` for reusable constants.
 	 */
@@ -330,7 +1012,7 @@ export interface BaseRule<
 	 * predicates passed) and BEFORE the block verdict is returned.
 	 *
 	 * Use for self-marking patterns where the rule's fire IS the event
-	 * (e.g. `cr-description-check` — first attempt per agent loop blocks
+	 * (e.g. `cr-description-check` - first attempt per agent loop blocks
 	 * as reminder, self-marks via `onFire` so subsequent attempts pass).
 	 * Anything written via `ctx.appendEntry` gets auto-tagged with the
 	 * current `_agentLoopIndex` so a follow-up `when.happened:
@@ -341,7 +1023,7 @@ export interface BaseRule<
 	 *     evaluated favourably. If `when.cwd` or any other predicate
 	 *     fails, the rule doesn't fire and `onFire` doesn't run.
 	 *   - Runs for rules that will actually BLOCK. Rules suppressed by an
-	 *     inline override comment do NOT trigger `onFire` — the agent
+	 *     inline override comment do NOT trigger `onFire` - the agent
 	 *     overrode the rule, so its side effects are bypassed too.
 	 *   - Fail-closed rules (noOverride omitted or true) ignore override
 	 *     comments entirely, so `onFire` runs on every fire even when
@@ -350,7 +1032,7 @@ export interface BaseRule<
 	 * Error handling: `onFire` is a best-effort side effect. If it
 	 * throws (sync) or its returned promise rejects, the engine logs
 	 * the error with `console.warn` and proceeds to return the block
-	 * verdict. The block is not affected by an `onFire` failure — the
+	 * verdict. The block is not affected by an `onFire` failure - the
 	 * block decision already passed every predicate, and a broken
 	 * self-mark must not invalidate it. Mirrors the observer
 	 * dispatcher's per-observer isolation.
@@ -363,7 +1045,7 @@ export interface BaseRule<
 /**
  * Bash rule: gates pi's `bash` tool.
  *
- * `field` is constrained to `"command"` — the evaluator always runs
+ * `field` is constrained to `"command"` - the evaluator always runs
  * bash rules against the extracted command string per ref (see
  * `evaluator.ts` bash branch). There is no useful "test a bash rule
  * against a path" mode: bash has no path. `field: "path"` /
@@ -373,7 +1055,7 @@ export interface BaseRule<
  *
  * Inside a rule's predicates / `onFire`, the context exposes the
  * extracted command plus `args` (quote-aware `Word[]`) and
- * `basename` — those are populated per-ref by the evaluator, not by
+ * `basename` - those are populated per-ref by the evaluator, not by
  * the rule author.
  */
 export interface BashRule<
@@ -388,9 +1070,9 @@ export interface BashRule<
  * Write rule: gates pi's `write` tool (whole-file writes).
  *
  * `field` picks the input slot the {@link pattern} tests against:
- *   - `"path"`    — the target path (regex-gate paths a file may be
+ *   - `"path"`    - the target path (regex-gate paths a file may be
  *                  written to).
- *   - `"content"` — the full file contents the agent is writing.
+ *   - `"content"` - the full file contents the agent is writing.
  */
 export interface WriteRule<
 	ObsName extends string = string,
@@ -404,8 +1086,8 @@ export interface WriteRule<
  * Edit rule: gates pi's `edit` tool (targeted oldText/newText patches).
  *
  * `field` picks the input slot the {@link pattern} tests against:
- *   - `"path"`    — the target path.
- *   - `"content"` — the concatenated `newText` of every edit in the
+ *   - `"path"`    - the target path.
+ *   - `"content"` - the concatenated `newText` of every edit in the
  *                  tool call (evaluator joins with `\n`). This mirrors
  *                  `write.content` so authors can use one rule class
  *                  for both file surfaces.
@@ -419,17 +1101,19 @@ export interface EditRule<
 }
 
 /**
- * A single steering rule — discriminated union over the three
+ * A single steering rule - discriminated union over the three
  * gatable tools. The `tool` discriminant determines which `field`
  * values are legal: bash rules test against `"command"`, write / edit
  * rules test against `"path"` or `"content"`. Invalid combinations
  * (`{ tool: "bash", field: "path" }`, `{ tool: "write", field:
- * "command" }`, …) are TS errors.
+ * "command" }`, ...) are TS errors.
  *
  * Shape refinements vs. v1:
  *   - `pattern` accepts `RegExp` in addition to `string`.
  *   - `requires` / `unless` accept `Pattern | PredicateFn`.
- *   - `when` is a recursive {@link WhenClause}.
+ *   - `when` is a {@link TopLevelWhenClause} — registry-driven
+ *     mapped type with one level of `not:` allowed (no nested
+ *     `not: not: ...`).
  *   - `observer` references an {@link Observer} by name (string) or
  *     inline definition.
  *   - `Rule` is a discriminated union by `tool`.
@@ -470,9 +1154,9 @@ export interface ObserverWatch {
 
 	/**
 	 * Constrain by tool exit-code / success-failure classification.
-	 *   - `"success"` / `"failure"` — string classification
-	 *   - `number`                  — exact exit code match (bash)
-	 *   - `"any"`                   — explicit no-filter
+	 *   - `"success"` / `"failure"` - string classification
+	 *   - `number`                  - exact exit code match (bash)
+	 *   - `"any"`                   - explicit no-filter
 	 */
 	exitCode?: number | "success" | "failure" | "any";
 }
@@ -539,21 +1223,21 @@ export interface Observer {
 	 * **Compile-time effect (via {@link defineConfig}):** the union of
 	 * all `writes` literals declared across plugin rules, plugin
 	 * observers, user rules, and user observers constrains the `event`
-	 * field of every {@link WhenClause.happened} inside the same config.
+	 * field of every {@link BuiltInWhenLeavesOuter.happened} inside the same config.
 	 * Declaring a write here makes it referenceable from
 	 * `when.happened.event` anywhere in that config; omitting it leaves
 	 * the string out of the union and downstream references to it are
 	 * rejected as typos.
 	 *
 	 * **Authoring pattern.** See {@link Rule.writes} for the full
-	 * footgun note — TL;DR: use `as const satisfies Observer` on
+	 * footgun note - TL;DR: use `as const satisfies Observer` on
 	 * reusable observer constants, or declare them inline inside
 	 * `defineConfig({ observers: [...] })`. Bare `: Observer` annotations
 	 * widen `writes` to `readonly string[]` and collapse `AllWrites` to
 	 * `never`, rejecting every `when.happened.event` reference.
 	 *
 	 * **Runtime effect:** none. `writes` is purely documentation +
-	 * type-level plumbing — the engine does NOT verify that `onResult`
+	 * type-level plumbing - the engine does NOT verify that `onResult`
 	 * only calls `ctx.appendEntry` with declared types.
 	 *
 	 * **Opt-out:** authors who build their config via
@@ -572,7 +1256,7 @@ export interface Observer {
 	/**
 	 * Called on every matching tool_result event. Typically writes an
 	 * entry via `ctx.appendEntry(customType, data)`; occasionally
-	 * performs side effects (logging). Must be idempotent — the same
+	 * performs side effects (logging). Must be idempotent - the same
 	 * event MAY fire the observer more than once across pi's
 	 * lifecycle (e.g. session restart mid-turn).
 	 */
@@ -587,7 +1271,7 @@ export interface Observer {
  *
  * Intentionally minimal: the fields the schema commits to are the
  * ones every tool_result carries. Tool-specific `input` / `output`
- * fields are `unknown` here — observer authors cast to the known
+ * fields are `unknown` here - observer authors cast to the known
  * shape for the tool they're watching.
  */
 export interface ToolResultEvent {
@@ -613,12 +1297,12 @@ export interface ToolResultEvent {
  * the evaluator populates whichever fields belong to that tool.
  *
  * Bash note (per ADR §9): `command`, `basename`, and `args` are
- * populated PER extracted command ref — a bash invocation of
+ * populated PER extracted command ref - a bash invocation of
  * `git push --force && ls` runs the predicate once per ref, with
  * `command: "git push --force"` (flattened for pattern matching),
  * `basename: "git"`, and `args: [<Word>, <Word>]` (suffix `Word[]`
  * with quote-aware `.value`). `rawCommand` and full AST node access
- * are deliberately NOT exposed — the wrapper context would be wrong
+ * are deliberately NOT exposed - the wrapper context would be wrong
  * for inner refs, and AST walking belongs in plugin code that imports
  * unbash-walker directly.
  */
@@ -633,7 +1317,7 @@ export interface PredicateToolInput {
 	 */
 	basename?: string;
 	/**
-	 * bash: suffix `Word[]` for the extracted ref — quote-aware
+	 * bash: suffix `Word[]` for the extracted ref - quote-aware
 	 * structured access with `.value` giving the lexical value and
 	 * `.text` the raw source. Prefer this over splitting `command`
 	 * when the predicate needs to preserve quoting (e.g. reading a
@@ -644,6 +1328,28 @@ export interface PredicateToolInput {
 	 * Undefined for non-bash tools.
 	 */
 	args?: readonly Word[];
+	/**
+	 * bash: shell env-assignment prefix for the extracted ref -
+	 * `AWS_PROFILE=dev aws s3 ls` exposes `[W("AWS_PROFILE=dev")]`
+	 * here (with `args` still `[W("s3"), W("ls")]`). Multiple
+	 * assignments come through in source order. Enables plugins to
+	 * inspect shell env vars via structured access instead of
+	 * regex-on-raw-command.
+	 *
+	 * Sourced from `CommandRef.node.prefix` via unbash-walker. Each
+	 * prefix element is projected into a `Word` whose `.text` preserves
+	 * the full `KEY=VALUE` source token (with quoting, if any);
+	 * consumers split on `=` to separate key from value. Dynamic
+	 * values like `A=$VAR` come through as-is - the token syntax is
+	 * visible in `.text`, so callers can detect the expansion
+	 * themselves.
+	 *
+	 * Always an empty array for `write` / `edit` tools (shell env
+	 * assignments don't apply to file-surface tools); shaped as
+	 * `[]` rather than `undefined` so plugin authors can treat the
+	 * field uniformly.
+	 */
+	envAssignments?: readonly Word[];
 	/** write / edit: the target path. */
 	path?: string;
 	/** write: the file content being written. */
@@ -653,7 +1359,7 @@ export interface PredicateToolInput {
 }
 
 /**
- * Options forwarded to {@link PredicateContext.exec} — narrow surface
+ * Options forwarded to {@link PredicateContext.exec} - narrow surface
  * over child_process, scoped to the handful of knobs predicates need.
  */
 export interface ExecOpts {
@@ -673,22 +1379,80 @@ export interface ExecResult {
 }
 
 /**
+ * Shape of the walker-state snapshot the evaluator populates on
+ * {@link PredicateContext.walkerState} for bash rules. Consumed by
+ * the built-in `when.cwd` / `when.happened` predicates and by
+ * plugin-authored predicates that read per-ref tracker state.
+ *
+ * All fields are read-only. The evaluator assembles a fresh object
+ * per extracted command ref - mutation has no effect on subsequent
+ * refs or on any persisted state.
+ *
+ * The type is open-ended (`readonly [key: string]: unknown`) because
+ * plugins register new trackers at config-build time; the schema
+ * can't commit to the complete key set. Plugin authors documenting
+ * their own predicates should narrow via their tracker's known
+ * value type (e.g. the git plugin's branch predicate reads
+ * `ctx.walkerState.branch` as a string | "unknown" sentinel).
+ *
+ * For `write` / `edit` rules there's no walker invocation and
+ * {@link PredicateContext.walkerState} is `undefined`. Bash rules
+ * always see at minimum `{ cwd, env, events }`.
+ */
+export interface WhenWalkerState {
+	/**
+	 * Effective cwd at this ref, per the walker's `cwdTracker`. For
+	 * dynamic cd targets the walker couldn't resolve statically
+	 * (unknown `$VAR`, command substitution, arithmetic), this is the
+	 * literal string `"unknown"` - the cwdTracker's sentinel. The
+	 * built-in `when.cwd` predicate applies its `onUnknown: 'allow' |
+	 * 'block'` policy on that sentinel (default `'block'`, fail-
+	 * closed). Plugin predicates reading this field directly should
+	 * check for the sentinel before pattern-matching, or use the
+	 * sugar form `when.cwd: { pattern, onUnknown }` via the engine.
+	 */
+	readonly cwd: string;
+
+	/**
+	 * Env map at this ref, per the walker's `envTracker`. Carries
+	 * statically-resolved bare assignments (`FOO=bar`), `export`
+	 * writes, and `unset` deletions from the current scope, seeded
+	 * from `process.env.{HOME, USER, PWD}` at tracker initialization.
+	 *
+	 * Plugin predicates consume this to expand `$VAR` / `~` in
+	 * user-supplied patterns, or to implement a `when.envVar`-style
+	 * predicate. Read via `ctx.walkerState.env.get("NAME")`. Returns
+	 * `undefined` for any name the walker hasn't seen - callers apply
+	 * their own fallback (or route through the `resolveWord` helper
+	 * re-exported from the package root for word-level resolution).
+	 */
+	readonly env: EnvState;
+
+	/**
+	 * Additional tracker-registered fields (e.g. the git plugin's
+	 * `branch`) and reserved keys (`events`). Indexed loosely so
+	 * plugins adding new trackers don't need a schema amendment.
+	 */
+	readonly [key: string]: unknown;
+}
+
+/**
  * Context passed to a predicate (either {@link PredicateFn} or a
  * plugin's {@link PredicateHandler}).
  *
  * Rationale per ADR "Design → Predicate context":
- *   - `cwd`, `tool`, `input` — what the agent is about to do.
- *   - `agentLoopIndex` — engine-maintained counter bumped on each
+ *   - `cwd`, `tool`, `input` - what the agent is about to do.
+ *   - `agentLoopIndex` - engine-maintained counter bumped on each
  *     pi `agent_start` event (one agent loop = one user prompt + its
  *     tool calls). Rules gate "since the user's last message" state
  *     by comparing entries' auto-tagged `_agentLoopIndex` against
  *     `ctx.agentLoopIndex`, which is what `when.happened` with
  *     `in: "agent_loop"` does internally.
- *   - `exec` — shell escape hatch. The evaluator memoizes results per
+ *   - `exec` - shell escape hatch. The evaluator memoizes results per
  *     `(cmd, args, cwd)` within a single tool_call; no cross-call cache.
- *     This schema commits to the TYPE only — memoization is the
+ *     This schema commits to the TYPE only - memoization is the
  *     evaluator's concern (Phase 3).
- *   - `appendEntry` / `findEntries` — pi's session JSONL mirror of
+ *   - `appendEntry` / `findEntries` - pi's session JSONL mirror of
  *     what observers write. Predicates consult prior entries to
  *     implement turn-state checks.
  */
@@ -699,7 +1463,7 @@ export interface PredicateContext {
 	/** Which pi tool is being gated. */
 	tool: "bash" | "write" | "edit";
 
-	/** Tool input — evaluator populates whichever fields apply to `tool`. */
+	/** Tool input - evaluator populates whichever fields apply to `tool`. */
 	input: PredicateToolInput;
 
 	/**
@@ -714,7 +1478,7 @@ export interface PredicateContext {
 	 *
 	 * Stability guarantee: across rules evaluated for the SAME
 	 * tool_call, identical `(cmd, args, cwd)` tuples return the same
-	 * ExecResult without re-executing. Across tool_calls, no cache —
+	 * ExecResult without re-executing. Across tool_calls, no cache -
 	 * the world can change between turns.
 	 */
 	exec: (
@@ -740,49 +1504,38 @@ export interface PredicateContext {
 
 	/**
 	 * Walker state snapshot for the command being evaluated. Populated
-	 * only for bash rules — the walker runs once per tool_call over the
+	 * only for bash rules - the walker runs once per tool_call over the
 	 * full command and produces a per-ref snapshot of every registered
-	 * tracker (`cwd`, plugin-registered dimensions like `branch`, …).
-	 * For `write` / `edit` rules there is no walker, so this is
-	 * `undefined`.
+	 * tracker (`cwd`, `env`, plus plugin-registered dimensions like
+	 * `branch`). For `write` / `edit` rules there is no walker, so this
+	 * is `undefined`.
 	 *
 	 * Plugin predicates consult `walkerState[<tracker-name>]` to read
 	 * statically-resolved values (branch after `git checkout X`, cwd
-	 * after `cd /path`, …) without re-running the tracker's work. When
-	 * the tracker can't resolve statically the value is the tracker's
-	 * `unknown` sentinel — handlers apply their `onUnknown` policy.
+	 * after `cd /path`, env after `FOO=bar` / `export FOO=bar`) without
+	 * re-running the tracker's work. When the tracker can't resolve
+	 * statically the value is the tracker's `unknown` sentinel -
+	 * handlers apply their `onUnknown` policy.
 	 *
-	 * Shape is open-ended (`Record<string, unknown>`): the schema does
-	 * not commit to which trackers exist — that's a plugin registration
-	 * concern.
-	 */
-	walkerState?: Readonly<Record<string, unknown>>;
-
-	/**
-	 * Prior refs in the current bash tool_call that are connected to the
-	 * current ref via a continuous `&&` chain (left-to-right). Populated
-	 * only for bash rules. Used by chain-aware {@link WhenClause.happened}:
-	 * if any prior ref matches an observer that writes `event`, the
-	 * `happened` predicate treats the event as "about to happen" and
-	 * the rule does NOT fire (speculative allow). Safe because `&&`
-	 * short-circuits — if any prior failed, the current ref never runs,
-	 * so the speculative allow decision is moot.
+	 * Typed as {@link WhenWalkerState} (open-ended string-indexed) so
+	 * the schema commits to the two built-in keys (`cwd`, `env`) plus
+	 * the reserved `events` slot while leaving room for plugin
+	 * extensions.
 	 *
-	 * Refs connected via `;`, `|`, or `||` do NOT qualify and are not
-	 * in this set. Empty for the first ref or when the current ref is
-	 * preceded by a non-`&&` joiner.
+	 * Reserved key `events`: `Record<customType, SyntheticEntry[]>`.
+	 * Populated by the walker-level speculative-entry synthesis pass
+	 * (see `evaluator-internals/speculative-synthesis.ts`). Carries
+	 * per-ref speculative entries representing "events about to happen"
+	 * via continuous `&&` chains from observers' `writes:` declarations.
+	 * Each entry carries a `{ data, timestamp, speculative: true }`
+	 * shape; timestamps are in a reserved range (above any real entry)
+	 * monotonic in AST order. The built-in `when.happened` predicate
+	 * merges these with real entries via timestamp comparison;
+	 * plugin-authored predicates can opt out by filtering
+	 * `e.speculative === true`. Trackers cannot claim the `events`
+	 * key - plugin registration rejects it as reserved.
 	 */
-	priorAndChainedRefs?: readonly { text: string }[];
-
-	/**
-	 * Reverse index: for each event literal declared in an observer's
-	 * `writes`, the list of observers that produce it. Built once at
-	 * config resolution time from every loaded plugin's + inline
-	 * observer's declarations. Consumed by chain-aware
-	 * {@link WhenClause.happened}; undefined for evaluator callers that
-	 * don't ship observers.
-	 */
-	observersByWrittenEvent?: ReadonlyMap<string, readonly Observer[]>;
+	walkerState?: Readonly<WhenWalkerState>;
 }
 
 // ---------------------------------------------------------------------------
@@ -790,20 +1543,20 @@ export interface PredicateContext {
 // ---------------------------------------------------------------------------
 
 /**
- * A plugin — distribution unit for rule packs and extension points.
+ * A plugin - distribution unit for rule packs and extension points.
  *
  * Plugins register zero or more of:
- *   - {@link predicates}        — new `when.<key>` slots
- *   - {@link rules}             — bundled rules users can enable/disable
- *   - {@link observers}         — reusable observer definitions
- *   - {@link trackers}          — new walker state dimensions
- *   - {@link trackerExtensions} — modifiers for existing trackers
+ *   - {@link predicates}        - new `when.<key>` slots
+ *   - {@link rules}             - bundled rules users can enable/disable
+ *   - {@link observers}         - reusable observer definitions
+ *   - {@link trackers}          - new walker state dimensions
+ *   - {@link trackerExtensions} - modifiers for existing trackers
  *
  * See ADR "Design → Plugin schema". Plugin loading precedence is
  * "first-wins" (project-local → user's `plugins` array → built-in
  * defaults); name collisions on predicates / rules / observers /
  * tracker-extensions log a WARN and keep the first-registered entry.
- * Tracker-*name* collisions are a hard error — two plugins claiming the
+ * Tracker-*name* collisions are a hard error - two plugins claiming the
  * same state dimension is always a bug.
  */
 export interface Plugin {
@@ -814,7 +1567,7 @@ export interface Plugin {
 	 * Predicate handlers keyed by the `when.<key>` slot they register.
 	 * See {@link PredicateHandler}.
 	 */
-	predicates?: Record<string, PredicateHandler>;
+	predicates?: Record<string, AnyPredicateHandler>;
 
 	/** Rules the plugin suggests. Users can opt out via `disabledRules: [...]`. */
 	rules?: readonly Rule[];
@@ -831,19 +1584,19 @@ export interface Plugin {
 	/**
 	 * Modifiers added to an EXISTING tracker. Outer key is the tracker
 	 * name (e.g. `cwd`), inner key is the command basename the modifier
-	 * triggers on (e.g. `git` — to register a `--git-dir=...` parser on
+	 * triggers on (e.g. `git` - to register a `--git-dir=...` parser on
 	 * top of the built-in cwd tracker).
 	 *
 	 * The inner value accepts either a single {@link Modifier} or a
 	 * readonly array of them, mirroring {@link Tracker.modifiers} on the
 	 * walker side. Plugins can register multiple modifiers under one
-	 * `(tracker, basename)` pair — e.g. distinct parsers for different
+	 * `(tracker, basename)` pair - e.g. distinct parsers for different
 	 * subcommands of the same CLI that all share a basename.
 	 *
 	 * Collisions on a `(tracker, basename)` pair log a WARN and keep
 	 * the first-registered entry.
 	 *
-	 * Typed as `unknown` at this schema level — concrete plugins
+	 * Typed as `unknown` at this schema level - concrete plugins
 	 * declare their own modifier types tied to the tracker value they
 	 * extend.
 	 */
@@ -876,7 +1629,7 @@ export interface Plugin {
 export interface SteeringConfig {
 	/**
 	 * Default value for {@link Rule.noOverride} when a rule doesn't
-	 * specify its own. Defaults to `true` (fail-closed — overrides
+	 * specify its own. Defaults to `true` (fail-closed - overrides
 	 * must be explicit opt-in per rule).
 	 *
 	 * Walk-up merge: inner layer wins when specified; missing layer
@@ -895,16 +1648,38 @@ export interface SteeringConfig {
 	 * Rules to disable by name. Additive union across layers.
 	 *
 	 * Past-participle form (`disabledRules`) reads as a predicate on
-	 * state — "these are the rules that are disabled." Distinct from
+	 * state - "these are the rules that are disabled." Distinct from
 	 * the imperative flag {@link disableDefaults} (action: disable
 	 * the default plugins + rules).
+	 *
+	 * **Navigation note:** these are string literals projected from
+	 * `DEFAULT_RULES` (engine defaults), `plugin.rules[*].name`, and
+	 * inline `rules[*].name`. Ctrl+Click on a literal jumps to the
+	 * `AllRuleNames` union, NOT the rule's source — TypeScript-language
+	 * limitation on string-literal union members. To inspect a shipped
+	 * default's `reason` / `pattern`, import `DEFAULT_RULES` directly:
+	 *
+	 * ```ts
+	 * import { DEFAULT_RULES } from "pi-steering";
+	 * // hover DEFAULT_RULES[0] to see the rule body
+	 * ```
 	 */
 	disabledRules?: string[];
 
 	/**
 	 * Plugins to disable by name. Additive union across layers.
-	 * A disabled plugin contributes NOTHING — no rules, no observers,
+	 * A disabled plugin contributes NOTHING - no rules, no observers,
 	 * no predicates, no trackers.
+	 *
+	 * **Navigation note:** same TypeScript-language limitation as
+	 * {@link disabledRules} — Ctrl+Click on a string literal jumps to
+	 * the `AllPluginNames` union, not the plugin's source. To inspect a
+	 * shipped default plugin, import `DEFAULT_PLUGINS` directly:
+	 *
+	 * ```ts
+	 * import { DEFAULT_PLUGINS } from "pi-steering";
+	 * // hover DEFAULT_PLUGINS[0] to see the plugin body
+	 * ```
 	 */
 	disabledPlugins?: string[];
 

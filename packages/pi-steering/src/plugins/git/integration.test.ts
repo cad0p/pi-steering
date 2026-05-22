@@ -84,7 +84,21 @@ function buildRuntime(
 	return { evaluator, host, resolved };
 }
 
-/** Stub exec that reports a given branch name for `git branch --show-current`. */
+/**
+ * Stub exec that reports a given branch name for `git branch
+ * --show-current`. Every other `git` call (including `git config
+ * --get remote.origin.url`) returns exit 1, so predicates fall back
+ * to their `onUnknown` policy. The github-flavored
+ * `noMainCommitGithub` specialization is more specific via
+ * `remote: { pattern: ..., onUnknown: "allow" }`; on the resulting
+ * no-origin signal the github rule skips and the engine cleanly
+ * falls through to the generic `noMainCommit` for tests in this
+ * scope.
+ *
+ * Tests that need to exercise the github-flavored rule (or its
+ * non-github fall-through) construct their own exec stub that
+ * additionally returns a github URL on the `git config` call.
+ */
 function branchExec(name: string) {
 	return async (cmd: string, args: string[]): Promise<PiExecResult> => {
 		if (
@@ -326,10 +340,13 @@ describe("git plugin: walker-driven branch state (the KEY test)", () => {
 
 	it("checkout in a subshell does NOT escape - outer `git commit` allowed on feature", async () => {
 		// `(git checkout main)` is subshell-isolated; the outer
-		// `git commit` inherits the pre-subshell branch state.
-		// Walker says `unknown` (no initial branch seeded; tracker's
-		// initial value), so the predicate falls back to exec which
-		// reports `feature`. Rule doesn't fire.
+		// `git commit` inherits the pre-subshell branch state. No
+		// branch-changing modifier fired in the outer scope, so the
+		// walker threads the tracker's `NO_CHECKOUT_IN_CHAIN` initial
+		// sentinel (distinct from the `"unknown"` sentinel that
+		// signals a dynamic checkout). The predicate reads this as
+		// `missing` -> exec fallback to `git branch --show-current`,
+		// which the stub reports as `feature`. Rule doesn't fire.
 		const { evaluator } = buildRuntime(
 			{ plugins: [gitPlugin], rules: [] },
 			branchExec("feature"),
@@ -342,24 +359,23 @@ describe("git plugin: walker-driven branch state (the KEY test)", () => {
 		assert.equal(res, undefined);
 	});
 
-	it("`git checkout $VAR && git commit` - walker unknown + fail-closed fires no-main-commit", async () => {
+	it("`git checkout $VAR && git commit` - walker unknown short-circuits to onUnknown, no exec fallback", async () => {
 		// When $VAR is not statically resolvable, the branch tracker
-		// collapses to "unknown". The branch predicate's
-		// onUnknown:"block" default makes the rule fire even though
-		// git's exec fallback (if it ran) would report the starting
-		// branch. This is the fail-closed enforcement the ADR's
-		// walker+predicate story promises at the rule level.
+		// collapses to its "unknown" sentinel. The predicate MUST
+		// short-circuit on this signal: a `git branch --show-current`
+		// exec fallback here would return the PRE-checkout branch,
+		// which is exactly the case the walker's in-chain tracking
+		// exists to catch. The predicate's `onUnknown: "block"`
+		// default then fires the rule.
 		//
-		// NB: today the predicate treats walker "unknown" as "absent"
-		// and DOES fall back to exec (see the sibling unit test for
-		// that); the stub here deliberately makes exec FAIL so the
-		// fail-closed policy is what produces the fire. Wiring a
-		// direct walker-unknown -> onUnknown=block short-circuit is
-		// tracked as a follow-up (ADR Phase 5).
-		const { evaluator } = buildRuntime(
+		// This pins U1: the exec stub reports "feature" (a non-
+		// protected branch). Pre-U1 the predicate treated walker
+		// "unknown" as "absent" and fell through to exec -> the rule
+		// would INCORRECTLY allow, defeating fail-closed. Post-U1:
+		// exec is not consulted, the rule correctly fires.
+		const { evaluator, host } = buildRuntime(
 			{ plugins: [gitPlugin], rules: [] },
-			// exec fails -> onUnknown:"block" default fires the rule.
-			async () => ({ stdout: "", stderr: "", code: 128, killed: false }),
+			branchExec("feature"),
 		);
 		const res = await evaluator.evaluate(
 			bashEvent("git checkout $VAR && git commit -m 'x'"),
@@ -369,6 +385,335 @@ describe("git plugin: walker-driven branch state (the KEY test)", () => {
 		assert.ok(
 			res && res.block === true,
 			"unresolvable branch must fail-closed and fire no-main-commit",
+		);
+		// Regression guard: walker-unknown must NOT fall through to
+		// `git branch --show-current`. If this count is ever > 0 the
+		// U1 short-circuit has been re-broken.
+		assert.equal(
+			host.execCalls.filter(
+				(c) =>
+					c.cmd === "git" &&
+					c.args[0] === "branch" &&
+					c.args[1] === "--show-current",
+			).length,
+			0,
+			"walker-unknown short-circuits to onUnknown; predicate must not shell out",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 6. no-main-commit-github + walker-unknown cwd
+//
+// The github-flavored specialization's reason fn has a dedicated
+// walker-unknown branch — under `cd "$VAR" && git commit`, the engine
+// Walker-unknown cwd: github-flavored rule has
+// `remote: { pattern, onUnknown: "allow" }`. Under the trinary
+// engine, `onUnknown: "allow"` at the leaf level genuinely means
+// "skip the predicate when the value is unresolvable" — the
+// `remote:` leaf surfaces trinary `"unknown"` (via the inline
+// walker-unknown guard at the top of the handler body) and the
+// engine's leaf adapter projects it to `false` (rule skips).
+// The github-flavored rule therefore correctly defers to the
+// generic `noMainCommit` rule under walker-unknown cwd, which
+// consumes only the `branch:` predicate (no walker-unknown guard;
+// stub returns "main\n") and fires fail-CLOSED via its default
+// leaf-level `onUnknown: "block"`.
+//
+// What this test exercises (counterfactual rationale):
+//
+//   1. The `branch:` predicate matches `main` via the test stub
+//      (the stub returns "main\n" for `git branch --show-current`
+//      regardless of the runtime cwd that gets passed to it; in
+//      production the same exec at `cwd === "unknown"` would fail
+//      and the predicate would fall back to its `onUnknown:
+//      "block"` default — same firing verdict, different code
+//      path).
+//   2. The `remote:` predicate inlines a walker-unknown-cwd guard
+//      at the top of its body and surfaces trinary `"unknown"`
+//      under `walkerState.cwd === "unknown"`. The leaf-level
+//      `onUnknown: "allow"` on the github rule's `remote:` arg
+//      then projects unknown → `false` — the github rule SKIPS.
+//   3. The generic `noMainCommit` rule (with only `branch:`)
+//      fires next via its default `onUnknown: "block"`. Block
+//      verdict lands; the reason text is the generic
+//      protected-branch reason, not the github-specific one.
+//
+// Pinned: the steering tag is rendered, a block verdict lands,
+// and the rule that fires is `no-main-commit` (generic), not
+// `no-main-commit-github` — the github-flavored rule cleanly
+// declines under walker-unknown cwd because its `remote:` leaf
+// opts into "allow" semantics there.
+// ---------------------------------------------------------------------------
+
+describe("git plugin: no-main-commit-github walker-unknown cwd", () => {
+	it("`cd \"$VAR\" && git commit` on main + github remote → generic rule fires (github rule allows on walker-unknown via `onUnknown: \"allow\"` on its `remote:` leaf)", async () => {
+		// Explicit exec stubs make the test deterministic regardless
+		// of the runner's actual git state. Without the stubs, the
+		// `branch:` predicate (which has no inline walker-unknown-cwd
+		// guard — it tries the branch tracker first, then shells out)
+		// would shell out at the test runner's cwd — the test outcome
+		// would depend on whatever branch / remote that workspace
+		// happens to be on (flaky).
+		const { evaluator } = buildRuntime(
+			{ plugins: [gitPlugin], rules: [] },
+			async (cmd: string, args: string[]): Promise<PiExecResult> => {
+				if (
+					cmd === "git" &&
+					args[0] === "branch" &&
+					args[1] === "--show-current"
+				) {
+					return {
+						stdout: "main\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				if (
+					cmd === "git" &&
+					args[0] === "config" &&
+					args[1] === "--get" &&
+					args[2] === "remote.origin.url"
+				) {
+					return {
+						stdout: "https://github.com/cad0p/repo.git\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				return { stdout: "", stderr: "", code: 1, killed: false };
+			},
+		);
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$VAR" && git commit -m \'x\''),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			res && res.block === true,
+			"walker-unknown cwd must still fire a block (generic no-main-commit, after github-flavored rule allows via its `onUnknown: \"allow\"` on `remote:`)",
+		);
+		assert.match(
+			res.reason!,
+			/\[steering:no-main-commit@[^\]]+\]/,
+			"generic protected-branch rule fires (the github-flavored rule cleanly declines under walker-unknown via its `onUnknown: \"allow\"` on `remote:`)",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/\[steering:no-main-commit-github@/,
+			"github-flavored rule must NOT fire when its `remote:` leaf opts into `onUnknown: \"allow\"` and walker can't resolve cwd",
+		);
+		// The reason text should be the generic protected-branch reason,
+		// not github-flavored PR-flow guidance, and must not contain
+		// walker-unknown-branch error text (the github-flavored rule's
+		// bespoke "could not verify the current branch" line lives
+		// behind its bespoke reason fn — it's the github rule, not the
+		// generic, that handles walker-unknown branch).
+		assert.doesNotMatch(
+			res.reason!,
+			/walker.*unknown/i,
+			"generic rule's reason text doesn't mention walker-unknown (that's the github rule's domain, and the github rule didn't fire here)",
+		);
+		assert.doesNotMatch(
+			res.reason!,
+			/open a PR|pull request/i,
+			"generic rule's reason text doesn't carry github-flavored PR-flow guidance",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 7. isClean spread-form engine end-to-end
+//
+// Pins the engine's leaf-onUnknown read + handler-dispatch contract
+// for boolean predicates: the spread form `{ value: false,
+// onUnknown: "allow" }` flows verbatim to the handler; the engine's
+// `readLeafOnUnknown` reads the modifier and `projectVerdict` projects
+// the handler's `"unknown"` returns under that policy. The handler
+// itself treats `onUnknown:` as an opaque sibling field. This drives
+// `evaluateWhen` → `readLeafOnUnknown` → `isClean` handler end-to-end.
+// ---------------------------------------------------------------------------
+
+describe("git plugin: isClean spread form drives through readLeafOnUnknown", () => {
+	it("`isClean: { value: false, onUnknown: \"allow\" }` fires when working tree is dirty (handler unwraps `value:` and ignores `onUnknown:`)", async () => {
+		// Stub `git status --porcelain` to report a dirty tree.
+		const { evaluator } = buildRuntime(
+			{
+				plugins: [gitPlugin],
+				rules: [
+					{
+						name: "deploy-requires-clean",
+						tool: "bash",
+						field: "command",
+						pattern: /^npm\s+run\s+deploy\b/,
+						reason: "Working tree dirty.",
+						when: { isClean: { value: false, onUnknown: "allow" } },
+					},
+				],
+			},
+			async (cmd: string, args: string[]): Promise<PiExecResult> => {
+				if (
+					cmd === "git" &&
+					args[0] === "status" &&
+					args[1] === "--porcelain"
+				) {
+					return {
+						stdout: " M file.ts\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				return { stdout: "", stderr: "", code: 1, killed: false };
+			},
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("npm run deploy"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			res && res.block === true,
+			"engine reads `onUnknown: 'allow'` via `readLeafOnUnknown`; handler receives the raw `{ value, onUnknown }` arg, unwraps `value: false`, sees dirty tree (boolean returns from a dirty tree are concrete false/true so `onUnknown` plays no role on this path), returns true → rule fires",
+		);
+		assert.match(
+			res.reason!,
+			/\[steering:deploy-requires-clean@[^\]]+\]/,
+		);
+	});
+
+	it("`isClean: { value: false, onUnknown: \"allow\" }` skips on walker-unknown cwd (handler surfaces `\"unknown\"` → leaf `\"allow\"` → false)", async () => {
+		// Pins the walker-unknown-cwd path: the inline guard at the
+		// handler's top surfaces `"unknown"`; the engine's leaf-level
+		// `onUnknown: "allow"` projects unknown → false, the rule skips.
+		const { evaluator } = buildRuntime(
+			{
+				plugins: [gitPlugin],
+				rules: [
+					{
+						name: "deploy-requires-clean",
+						tool: "bash",
+						field: "command",
+						pattern: /^npm\s+run\s+deploy\b/,
+						reason: "Working tree dirty.",
+						when: { isClean: { value: false, onUnknown: "allow" } },
+					},
+				],
+			},
+			async (): Promise<PiExecResult> => ({
+				stdout: " M file.ts\n",
+				stderr: "",
+				code: 0,
+				killed: false,
+			}),
+		);
+		const res = await evaluator.evaluate(
+			bashEvent('cd "$VAR" && npm run deploy'),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"walker-unknown cwd → handler returns 'unknown' → leaf-level 'allow' projects to false → rule skips",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 8. isClean: false vs not: { isClean: true } — README equivalence pin
+//
+// The dynamic-reason-runtime-cwd example README documents that
+// `isClean: false` and `not: { isClean: true }` agree on every truth-
+// table row EXCEPT `walker-known + git fails`, where they diverge:
+//   - `isClean: false`: handler returns `false` on git failure → leaf
+//     verdict false → rule skips.
+//   - `not: { isClean: true }`: handler returns `false` → inner
+//     verdict false → Kleene-AND-false-absorbs → not-flip yields true
+//     → rule fires.
+// This test pins both arms of the divergence so future engine drift
+// trips the test alongside the README — the cross-link in the
+// describe / test descriptions is intentional.
+// ---------------------------------------------------------------------------
+
+describe("git plugin: README equivalence — isClean: false vs not: { isClean: true } (walker-known + git fails row)", () => {
+	const gitFailsExec = async (
+		cmd: string,
+		args: string[],
+	): Promise<PiExecResult> => {
+		// `git status --porcelain` exits non-zero (git failure path the
+		// handler treats as `null` → boolean `false`).
+		if (
+			cmd === "git" &&
+			args[0] === "status" &&
+			args[1] === "--porcelain"
+		) {
+			return {
+				stdout: "",
+				stderr: "fatal: not a git repository",
+				code: 128,
+				killed: false,
+			};
+		}
+		return { stdout: "", stderr: "", code: 1, killed: false };
+	};
+
+	it("`when: { isClean: false }` does NOT fire on git failure (handler returns false → leaf false → rule skips)", async () => {
+		const { evaluator } = buildRuntime(
+			{
+				plugins: [gitPlugin],
+				rules: [
+					{
+						name: "deploy-requires-clean-positive",
+						tool: "bash",
+						field: "command",
+						pattern: /^npm\s+run\s+deploy\b/,
+						reason: "Working tree must be clean.",
+						when: { isClean: false },
+					},
+				],
+			},
+			gitFailsExec,
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("npm run deploy"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.equal(
+			res,
+			undefined,
+			"git failure → handler returns false → leaf verdict false → rule skips",
+		);
+	});
+
+	it("`when: { not: { isClean: true } }` FIRES on git failure (handler returns false → Kleene-AND-false-absorbs → not-flip = true)", async () => {
+		const { evaluator } = buildRuntime(
+			{
+				plugins: [gitPlugin],
+				rules: [
+					{
+						name: "deploy-requires-clean-not",
+						tool: "bash",
+						field: "command",
+						pattern: /^npm\s+run\s+deploy\b/,
+						reason: "Working tree must be clean.",
+						when: { not: { isClean: true } },
+					},
+				],
+			},
+			gitFailsExec,
+		);
+		const res = await evaluator.evaluate(
+			bashEvent("npm run deploy"),
+			makeCtx("/repo"),
+			0,
+		);
+		assert.ok(
+			res && res.block === true,
+			"git failure → handler returns false → inner verdict false → Kleene-AND false absorbs → not(false) = true → rule fires",
 		);
 	});
 });

@@ -2,6 +2,8 @@
 
 A rule pack that forces `gh pr create` to include `--draft`.
 
+> **TypeScript form (canonical):** see [`steering.ts`](./steering.ts) — drop in at `~/.pi/steering.ts` or `<project-root>/.pi/steering.ts`. The loader accepts TypeScript only. The [`steering.json`](./steering.json) form is provided for reference + `pi-steering import-json` migration; the loader does NOT pick up JSON files. See [examples/README.md#json](../README.md#json) for migration steps.
+
 ## What it enforces
 
 - `gh pr create --title "..."` → **blocked**
@@ -37,4 +39,4 @@ Blocking `gh pr create` without `--draft` prevents the failure mode where an age
 
 ## Install
 
-Drop the file at `~/.pi/agent/steering.json` (global), at `<project-root>/.pi/steering.json` (project-scoped), or merge into an existing `steering.json`.
+Copy [`steering.ts`](./steering.ts) to `~/.pi/steering.ts` (global) or `<project-root>/.pi/steering.ts` (project-scoped). The loader accepts TypeScript only; see [examples/README.md#json](../README.md#json) if you're migrating from a `steering.json`.

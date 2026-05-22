@@ -29,7 +29,32 @@ the lease-variant carve-out is an attack surface. This rule pack closes it.
 
 ## Install
 
-Merge this into your `steering.json`. The `disable` entry turns off the built-in `no-force-push`; the new `no-force-push-strict` rule takes its place:
+Two equivalent forms. Pick whichever matches your setup.
+
+### TypeScript form (canonical)
+
+Copy [`steering.ts`](./steering.ts) to `~/.pi/steering.ts` (or
+`<project-root>/.pi/steering.ts`) for a repo-scoped policy. The
+TypeScript form participates in compile-time checking via
+`defineConfig`. The loader accepts TypeScript only.
+
+### JSON form (for migration)
+
+The loader does **not** load `.pi/steering.json` files directly. The
+[`steering.json`](./steering.json) below is provided as a reference
+shape for `pi-steering import-json` migration — convert it with
+`pi-steering import-json steering.json -o .pi/steering/index.ts` (or
+programmatically via `fromJSON` from `compat.ts`).
+
+JSON is a deliberate subset of the TypeScript shape: pattern-string
+rules, `requires` / `unless`, `when.cwd` (string pattern only), and
+override flags. Plugins, observers, function-valued rule fields,
+plugin-registered predicate keys (`when.<customKey>`), `when.not`,
+and `when.condition` are TypeScript-only — equivalently, any `when`
+clause member other than `when.cwd` is rejected.
+
+The `disable` entry below turns off the built-in `no-force-push`; the
+new `no-force-push-strict` rule takes its place:
 
 ```json
 {
@@ -46,4 +71,5 @@ Merge this into your `steering.json`. The `disable` entry turns off the built-in
 }
 ```
 
-Drop the file at `~/.pi/agent/steering.json` for a global policy, or at `<project-root>/.pi/steering.json` for repo-scoped enforcement (the loader walks up from the session cwd and merges every `.pi/steering.json` it finds).
+See [examples/README.md#json](../README.md#json) for the full migration
+workflow and the v0 fallback option.

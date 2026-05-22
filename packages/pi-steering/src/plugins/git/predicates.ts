@@ -12,12 +12,31 @@
  * Evaluation strategy:
  *
  *   - `branch`           - read `ctx.walkerState.branch` first (set by
- *                           the branch tracker on in-chain checkouts);
- *                           otherwise shell out via `git branch
+ *                           the branch tracker on in-chain checkouts).
+ *                           If the tracker resolved statically, use
+ *                           that value. If the tracker reports
+ *                           `"unknown"` (dynamic checkout like
+ *                           `git checkout $VAR` that the walker
+ *                           couldn't resolve), apply `onUnknown`
+ *                           policy without falling back to `exec` -
+ *                           a `git branch --show-current` call would
+ *                           return the PRE-checkout branch and
+ *                           silently defeat the walker. If no
+ *                           tracker state exists (no checkout in
+ *                           chain), shell out via `git branch
  *                           --show-current`.
  *   - `upstream`         - no tracker today; always shell out via
  *                           `git rev-parse --abbrev-ref @{upstream}`.
+ *                           Inlines a {@link cwdIsWalkerUnknown} guard
+ *                           so walker-unknown cwd surfaces trinary
+ *                           `"unknown"` instead of shelling against
+ *                           the pi session cwd — the engine's
+ *                           `onUnknown:` policy then projects to a
+ *                           definite verdict (default `"block"` =
+ *                           fail-CLOSED).
  *   - `commitsAhead`     - shell out via `git rev-list --count`.
+ *                           Inlines the same walker-unknown guard as
+ *                           `upstream`.
  *   - `hasStagedChanges` - shell out via `git diff --cached --quiet`.
  *   - `isClean`          - shell out via `git status --porcelain`.
  *   - `remote`           - shell out via `git config --get
@@ -36,36 +55,94 @@
  */
 
 import type {
+	AnyPredicateHandler,
 	Pattern,
 	PredicateContext,
 	PredicateHandler,
-} from "../../index.ts";
+	PredicateShape,
+	PredicateVerdict,
+} from "../../schema.ts";
+import { isPattern } from "../../internal/pattern-utils.ts";
+import { NO_CHECKOUT_IN_CHAIN } from "./branch-tracker.ts";
+import {
+	getCommitsAhead,
+	getRemoteUrl,
+	getStagedChanges,
+	getUpstream,
+	getWorkingTreeClean,
+} from "./git-ops.ts";
+
+// ---------------------------------------------------------------------------
+// Walker-unknown cwd guard (inline trinary)
+// ---------------------------------------------------------------------------
+
+/**
+ * Inline trinary guard for runtime-cwd predicates: returns `true` when
+ * the walker couldn't statically resolve the command's effective cwd
+ * (the cwd-tracker `"unknown"` sentinel is on `ctx.walkerState.cwd`),
+ * which signals to the caller that the handler should bail with
+ * `"unknown"` instead of querying the wrong repo.
+ *
+ * Each runtime-cwd handler in this module starts with:
+ *
+ *   ```ts
+ *   if (cwdIsWalkerUnknown(ctx)) return "unknown";
+ *   ```
+ *
+ * Surfacing walker-unknown as trinary `"unknown"` lets the engine
+ * apply the leaf-level (or block-level, inside `not:`) `onUnknown:`
+ * policy. Default `"block"` is fail-CLOSED (the rule fires); a user
+ * with `onUnknown: "allow"` opts into fail-OPEN handling.
+ * Self-documenting + composable.
+ */
+function cwdIsWalkerUnknown(ctx: PredicateContext): boolean {
+	return ctx.walkerState?.cwd === "unknown";
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Normalize the two shorthand forms accepted by string-valued
- * predicates:
+ * Normalize the shorthand forms accepted by the pattern-valued
+ * predicates (`branch`, `upstream`, `remote`) into a canonical
+ * `{ patterns, onUnknown }` shape:
  *
- *   - `Pattern`                              -> `{ pattern, onUnknown: "block" }`
- *   - `{ pattern, onUnknown? }`              -> object used as-is,
- *                                                `onUnknown` defaults
- *                                                to `"block"`.
+ *   - `Pattern`                                  -> `{ patterns: [pattern], onUnknown: "block" }`
+ *   - `Pattern[]`  (non-empty, all-Pattern)      -> `{ patterns, onUnknown: "block" }`
+ *   - `{ pattern: Pattern, onUnknown? }`         -> object used as-is,
+ *                                                    `pattern` re-wrapped
+ *                                                    into a single-element
+ *                                                    array; `onUnknown`
+ *                                                    defaults to `"block"`.
+ *   - `{ pattern: Pattern[], onUnknown? }`       -> array preserved,
+ *                                                    same `onUnknown`
+ *                                                    handling.
+ *
+ * Array semantics are OR-of-matches: the rule fires when the input
+ * matches ANY of the listed patterns. Array form requires at least
+ * one pattern (empty arrays are invalid).
  *
  * Returning `null` means the author supplied something that isn't a
- * valid value for this predicate (e.g. a bare number); handlers treat
- * that as a non-match and don't throw - invalid config shouldn't
- * crash the evaluator, but it also shouldn't silently fire.
+ * valid value for this predicate (e.g. a bare number, an empty array,
+ * or an array containing a non-Pattern value); handlers treat that as
+ * a non-match and don't throw - invalid config shouldn't crash the
+ * evaluator, but it also shouldn't silently fire.
  */
 function unwrapPatternArg(value: unknown): {
-	pattern: Pattern;
+	patterns: Pattern[];
 	onUnknown: "allow" | "block";
 } | null {
-	if (typeof value === "string" || value instanceof RegExp) {
-		return { pattern: value, onUnknown: "block" };
+	// Shorthand: single Pattern.
+	if (isPattern(value)) {
+		return { patterns: [value], onUnknown: "block" };
 	}
+	// Shorthand: Pattern[] (must be non-empty + all-Pattern).
+	if (Array.isArray(value) && value.every(isPattern)) {
+		if (value.length === 0) return null;
+		return { patterns: value, onUnknown: "block" };
+	}
+	// Object form: { pattern: Pattern | Pattern[]; onUnknown? }.
 	if (
 		value !== null &&
 		typeof value === "object" &&
@@ -75,11 +152,13 @@ function unwrapPatternArg(value: unknown): {
 			pattern?: unknown;
 			onUnknown?: "allow" | "block";
 		};
-		if (typeof obj.pattern === "string" || obj.pattern instanceof RegExp) {
-			return {
-				pattern: obj.pattern,
-				onUnknown: obj.onUnknown === "allow" ? "allow" : "block",
-			};
+		const onUnknown = obj.onUnknown === "allow" ? "allow" : "block";
+		if (isPattern(obj.pattern)) {
+			return { patterns: [obj.pattern], onUnknown };
+		}
+		if (Array.isArray(obj.pattern) && obj.pattern.every(isPattern)) {
+			if (obj.pattern.length === 0) return null;
+			return { patterns: obj.pattern, onUnknown };
 		}
 	}
 	return null;
@@ -102,14 +181,60 @@ function unknownVerdict(onUnknown: "allow" | "block"): boolean {
 }
 
 /**
- * Run a shell command and return its trimmed stdout on exit 0, or
- * `null` on any failure (non-zero exit, spawn error, timeout, ...).
+ * Unwrap the boolean payload from a {@link PredicateShape}<boolean>
+ * argument. Accepts the bare form (`true` / `false`) and the
+ * spread form (`{ value: true, onUnknown? }` /
+ * `{ value: false, onUnknown? }`); the engine's `readLeafOnUnknown`
+ * reads any `onUnknown:` sibling and `projectVerdict` applies the
+ * policy to the handler's `"unknown"` returns. The handler itself
+ * treats `onUnknown:` as an opaque sibling field and only consumes
+ * `value:`.
  *
- * Callers map `null` to their `onUnknown` policy. A thrown exception
- * inside `ctx.exec` (e.g. the command path couldn't be resolved) is
- * caught and also returned as `null` - predicates should not surface
- * bespoke errors; "I couldn't learn the answer" is uniformly handled
- * via `onUnknown`.
+ * Returns `undefined` on malformed input — the caller decides what
+ * to do with that (typically `return false`, mirroring the existing
+ * pattern-unwrap fail-closed contract).
+ *
+ * Used by {@link isClean} and {@link hasStagedChanges}; both ship
+ * with `PredicateShape<boolean>` in the registry so the bare/spread
+ * shape is identical at the type level too.
+ *
+ * @internal
+ */
+function unwrapBooleanLeafArg(args: unknown): boolean | undefined {
+	if (typeof args === "boolean") return args;
+	if (
+		args !== null
+		&& typeof args === "object"
+		&& typeof (args as { value?: unknown }).value === "boolean"
+	) {
+		return (args as { value: boolean }).value;
+	}
+	return undefined;
+}
+
+/**
+ * Test-internal export of {@link unwrapBooleanLeafArg}. Module-private
+ * by intent; the `@internal` JSDoc tag (TypeScript ecosystem-standard)
+ * flags "not part of the public surface" and the underscore prefix
+ * mirrors the convention so external consumers can grep-discover it
+ * too. Direct unit tests pin malformed-input branches that are hard
+ * to drive via the engine end-to-end.
+ *
+ * @internal
+ */
+export const _unwrapBooleanLeafArg = unwrapBooleanLeafArg;
+
+/**
+ * Direct one-shot git exec used only by the `branch` predicate's
+ * tracker-missing fallback (the predicate's three-way tracker
+ * discrimination stays in predicate-land; see the `branch` JSDoc
+ * below AND `./git-ops.ts` file header "Branch caveat" for why
+ * `getBranch` is NOT called here).
+ * Other predicates delegate to helpers in `./git-ops.ts` and don't
+ * need this.
+ *
+ * Mirrors the failure-collapse contract of `tryGit` in git-ops:
+ * non-zero exit, spawn error, or thrown exception → `null`.
  */
 async function tryExec(
 	ctx: PredicateContext,
@@ -127,18 +252,77 @@ async function tryExec(
 }
 
 /**
- * Resolve a string tracker value from `ctx.walkerState[key]`, treating
- * the tracker's `"unknown"` sentinel and any non-string value as
- * "absent".
+ * Resolved outcome of reading a string tracker value from
+ * `ctx.walkerState[key]`. Callers MUST distinguish the three cases:
+ *
+ *   - `value`   - the tracker resolved the value statically for this
+ *                  command ref. Use it directly.
+ *   - `unknown` - the tracker observed a write it couldn't resolve
+ *                  statically (e.g. `git checkout $VAR`). The walker
+ *                  deliberately surfaces this to signal "a change
+ *                  happened but I can't name the new value". Falling
+ *                  through to `exec` would return the PRE-write
+ *                  value and silently defeat the walker's static
+ *                  tracking - exactly the case it exists for.
+ *                  Callers must apply their `onUnknown` policy.
+ *   - `missing` - no tracker modifier fired for this dimension in
+ *                  this ref's scope (the walker threaded the
+ *                  tracker's initial sentinel, or `walkerState` has
+ *                  no key for this tracker at all). `exec` fallback
+ *                  is correct here: the shell's current state is the
+ *                  value the predicate wants.
+ *
+ * The three-way split requires cooperation from the tracker: its
+ * `initial` value must be distinct from its `unknown` sentinel, so
+ * the predicate can tell "no modifier fired" apart from "modifier
+ * fired and couldn't resolve". `branchTracker` does this via
+ * {@link NO_CHECKOUT_IN_CHAIN}. A tracker that reuses `"unknown"`
+ * for both initial and unknown would collapse these two cases -
+ * preserved here as `missing` for backward compatibility (the
+ * predicate then behaves as it did pre-U1, shelling out on any
+ * unknown).
  */
-function walkerString(
+export type WalkerStringResult =
+	| { kind: "value"; value: string }
+	| { kind: "unknown" }
+	| { kind: "missing" };
+
+/**
+ * Resolve a string tracker value from `ctx.walkerState[key]` into a
+ * three-state discriminated result. See {@link WalkerStringResult}
+ * for why callers must not conflate `unknown` with `missing`.
+ *
+ * `initialSentinel` is the tracker's initial value (distinct from
+ * its `unknown` sentinel). When `walkerState[key]` equals this
+ * sentinel, the result is `missing` - no modifier fired for this
+ * dimension in this ref's scope.
+ */
+export function walkerString(
 	ctx: PredicateContext,
 	key: string,
-): string | null {
+	initialSentinel: string,
+): WalkerStringResult {
+	// Guard against a tracker that reuses `"unknown"` as its initial
+	// sentinel. Accepting such a value here would silently collapse the
+	// three-way discrimination back into the pre-U1 two-step: the
+	// `missing` branch would swallow genuine dynamic-checkout signals
+	// and the predicate would exec-fallback onto the PRE-checkout
+	// branch — exactly the bug U1 exists to prevent. The JSDoc on
+	// WalkerStringResult documents this; the assertion makes the
+	// contract un-foot-shootable for new tracker authors.
+	if (initialSentinel === "unknown") {
+		throw new Error(
+			`[pi-steering/git] walkerString: tracker initialSentinel cannot be ` +
+				`"unknown" — it's reserved for the unresolvable-dynamic-value ` +
+				`signal. Use a distinct initial value (e.g. "" or a sentinel ` +
+				`like NO_CHECKOUT_IN_CHAIN). See WalkerStringResult JSDoc.`,
+		);
+	}
 	const v = ctx.walkerState?.[key];
-	if (typeof v !== "string") return null;
-	if (v === "unknown") return null;
-	return v;
+	if (typeof v !== "string") return { kind: "missing" };
+	if (v === initialSentinel) return { kind: "missing" };
+	if (v === "unknown") return { kind: "unknown" };
+	return { kind: "value", value: v };
 }
 
 // ---------------------------------------------------------------------------
@@ -151,16 +335,30 @@ function walkerString(
  * Accepted arg shapes:
  *
  *   ```ts
- *   when: { branch: /^main$/ }
- *   when: { branch: "^feat-" }
- *   when: { branch: { pattern: /^main$/, onUnknown: "allow" } }
+ *   when: { branch: /^main$/ }                                  // single Pattern
+ *   when: { branch: "^feat-" }                                   // single Pattern (string)
+ *   when: { branch: [/^main$/, /^master$/, /^trunk$/] }          // Pattern[] (any-of)
+ *   when: { branch: { pattern: /^main$/, onUnknown: "allow" } }  // object form
+ *   when: { branch: { pattern: [/^main$/, /^master$/], onUnknown: "allow" } }
  *   ```
+ *
+ * Array semantics: OR-of-matches (rule fires when the resolved
+ * branch matches ANY of the listed patterns). Empty arrays are
+ * invalid (rule skips); arrays containing non-Pattern values are
+ * invalid (rule skips).
  *
  * Resolution order:
  *   1. `ctx.walkerState.branch` - set by the branch tracker when the
- *       current bash chain contains `git checkout` / `git switch`. If
- *       this is the tracker's `"unknown"` sentinel or missing, fall
- *       through.
+ *       current bash chain contains `git checkout` / `git switch`.
+ *       Three outcomes:
+ *         - value resolved statically (e.g. `git checkout main`) ->
+ *           match the pattern against it.
+ *         - `"unknown"` sentinel (dynamic checkout like `git checkout
+ *           $VAR`) -> apply `onUnknown` policy. Do NOT fall through
+ *           to exec: a `git branch --show-current` call here would
+ *           return the PRE-checkout branch (the walker exists to
+ *           track exactly this kind of in-chain change statically).
+ *         - missing (no checkout in chain) -> fall through to exec.
  *   2. `git branch --show-current` in `ctx.cwd`. Empty stdout is
  *       treated as "no branch" (detached HEAD) - the predicate falls
  *       back to `onUnknown`.
@@ -174,15 +372,21 @@ export const branch: PredicateHandler = async (value, ctx) => {
 	if (arg === null) return false;
 
 	// 1. Walker state (tracker-resolved mid-command).
-	const fromWalker = walkerString(ctx, "branch");
-	if (fromWalker !== null) {
-		return matchPattern(arg.pattern, fromWalker);
+	const fromWalker = walkerString(ctx, "branch", NO_CHECKOUT_IN_CHAIN);
+	if (fromWalker.kind === "value") {
+		return arg.patterns.some((p) => matchPattern(p, fromWalker.value));
+	}
+	if (fromWalker.kind === "unknown") {
+		// Dynamic in-chain checkout. Exec would return the PRE-checkout
+		// branch, which is the case the walker exists to catch. Apply
+		// the predicate's `onUnknown` policy instead of falling through.
+		return unknownVerdict(arg.onUnknown);
 	}
 
-	// 2. Shell out.
+	// 2. Shell out (tracker saw no in-chain checkout).
 	const out = await tryExec(ctx, "git", ["branch", "--show-current"], ctx.cwd);
 	if (out === null || out.length === 0) return unknownVerdict(arg.onUnknown);
-	return matchPattern(arg.pattern, out);
+	return arg.patterns.some((p) => matchPattern(p, out));
 };
 
 // ---------------------------------------------------------------------------
@@ -204,19 +408,29 @@ export const branch: PredicateHandler = async (value, ctx) => {
  * is past the point where a pre-execution guard would act). The
  * per-tool_call exec cache ensures multiple upstream-gated rules share
  * one git call.
+ *
+ * Runtime-cwd guard: `getUpstream` shells out at `ctx.cwd`. When the
+ * walker surfaces `ctx.walkerState.cwd === "unknown"` (dynamic
+ * `cd "$VAR/pkg"` the walker couldn't resolve), the exec would run
+ * against the pi session cwd — the wrong repo — and a user who opted
+ * into `onUnknown: "allow"` would get a silent fail-OPEN. The handler
+ * inlines a {@link cwdIsWalkerUnknown} check at the top and surfaces
+ * trinary `"unknown"`; the engine's leaf-level (outer) or block-level
+ * (inside `not:`) `onUnknown:` policy then projects to the right
+ * boolean (default `"block"` = fail-CLOSED).
+ *
+ * @see walkerUnknownCwdReason — compose the agent-facing reason text
+ *      for the walker-unknown-cwd fail-closed branch in your rule's
+ *      ReasonFn.
  */
 export const upstream: PredicateHandler = async (value, ctx) => {
+	if (cwdIsWalkerUnknown(ctx)) return "unknown";
 	const arg = unwrapPatternArg(value);
 	if (arg === null) return false;
 
-	const out = await tryExec(
-		ctx,
-		"git",
-		["rev-parse", "--abbrev-ref", "@{upstream}"],
-		ctx.cwd,
-	);
-	if (out === null || out.length === 0) return unknownVerdict(arg.onUnknown);
-	return matchPattern(arg.pattern, out);
+	const out = await getUpstream(ctx);
+	if (out === null) return unknownVerdict(arg.onUnknown);
+	return arg.patterns.some((p) => matchPattern(p, out));
 };
 
 // ---------------------------------------------------------------------------
@@ -266,26 +480,51 @@ export interface CommitsAheadArgs {
  * fail-closed behavior can layer `{ upstream: "..." }` first in the
  * same `when` (AND semantics via the ADR's plugin predicates) - that
  * handles the "no upstream" case with explicit `onUnknown`.
+ *
+ * Runtime-cwd guard: `getCommitsAhead` shells out at `ctx.cwd`. When
+ * the walker surfaces `ctx.walkerState.cwd === "unknown"`, the exec
+ * would run against the pi session cwd — wrong repo — and the
+ * `count === null` failure path returns `false`, silently skipping
+ * the rule (fail-OPEN). The handler inlines a
+ * {@link cwdIsWalkerUnknown} check at the top and surfaces trinary
+ * `"unknown"`; the engine's `onUnknown:` policy then projects to the
+ * right boolean (default `"block"` = fail-CLOSED, matching the policy
+ * used by the other runtime-cwd predicates in this plugin).
+ *
+ * @see walkerUnknownCwdReason — compose the agent-facing reason text
+ *      for the walker-unknown-cwd fail-closed branch in your rule's
+ *      ReasonFn.
+ * @see PiSteeringPredicates.commitsAhead — the registry entry that
+ *      declares the bare / spreadBase shape this handler dispatches
+ *      on.
  */
-export const commitsAhead: PredicateHandler<CommitsAheadArgs> = async (
-	args,
-	ctx,
-) => {
-	if (args === null || typeof args !== "object") return false;
-	const { wrt = "@{upstream}", eq, gt, lt } = args;
+export const commitsAhead: PredicateHandler<
+	number | CommitsAheadArgs
+> = async (args, ctx) => {
+	if (cwdIsWalkerUnknown(ctx)) return "unknown";
+	// Schema advertises `PredicateShape<number, { eq?, gt?, lt?, wrt? }>`
+	// — bare-number `commitsAhead: N` is sugar for `{ eq: N }`.
+	let eq: number | undefined;
+	let gt: number | undefined;
+	let lt: number | undefined;
+	let wrt: string = "@{upstream}";
+	if (typeof args === "number") {
+		eq = args;
+	} else if (args !== null && typeof args === "object") {
+		const shape = args as CommitsAheadArgs;
+		eq = shape.eq;
+		gt = shape.gt;
+		lt = shape.lt;
+		wrt = shape.wrt ?? "@{upstream}";
+	} else {
+		return false;
+	}
 	if (eq === undefined && gt === undefined && lt === undefined) {
 		return false;
 	}
 
-	const out = await tryExec(
-		ctx,
-		"git",
-		["rev-list", "--count", `${wrt}..HEAD`],
-		ctx.cwd,
-	);
-	if (out === null) return false;
-	const count = Number.parseInt(out, 10);
-	if (!Number.isFinite(count)) return false;
+	const count = await getCommitsAhead(ctx, wrt);
+	if (count === null) return false;
 
 	if (eq !== undefined && count !== eq) return false;
 	if (gt !== undefined && !(count > gt)) return false;
@@ -309,26 +548,38 @@ export const commitsAhead: PredicateHandler<CommitsAheadArgs> = async (
  * 1 = staged changes exist. On any other exit / spawn failure, we
  * conservatively report `false` - the caller can AND this with an
  * `upstream` check if fail-closed behavior is needed.
+ *
+ * Runtime-cwd guard: the underlying `git diff --cached` call runs
+ * at `ctx.cwd`. When the walker surfaces `ctx.walkerState.cwd ===
+ * "unknown"` (dynamic `cd "$VAR/pkg"` the walker couldn't resolve),
+ * `ctx.cwd` falls back to the pre-cd ambient cwd — the PI session
+ * cwd, not the intended subpackage. The handler inlines a
+ * {@link cwdIsWalkerUnknown} check at the top and surfaces trinary
+ * `"unknown"`; the engine's `onUnknown:` policy then projects to the
+ * right boolean (default `"block"` = fail-CLOSED).
+ *
+ * @see walkerUnknownCwdReason — compose the agent-facing reason text
+ *      for the walker-unknown-cwd fail-closed branch in your rule's
+ *      ReasonFn.
+ * @see PiSteeringPredicates.hasStagedChanges — the registry entry
+ *      that declares the bare / spreadBase shape this handler
+ *      dispatches on.
  */
-export const hasStagedChanges: PredicateHandler<boolean> = async (
-	args,
-	ctx,
-) => {
-	if (typeof args !== "boolean") return false;
-	let exitCode: number | null = null;
-	try {
-		const res = await ctx.exec(
-			"git",
-			["diff", "--cached", "--quiet"],
-			{ cwd: ctx.cwd },
-		);
-		exitCode = res.exitCode;
-	} catch {
-		return false;
-	}
-	if (exitCode === 0) return args === false; // no staged changes
-	if (exitCode === 1) return args === true; //   staged changes present
-	return false; // unexpected - don't fire
+export const hasStagedChanges: PredicateHandler<
+	boolean | { value: boolean; onUnknown?: "allow" | "block" }
+> = async (args, ctx) => {
+	if (cwdIsWalkerUnknown(ctx)) return "unknown";
+	// Schema's `PredicateShape<boolean>` auto-detects spreadBase to
+	// `{ value: boolean; onUnknown? }`; unwrap consumes `value:` only.
+	// Authors attach modifiers via `{ value: true, onUnknown: "allow" }`;
+	// the engine reads any `onUnknown:` sibling via readLeafOnUnknown
+	// and projects the handler's `"unknown"` returns under that policy
+	// (the handler itself treats `onUnknown:` as an opaque sibling field).
+	const expected = unwrapBooleanLeafArg(args);
+	if (expected === undefined) return false;
+	const state = await getStagedChanges(ctx);
+	if (state === null) return false; // unknown — don't fire
+	return expected === state;
 };
 
 // ---------------------------------------------------------------------------
@@ -347,13 +598,35 @@ export const hasStagedChanges: PredicateHandler<boolean> = async (
  * Uses `git status --porcelain`: empty stdout = clean. Non-zero exit
  * returns `false` (unknown); pair with an `upstream` check for
  * fail-closed behavior.
+ *
+ * Runtime-cwd guard: same rationale as {@link hasStagedChanges} — the
+ * handler inlines a {@link cwdIsWalkerUnknown} check at the top and
+ * surfaces trinary `"unknown"` when the walker couldn't statically
+ * resolve the command's effective cwd, rather than silently running
+ * `git status` at the pi session cwd.
+ *
+ * @see walkerUnknownCwdReason — compose the agent-facing reason text
+ *      for the walker-unknown-cwd fail-closed branch in your rule's
+ *      ReasonFn.
+ * @see PiSteeringPredicates.isClean — the registry entry that
+ *      declares the bare / spreadBase shape this handler dispatches
+ *      on.
  */
-export const isClean: PredicateHandler<boolean> = async (args, ctx) => {
-	if (typeof args !== "boolean") return false;
-	const out = await tryExec(ctx, "git", ["status", "--porcelain"], ctx.cwd);
-	if (out === null) return false;
-	const clean = out.length === 0;
-	return args === clean;
+export const isClean: PredicateHandler<
+	boolean | { value: boolean; onUnknown?: "allow" | "block" }
+> = async (args, ctx) => {
+	if (cwdIsWalkerUnknown(ctx)) return "unknown";
+	// Schema's `PredicateShape<boolean>` auto-detects spreadBase to
+	// `{ value: boolean; onUnknown? }`; unwrap consumes `value:` only.
+	// Authors attach modifiers via `{ value: true, onUnknown: "allow" }`;
+	// the engine reads any `onUnknown:` sibling via readLeafOnUnknown
+	// and projects the handler's `"unknown"` returns under that policy
+	// (the handler itself treats `onUnknown:` as an opaque sibling field).
+	const expected = unwrapBooleanLeafArg(args);
+	if (expected === undefined) return false;
+	const clean = await getWorkingTreeClean(ctx);
+	if (clean === null) return false;
+	return expected === clean;
 };
 
 // ---------------------------------------------------------------------------
@@ -369,19 +642,25 @@ export const isClean: PredicateHandler<boolean> = async (args, ctx) => {
  *
  * Resolves via `git config --get remote.origin.url`. Non-zero exit
  * (no origin configured) falls back to `onUnknown`.
+ *
+ * Runtime-cwd guard: the handler inlines a {@link cwdIsWalkerUnknown}
+ * check at the top and surfaces trinary `"unknown"` when the walker
+ * couldn't statically resolve the command's effective cwd — querying
+ * the wrong repo's remote would silently mis-route a repo-gated rule.
+ * Same rationale as {@link hasStagedChanges}.
+ *
+ * @see walkerUnknownCwdReason — compose the agent-facing reason text
+ *      for the walker-unknown-cwd fail-closed branch in your rule's
+ *      ReasonFn.
  */
 export const remote: PredicateHandler = async (value, ctx) => {
+	if (cwdIsWalkerUnknown(ctx)) return "unknown";
 	const arg = unwrapPatternArg(value);
 	if (arg === null) return false;
 
-	const out = await tryExec(
-		ctx,
-		"git",
-		["config", "--get", "remote.origin.url"],
-		ctx.cwd,
-	);
-	if (out === null || out.length === 0) return unknownVerdict(arg.onUnknown);
-	return matchPattern(arg.pattern, out);
+	const out = await getRemoteUrl(ctx);
+	if (out === null) return unknownVerdict(arg.onUnknown);
+	return arg.patterns.some((p) => matchPattern(p, out));
 };
 
 // ---------------------------------------------------------------------------
@@ -392,12 +671,18 @@ export const remote: PredicateHandler = async (value, ctx) => {
  * Bundle of predicate handlers the git plugin registers under
  * `Plugin.predicates`. Keys become the `when.<key>` slots rule authors
  * see.
+ *
+ * Typed as `Record<string, AnyPredicateHandler>` to match
+ * {@link Plugin.predicates} at the registry boundary — each handler's
+ * concrete argument shape is preserved in its individual declaration
+ * above, and consumers can import `commitsAhead`, `isClean`, etc.
+ * directly when they want the narrow type.
  */
-export const predicates: Record<string, PredicateHandler> = {
+export const predicates: Record<string, AnyPredicateHandler> = {
 	branch,
 	upstream,
-	commitsAhead: commitsAhead as PredicateHandler,
-	hasStagedChanges: hasStagedChanges as PredicateHandler,
-	isClean: isClean as PredicateHandler,
+	commitsAhead,
+	hasStagedChanges,
+	isClean,
 	remote,
 };

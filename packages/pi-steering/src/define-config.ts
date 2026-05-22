@@ -35,11 +35,13 @@
  */
 
 import type {
+	BuiltInWhenLeavesOuter,
 	Observer,
 	Plugin,
 	Rule,
 	SteeringConfig,
 } from "./schema.ts";
+import { DEFAULT_PLUGINS, DEFAULT_RULES } from "./defaults.ts";
 
 // ---------------------------------------------------------------------------
 // Type-level plumbing: project `name` / `writes` literals off tuples of
@@ -117,28 +119,49 @@ export type AllObserverNames<
 	| ProjectField<Inline, "name">;
 
 // ---------------------------------------------------------------------------
+// Default-rule + default-plugin name unions
+// ---------------------------------------------------------------------------
+
+/**
+ * Union of {@link DEFAULT_RULES} `name` literals — the names of rules
+ * shipped by the engine itself. Folded into {@link AllRuleNames}; the
+ * live list is the `name` field of each entry in {@link DEFAULT_RULES}.
+ *
+ * Relies on {@link DEFAULT_RULES} being authored as
+ * `as const satisfies readonly Rule[]` so the literal `name` values
+ * survive through the array — a bare `Rule[]` annotation widens to
+ * `string` and collapses this union.
+ */
+export type DefaultRuleName = (typeof DEFAULT_RULES)[number]["name"];
+
+/**
+ * Union of {@link DEFAULT_PLUGINS} `name` literals. Folded into
+ * {@link AllPluginNames} so `disabledPlugins` typechecks against
+ * shipped defaults without a cast.
+ */
+export type DefaultPluginName = (typeof DEFAULT_PLUGINS)[number]["name"];
+
+// ---------------------------------------------------------------------------
 // AllPluginNames — union of plugin `.name` literals across loaded plugins.
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the union of plugin names registered in the `plugins` tuple.
+ * Extract the union of plugin names registered in the `plugins` tuple,
+ * **plus** the names of {@link DEFAULT_PLUGINS} (those plugins ship
+ * pre-loaded by the engine and `disabledPlugins` honors them at
+ * runtime).
  *
  * Used to constrain {@link SteeringConfig.disabledPlugins} so typos
- * surface as compile errors.
+ * surface as compile errors. Default-plugin names are always part of
+ * this union, even when the user passes no `plugins` themselves.
  *
- * Falls back to `never` when no plugins are registered — typing
- * `disabledPlugins` against an empty registry rejects every string (a
- * deliberate fail-closed choice: the only valid value is the empty
- * tuple, matching the user's stated intent).
+ * Falls back to just {@link DefaultPluginName} when no user plugins
+ * are registered — typing `disabledPlugins` against an empty
+ * user-tuple still accepts the engine defaults.
  */
 export type AllPluginNames<P extends readonly Plugin[]> =
-	P extends readonly [infer First, ...infer Rest]
-		? First extends { name: infer N extends string }
-			? N | (Rest extends readonly Plugin[] ? AllPluginNames<Rest> : never)
-			: Rest extends readonly Plugin[]
-				? AllPluginNames<Rest>
-				: never
-		: never;
+	| DefaultPluginName
+	| ProjectField<P, "name">;
 
 // ---------------------------------------------------------------------------
 // AllRuleNames — union of rule `.name` literals across plugins + user rules.
@@ -146,16 +169,23 @@ export type AllPluginNames<P extends readonly Plugin[]> =
 
 /**
  * Extract the union of rule names across:
+ *   - every {@link DEFAULT_RULES} entry (engine-shipped defaults),
  *   - every plugin's `rules: Rule[]` array, AND
  *   - the top-level inline `rules: Rule[]` array.
  *
- * Used to constrain {@link SteeringConfig.disabledRules} so typos surface as
- * compile errors. Falls back to `never` when no rules are registered.
+ * Used to constrain {@link SteeringConfig.disabledRules} so typos
+ * surface as compile errors. Default rule names are always part of
+ * this union — disabling a default (`disabledRules: ["no-force-push"]`)
+ * typechecks the same as disabling a user or plugin rule.
+ *
+ * Falls back to just {@link DefaultRuleName} when no plugin or user
+ * rules are registered.
  */
 export type AllRuleNames<
 	P extends readonly Plugin[],
 	R extends readonly Rule[],
 > =
+	| DefaultRuleName
 	| FromPluginField<P, "rules", "name">
 	| ProjectField<R, "name">;
 
@@ -171,7 +201,7 @@ export type AllRuleNames<
  *   - the top-level inline `rules`, AND
  *   - the top-level inline `observers`.
  *
- * Used to constrain {@link WhenClause.happened} `event` so typos
+ * Used to constrain {@link BuiltInWhenLeavesOuter.happened} `event` so typos
  * (e.g., `happened: { event: "sync-don" }` when the observer writes
  * `"sync-done"`) surface as compile errors.
  *
@@ -276,6 +306,23 @@ export interface DefineConfigInput<
  * deliberately reference observers by name without registering them
  * inline (e.g., deferred to runtime), use `satisfies SteeringConfig`
  * as a fallback; you lose typo detection but regain flexibility.
+ *
+ * ## Hover ergonomics for plugin-predicate JSDoc
+ *
+ * The `const R extends readonly Rule[]` signature narrows the
+ * contextual type of inline rule literals to their `const`-inferred
+ * shape, bypassing the homomorphic mapped-type linkage that surfaces
+ * source-declared JSDoc on hover (e.g. on `when.isClean:`). Factor
+ * rules out into `const myRule = { ... } as const satisfies Rule`
+ * bindings before passing them to `defineConfig` to keep the
+ * hover-rich shape; see the
+ * `examples/dynamic-reason-runtime-cwd/steering.ts` example. The
+ * `as const` modifier on the binding (and the `const R` modifier on
+ * the signature) preserves each rule's literal `name` so
+ * `disabledRules` typo detection fires — the alternatives `: Rule`
+ * and bare `satisfies Rule` restore hover but widen the inferred
+ * type and collapse typo detection (and `when.happened.event`
+ * narrowing across declared `writes`).
  *
  * @example
  *   export default defineConfig({

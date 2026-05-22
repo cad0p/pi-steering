@@ -16,7 +16,20 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import shippedGitPlugin from "./plugins/git/index.ts";
 import { defineConfig } from "./define-config.ts";
+import type { DefaultPluginName, DefaultRuleName } from "./define-config.ts";
 import type { Observer, Plugin, PredicateContext } from "./schema.ts";
+
+// Type-equality helper for direct type-identity assertions. Pinning
+// `Equal<X, Y>` to `true` forces a same-CR test update if `X` widens
+// or narrows — catches partial regressions the behavioral typo-check
+// can miss (e.g. dropping one literal from a union of four would leave
+// the other three positive cases passing while silently weakening the
+// fence).
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <
+	T,
+>() => T extends B ? 1 : 2
+	? true
+	: false;
 
 const readObserver = {
 	name: "description-reads",
@@ -423,16 +436,24 @@ describe("defineConfig: type constraints (ADR §8)", () => {
 		assert.equal(cfg.rules?.[0]?.when?.happened?.event, "plugin-obs-type");
 	});
 
-	it("G10 — Plugin.predicates without definePredicate requires the cast", () => {
-		// Authors who skip `definePredicate` lose the variance cast it
-		// internalizes. Direct assignment of a typed-arg handler into
-		// `Plugin.predicates: Record<string, PredicateHandler>` (unknown
-		// arg) must fail — `definePredicate`'s whole point.
+	it("G10 — Plugin.predicates accepts typed-arg handlers without a cast", () => {
+		// Pins Item 2 of PR #5: `Plugin.predicates` is now
+		// `Record<string, AnyPredicateHandler>` (where
+		// `AnyPredicateHandler = PredicateHandler<any>`), which leverages
+		// TS's bivariance fallback so a specifically-typed handler
+		// assigns into the registry slot directly — no cast, no
+		// `definePredicate` wrapper needed at the plug-in site.
+		//
+		// Pre-Item-2 this test pinned the OPPOSITE behavior (typed-arg
+		// handlers were rejected by the `PredicateHandler<unknown>` slot,
+		// motivating `definePredicate`). If TS's variance rules change
+		// under us the `@ts-expect-error` version of this test would
+		// reappear in git history — `definePredicate` is still exported
+		// for handler AUTHORS who want the generic narrowing sugar on
+		// their handler declaration.
 		const plugin: Plugin = {
 			name: "p",
 			predicates: {
-				// @ts-expect-error — typed-arg handler not assignable to the
-				// loose record shape without the definePredicate cast.
 				commitFormat: (
 					_args: { pattern: RegExp },
 					_ctx: PredicateContext,
@@ -535,6 +556,118 @@ describe("defineConfig: bare-annotation footgun (ADR §8 authoring pattern)", ()
 		});
 		assert.equal(cfg.rules?.[0]?.when?.happened?.event, "sync-done");
 	});
+});
+
+describe("defineConfig: default rule + plugin names in typo-check union", () => {
+	// `AllRuleNames` and `AllPluginNames` include the names of
+	// `DEFAULT_RULES` / `DEFAULT_PLUGINS` directly, so disabling an
+	// engine-shipped default typechecks without a cast — the same as
+	// disabling a plugin or user rule. Pins the contract that
+	// `defaults.ts` keeps `as const satisfies readonly Rule[]` /
+	// `readonly Plugin[]` so literal `name` values survive into the
+	// unions; if either annotation regresses to a bare `Rule[]` /
+	// `Plugin[]`, these `@ts-expect-error` directives stop firing and
+	// the file fails to compile.
+
+	it("disabledRules accepts a single default-rule name without a cast", () => {
+		const cfg = defineConfig({
+			disabledRules: ["no-force-push"],
+		});
+		assert.deepEqual(cfg.disabledRules, ["no-force-push"]);
+	});
+
+	it("disabledRules accepts every other shipped default name", () => {
+		const cfg = defineConfig({
+			disabledRules: [
+				"no-hard-reset",
+				"no-rm-rf-slash",
+				"no-long-running-commands",
+			],
+		});
+		assert.equal(cfg.disabledRules?.length, 3);
+	});
+
+	it("disabledRules accepts a mix of default + plugin + user rule names", () => {
+		const plugin = {
+			name: "p",
+			rules: [
+				{
+					name: "plugin-rule",
+					tool: "bash",
+					field: "command",
+					pattern: /./,
+					reason: "r",
+				},
+			],
+		} as const satisfies Plugin;
+		const cfg = defineConfig({
+			plugins: [plugin],
+			rules: [
+				{
+					name: "user-rule",
+					tool: "bash",
+					field: "command",
+					pattern: /./,
+					reason: "r",
+				},
+			],
+			disabledRules: ["no-force-push", "plugin-rule", "user-rule"],
+		});
+		assert.equal(cfg.disabledRules?.length, 3);
+	});
+
+	it("disabledRules rejects misspellings of default-rule names", () => {
+		const cfg = defineConfig({
+			// @ts-expect-error — "no-force-pushh" is a typo of the default
+			// rule "no-force-push". Default rule names are part of the
+			// typo-check union; misspellings are rejected at compile time.
+			disabledRules: ["no-force-pushh"],
+		});
+		assert.equal(cfg.disabledRules?.length, 1);
+	});
+
+	it("disabledPlugins accepts a default-plugin name without a cast", () => {
+		const cfg = defineConfig({
+			disabledPlugins: ["git"],
+		});
+		assert.deepEqual(cfg.disabledPlugins, ["git"]);
+	});
+
+	it("disabledPlugins accepts a mix of default + user plugin names", () => {
+		const userPlugin = { name: "my-plugin" } as const satisfies Plugin;
+		const cfg = defineConfig({
+			plugins: [userPlugin],
+			disabledPlugins: ["git", "my-plugin"],
+		});
+		assert.equal(cfg.disabledPlugins?.length, 2);
+	});
+
+	it("disabledPlugins rejects misspellings of the default plugin name", () => {
+		const cfg = defineConfig({
+			// @ts-expect-error — "gti" is a typo of the default plugin
+			// "git". Default plugin names are part of the typo-check union.
+			disabledPlugins: ["gti"],
+		});
+		assert.equal(cfg.disabledPlugins?.length, 1);
+	});
+
+	// Direct type-identity assertions. The behavioral typo tests above
+	// pin the unions transitively (a `string` regression would stop the
+	// `@ts-expect-error` directives from firing). The assertions below
+	// pin the exact literal set: dropping one default name or hand-rolling
+	// `DefaultRuleName` to a partial enumeration is a typecheck failure
+	// here even when the positive tests above happen to cover the
+	// remaining literals.
+	type _RuleUnionCheck = Equal<
+		DefaultRuleName,
+		"no-force-push" | "no-hard-reset" | "no-rm-rf-slash" | "no-long-running-commands"
+	>;
+	const _ruleUnionCheck: _RuleUnionCheck = true;
+	void _ruleUnionCheck;
+
+	type _PluginUnionCheck = Equal<DefaultPluginName, "git">;
+	const _pluginUnionCheck: _PluginUnionCheck = true;
+	void _pluginUnionCheck;
 });
 
 describe("defineConfig: cross-module plugin typo detection (F2 regression fence)", () => {

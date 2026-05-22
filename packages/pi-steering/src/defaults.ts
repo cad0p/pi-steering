@@ -33,8 +33,15 @@
  */
 
 import type { Plugin, Rule } from "./schema.ts";
+import gitPlugin from "./plugins/git/index.ts";
 
-export const DEFAULT_RULES: Rule[] = [
+export const DEFAULT_RULES = [
+	// `as const satisfies readonly Rule[]` (vs. `: Rule[]`) preserves
+	// each rule's `name` literal through to `defaults` consumers. The
+	// type unions in `define-config.ts` (`DefaultRuleName`,
+	// `AllRuleNames`) project off `(typeof DEFAULT_RULES)[number]["name"]`
+	// — a bare `Rule[]` annotation widens those literals to `string`
+	// and silently disables typo-detection on `disabledRules`.
 	{
 		name: "no-force-push",
 		tool: "bash",
@@ -104,16 +111,45 @@ export const DEFAULT_RULES: Rule[] = [
 		reason:
 			"Long-running dev servers and watchers block the agent loop. Ask the user to run it manually in another terminal, or use a background-process tool. Representative — add your own via `.pi/steering.ts` if a framework isn't listed here.",
 	},
-];
+] as const satisfies readonly Rule[];
 
 /**
- * Default plugins shipped by the package. Currently empty — Phase 4
- * adds `pi-steering/plugins/git` which contributes
- * predicates (branch, upstream, commitsAhead), trackers (branch), and
- * tracker extensions (cwd with --git-dir / --work-tree). For Phase 3
- * the default set stays minimal to keep the engine domain-agnostic.
+ * Default plugins shipped by the package.
  *
- * Users opt out of all defaults (both {@link DEFAULT_RULES} and this
- * list) via `config.disableDefaults: true`.
+ * Contains the git plugin (`pi-steering/plugins/git`), which
+ * contributes:
+ *
+ *   - Predicates: `branch`, `upstream`, `commitsAhead`,
+ *     `hasStagedChanges`, `isClean`, `remote`.
+ *   - Rules: `no-main-commit` (overridable).
+ *   - Trackers: `branch` (in-chain `git checkout` / `git switch`
+ *     awareness for the `branch` predicate).
+ *   - Tracker extensions: `cwd.git` (`--git-dir=`, `--work-tree=`
+ *     flag parsing on the built-in cwd tracker).
+ *
+ * Rationale for default-on: git discipline is what the vast
+ * majority of steering consumers want - no-main-commit +
+ * branch-aware rules cover the common footgun of committing to
+ * `main` by accident. Explicit opt-out via `disabledPlugins` or
+ * `disableDefaults` is lower friction than requiring every user to
+ * remember `import gitPlugin from "pi-steering/plugins/git"` and
+ * wire it in themselves.
+ *
+ * Opt-out paths:
+ *
+ *   - Per-plugin:    `defineConfig({ disabledPlugins: ["git"] })`
+ *   - All defaults:  `defineConfig({ disableDefaults: true })` - drops
+ *                     BOTH {@link DEFAULT_RULES} and this list.
+ *   - Per-rule:      `defineConfig({ disabledRules: ["no-main-commit"] })`
+ *                     - keeps the plugin's predicates + tracker, just
+ *                     drops the shipped rule.
+ *
+ * Adding additional default plugins is a deliberate ship-surface
+ * decision - keep the list minimal. Domain-specific plugins (RDS,
+ * npm, etc.) stay opt-in.
  */
-export const DEFAULT_PLUGINS: Plugin[] = [];
+// Same `as const satisfies readonly Plugin[]` rationale as
+// `DEFAULT_RULES` above — preserves the `name` literal so
+// `DefaultPluginName` (in `define-config.ts`) projects off the
+// concrete value rather than widening to `string`.
+export const DEFAULT_PLUGINS = [gitPlugin] as const satisfies readonly Plugin[];

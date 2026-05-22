@@ -32,11 +32,18 @@
 import type { Modifier, Tracker } from "unbash-walker";
 import type {
 	Observer,
+	OperatorField,
 	Plugin,
 	PredicateHandler,
+	PredicateModifiers,
+	ReservedPredicateKey,
 	Rule,
 	SteeringConfig,
 } from "./schema.ts";
+import {
+	isReservedPredicateKey,
+	RESERVED_PREDICATE_KEYS,
+} from "./evaluator-internals/predicates.ts";
 
 // ---------------------------------------------------------------------------
 // Name validation (S3)
@@ -299,6 +306,18 @@ export function resolvePlugins(
 	for (const plugin of activePlugins) {
 		if (!plugin.trackers) continue;
 		for (const [name, tracker] of Object.entries(plugin.trackers)) {
+			// Reserved key: plugin-registered trackers may not claim `events`;
+			// the evaluator merges synthesized speculative entries under that
+			// name (see schema.ts `PredicateContext.walkerState` JSDoc).
+			if (name === "events") {
+				throw new Error(
+					`[pi-steering] tracker name "events" is reserved: ` +
+						`plugin "${plugin.name}" registers a tracker under that ` +
+						`name but the evaluator uses it on \`walkerState\` for ` +
+						`speculative-entry synthesis consumed by the built-in ` +
+						`\`when.happened\` predicate. Rename the tracker.`,
+				);
+			}
 			const prior = trackerOwner.get(name);
 			if (prior !== undefined) {
 				throw new Error(
@@ -365,6 +384,48 @@ export function resolvePlugins(
 	for (const plugin of activePlugins) {
 		if (!plugin.predicates) continue;
 		for (const [key, handler] of Object.entries(plugin.predicates)) {
+			// Reserved-key check fires at registration time so plugin authors
+			// get immediate feedback instead of an opaque type error at the
+			// user's rule site (the type-level filter via `Exclude` silently
+			// drops reserved keys from the registry surface). Adding a new
+			// modifier to `PredicateModifiers` automatically reserves its key
+			// via `RESERVED_PREDICATE_KEYS`; the type-vs-runtime sync is
+			// pinned by the `_RESERVED_PREDICATE_KEYS_COVERS_TYPE` assertion
+			// in `evaluator-internals/predicates.ts`.
+			if (isReservedPredicateKey(key)) {
+				// Key-specific suggestion: `not` collides with the operator
+				// field, `onUnknown` with the modifier surface.
+				//
+				// Convention for future {@link PredicateModifiers} /
+				// {@link OperatorField} additions:
+				//   - For OPERATOR collisions (a new logical operator like
+				//     `"or"` / `"and"`): prefer alternative verb forms that
+				//     avoid logical-operator vocabulary (`"either"`,
+				//     `"matchAny"` for `or`; `"all"`, `"matchAll"` for `and`).
+				//   - For MODIFIER collisions (a new modifier like a v0.2
+				//     `priority?:`): prefer names that include the modifier's
+				//     domain (`"rulePriority"`, `"orderingPriority"`) so the
+				//     suggestion clarifies which surface the registration
+				//     collided with.
+				// `Record<ReservedPredicateKey, string>` is type-exhaustive
+				// — every reserved key has a suggestion, so a future modifier
+				// addition forces an entry rather than silently flowing
+				// through a generic fallback.
+				const suggestions: Record<ReservedPredicateKey, string> = {
+					not: '"isNot", "negate"',
+					onUnknown: '"unknownPolicy", "walkerUnknownPolicy"',
+				};
+				// `key` is narrowed to `ReservedPredicateKey` by the
+				// `isReservedPredicateKey` type guard above.
+				const suggestion = suggestions[key];
+				throw new Error(
+					`[pi-steering] Plugin "${plugin.name}" attempted to register ` +
+						`reserved predicate key "${key}". This name conflicts with ` +
+						`the schema's operator/modifier surface ` +
+						`(${RESERVED_PREDICATE_KEYS.join(", ")}). Choose a different ` +
+						`name (e.g., ${suggestion}).`,
+				);
+			}
 			const prior = predicateOwner.get(key);
 			if (prior !== undefined) {
 				warnings.push({

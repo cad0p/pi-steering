@@ -8,10 +8,16 @@
   "engines": {
     "node": ">=22"
   },
+  "pi": {
+    "extensions": [
+      "packages/pi-steering/src/index.ts"
+    ]
+  },
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "prepare": "pnpm -r build"
   },
   "devDependencies": {
     "@types/node": "^20.19.39",

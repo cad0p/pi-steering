@@ -43,6 +43,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
 import { runMergerPipeline } from "./internal/session-runtime.ts";
+import { formatTrackerNameCollisionMessage } from "./plugin-merger.ts";
 import type {
 	Observer,
 	Plugin,
@@ -529,11 +530,11 @@ function detectTrackerNameCollisions(
 				diagnostics.push({
 					type: "error",
 					kind: "tracker-name-collision",
-					message:
-						`tracker name collision: both plugins "${prior}" and ` +
-						`"${plugin.name}" register a tracker called "${trackerName}". ` +
-						"Two plugins claiming the same state dimension is always a " +
-						"bug — rename one tracker or disable one plugin.",
+					message: formatTrackerNameCollisionMessage(
+						prior,
+						plugin.name,
+						trackerName,
+					),
 				});
 				continue;
 			}

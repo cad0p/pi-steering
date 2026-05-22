@@ -49,6 +49,39 @@ import {
 } from "./evaluator-internals/predicates.ts";
 
 // ---------------------------------------------------------------------------
+// Shared diagnostic message formatters
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the message body for a `tracker-name-collision` diagnostic.
+ *
+ * Two surfaces detect this collision independently:
+ *   - `buildConfig` (loader.ts) walks `plugins[*].trackers` after
+ *     applying `disabledPlugins`, so the diagnostic is available even
+ *     for callers that never reach `resolvePlugins`.
+ *   - `resolvePlugins` (this file) detects the collision again while
+ *     composing the runtime tracker map.
+ *
+ * `runMergerPipeline`'s short-circuit means a session sees only one of
+ * the two emissions, but both detectors must produce the SAME message
+ * text — otherwise a maintainer updating one copy silently drifts the
+ * other. Centralizing the formatter here keeps the two surfaces in
+ * lock-step.
+ */
+export function formatTrackerNameCollisionMessage(
+	prior: string,
+	current: string,
+	trackerName: string,
+): string {
+	return (
+		`tracker name collision: both plugins "${prior}" and ` +
+		`"${current}" register a tracker called "${trackerName}". ` +
+		"Two plugins claiming the same state dimension is always a " +
+		"bug — rename one tracker or disable one plugin."
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Name validation (S3)
 // ---------------------------------------------------------------------------
 
@@ -380,12 +413,11 @@ export function resolvePlugins(
 				diagnostics.push({
 					type: "error",
 					kind: "tracker-name-collision",
-					message:
-						`tracker name collision: ` +
-						`both plugins "${prior}" and "${plugin.name}" register ` +
-						`a tracker called "${name}". Two plugins claiming the ` +
-						`same state dimension is always a bug — rename one ` +
-						`tracker or disable one plugin.`,
+					message: formatTrackerNameCollisionMessage(
+						prior,
+						plugin.name,
+						name,
+					),
 				});
 				continue;
 			}

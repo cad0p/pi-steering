@@ -324,7 +324,7 @@ function buildNoopHarness(
 		diagnostics: [],
 	};
 	return {
-		evaluate: async () => undefined,
+		evaluate: async () => {},
 		dispatch: async () => {},
 		config,
 		resolved: emptyResolved,

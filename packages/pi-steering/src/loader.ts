@@ -317,14 +317,16 @@ export async function loadConfigs(cwd: string): Promise<{
  * cross-layer duplicate plugin name. First-registered wins (inner
  * layer is first — matches pi's project-local → global convention).
  *
- * Plugins whose name appears in the union of every layer's
- * `disabledPlugins` are still merged into the output (so downstream
- * surfaces like `pi-steering list` can render them tagged as
- * disabled), but they're EXEMPT from collision detection. A user
- * resolving a duplicate-plugin warning by adding the plugin to
- * `disabledPlugins` should see the warning go away in the same
- * config edit; detect-then-disable would still surface the warning
- * even though the disable already settled the conflict.
+ * The caller is responsible for unioning `config.disabledPlugins`
+ * across layers and passing the result as `disabledPlugins` (see
+ * `buildConfig`). Plugins whose name appears in the supplied set are
+ * still merged into the output (so downstream surfaces like
+ * `pi-steering list` can render them tagged as disabled), but they're
+ * EXEMPT from collision detection. A user resolving a duplicate-plugin
+ * warning by adding the plugin to `disabledPlugins` should see the
+ * warning go away in the same config edit; detect-then-disable would
+ * still surface the warning even though the disable already settled
+ * the conflict.
  */
 function mergePlugins(
 	layers: readonly SteeringConfig[],
@@ -363,11 +365,13 @@ function mergePlugins(
  * collisions stay silent: overriding a rule by name is the documented
  * customization path.
  *
- * Rules whose name appears in the union of every layer's
- * `disabledRules` are still merged into the output (so downstream
- * surfaces like `pi-steering list` can render them tagged as
- * disabled), but they're EXEMPT from collision detection. Mirrors
- * the disabledPlugins handling in {@link mergePlugins}.
+ * The caller is responsible for unioning `config.disabledRules` across
+ * layers and passing the result as `disabledRules` (see `buildConfig`).
+ * Rules whose name appears in the supplied set are still merged into
+ * the output (so downstream surfaces like `pi-steering list` can render
+ * them tagged as disabled), but they're EXEMPT from collision
+ * detection. Mirrors the `disabledPlugins` handling in
+ * {@link mergePlugins}.
  */
 function mergeRules(
 	layers: readonly SteeringConfig[],

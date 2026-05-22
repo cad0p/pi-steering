@@ -72,7 +72,9 @@ export function formatAggregatedDiagnostics(
  * `failOnWarnings: false`. Mirrors the previous `console.warn` shape
  * the loader emitted directly.
  */
-function formatLegacyConsoleWarn(d: SteeringDiagnostic): string {
+function formatLegacyConsoleWarn(
+	d: SteeringDiagnostic & { type: "warning" },
+): string {
 	const pathPrefix = d.path !== undefined ? `${d.path}: ` : "";
 	return `[pi-steering] ${pathPrefix}${d.message}`;
 }
@@ -185,10 +187,12 @@ export async function buildSessionRuntime(
 		// legacy console.warn channel so users running with the opt-out
 		// still see the message stream that pre-strict-mode code
 		// produced.
-		for (const d of aggregated) {
-			if (d.type === "warning") {
-				console.warn(formatLegacyConsoleWarn(d));
-			}
+		const warnings = aggregated.filter(
+			(d): d is SteeringDiagnostic & { type: "warning" } =>
+				d.type === "warning",
+		);
+		for (const d of warnings) {
+			console.warn(formatLegacyConsoleWarn(d));
 		}
 	}
 

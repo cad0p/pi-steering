@@ -27,6 +27,7 @@ import {
 	runMergerWithLoaderShortCircuit,
 } from "../internal/session-runtime.ts";
 import { loadConfigs } from "../loader.ts";
+import { validateUserConfigNames } from "../plugin-merger.ts";
 import type {
 	Observer,
 	Rule,
@@ -270,6 +271,18 @@ async function runList(args: string[]): Promise<number> {
 	const { config, diagnostics: mergeAndResolveDiagnostics } =
 		runCliMergeWithInfoCapture(layers);
 	for (const d of mergeAndResolveDiagnostics) {
+		recordDiagnostic(d);
+	}
+
+	// Validate user-config rule + observer names. Plugin-shipped
+	// names are validated inside `resolvePlugins`; user-config names
+	// reach `validateName` only at session_start (via the evaluator /
+	// observer-dispatcher build-time throw). The CLI is the pre-flight
+	// surface, so it runs the same check here — otherwise a config with
+	// a malformed user-config rule name would render as a valid listing
+	// on stdout, then production would refuse to start on the same
+	// config and the user would see a different verdict.
+	for (const d of validateUserConfigNames(config)) {
 		recordDiagnostic(d);
 	}
 

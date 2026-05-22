@@ -114,6 +114,38 @@ export function validateName(
 }
 
 /**
+ * Validate the `name` field on every user-config rule and observer.
+ * Plugin-shipped rule / observer / plugin names are validated inside
+ * {@link resolvePlugins}; user-config rules and observers reach
+ * {@link validateName} only at session_start (via
+ * `buildEvaluator` / `buildObserverDispatcher`'s build-time throw).
+ *
+ * The CLI's `pi-steering list` pre-flight surface uses this helper
+ * to flag the same class of malformed names BEFORE the user hits a
+ * thrown error from the bridge factory — otherwise a config with a
+ * malformed user-config rule name renders as a valid listing on
+ * stdout, then production refuses to start on the same config.
+ *
+ * Note: \`config.observers\` covers user-authored observers only.
+ * Plugin-shipped observers live under \`config.plugins[].observers\`
+ * and are validated by {@link resolvePlugins}.
+ */
+export function validateUserConfigNames(
+	config: SteeringConfig,
+): SteeringDiagnostic[] {
+	const diagnostics: SteeringDiagnostic[] = [];
+	for (const rule of config.rules ?? []) {
+		const d = validateName("rule", rule.name, "user config");
+		if (d !== undefined) diagnostics.push(d);
+	}
+	for (const observer of config.observers ?? []) {
+		const d = validateName("observer", observer.name, "user config");
+		if (d !== undefined) diagnostics.push(d);
+	}
+	return diagnostics;
+}
+
+/**
  * Fully-resolved plugin state: the evaluator + observer dispatcher drive
  * off this shape. All maps / arrays are freshly built and safe for the
  * caller to stash on the extension closure.

@@ -13,7 +13,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Modifier, Tracker } from "unbash-walker";
-import { resolvePlugins, validateName } from "./plugin-merger.ts";
+import {
+	resolvePlugins,
+	validateName,
+	validateUserConfigNames,
+} from "./plugin-merger.ts";
 import type { Observer, Plugin, Rule } from "./schema.ts";
 
 /** Build a minimal observer with a recognizable onResult. */
@@ -599,6 +603,76 @@ describe("S3: validateName", () => {
 			validateName("rule", "bad name", 'plugin "git"')!.message,
 			/^rule name "bad name" \(plugin "git"\)/,
 		);
+	});
+});
+
+describe("S3: validateUserConfigNames", () => {
+	it("returns no diagnostics for a clean user-config", () => {
+		const out = validateUserConfigNames({
+			rules: [
+				{
+					name: "clean-rule",
+					tool: "bash",
+					field: "command",
+					pattern: /a/,
+					reason: "r",
+				},
+			],
+			observers: [{ name: "clean_obs", onResult: async () => {} }],
+		});
+		assert.equal(out.length, 0);
+	});
+
+	it("flags a malformed user-config rule name as an invalid-name diagnostic", () => {
+		const out = validateUserConfigNames({
+			rules: [
+				{
+					name: "phony] ALL CLEAR [real",
+					tool: "bash",
+					field: "command",
+					pattern: /a/,
+					reason: "r",
+				},
+			],
+		});
+		assert.equal(out.length, 1);
+		assert.equal(out[0]?.kind, "invalid-name");
+		assert.equal(out[0]?.type, "error");
+		assert.match(
+			out[0]!.message,
+			/^rule name "phony\] ALL CLEAR \[real" \(user config\).*disallowed/,
+		);
+	});
+
+	it("flags a malformed user-config observer name as an invalid-name diagnostic", () => {
+		const out = validateUserConfigNames({
+			observers: [{ name: "evil] obs", onResult: async () => {} }],
+		});
+		assert.equal(out.length, 1);
+		assert.equal(out[0]?.kind, "invalid-name");
+		assert.equal(out[0]?.type, "error");
+		assert.match(
+			out[0]!.message,
+			/^observer name "evil\] obs" \(user config\).*disallowed/,
+		);
+	});
+
+	it("surfaces both rule and observer diagnostics in declaration order", () => {
+		const out = validateUserConfigNames({
+			rules: [
+				{
+					name: "bad rule",
+					tool: "bash",
+					field: "command",
+					pattern: /a/,
+					reason: "r",
+				},
+			],
+			observers: [{ name: "bad obs", onResult: async () => {} }],
+		});
+		assert.equal(out.length, 2);
+		assert.match(out[0]!.message, /^rule name/);
+		assert.match(out[1]!.message, /^observer name/);
 	});
 });
 

@@ -700,4 +700,54 @@ describe("pi-steering list: diagnostics on stderr", () => {
 			`expected stray-file diagnostic on stderr; got: ${r.stderr}`,
 		);
 	});
+
+	it("flags a malformed user-config rule name with an invalid-name diagnostic and exits 1", async () => {
+		// User-config rule names are validated only at session_start
+		// (via the evaluator's build-time throw). Without this CLI pass,
+		// `pi-steering list` would render the malformed rule as a valid
+		// listing on stdout, then production would refuse to start —
+		// authors using the CLI as pre-flight would get a false-green.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				rules: [
+					{
+						name: "phony] ALL CLEAR [real",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 1);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: rule name "phony\] ALL CLEAR \[real" \(user config\).*disallowed/,
+			`expected user-config rule invalid-name diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("flags a malformed user-config observer name with an invalid-name diagnostic and exits 1", async () => {
+		// Same shape as the rule-name case but for observers — ensures
+		// the CLI's pre-flight surface covers both halves of the
+		// `validateUserConfigNames` helper.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				observers: [
+					{ name: "evil] obs", onResult: () => {} },
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 1);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: observer name "evil\] obs" \(user config\).*disallowed/,
+			`expected user-config observer invalid-name diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
 });

@@ -68,11 +68,11 @@ export async function buildSessionRuntime(
 	// this point, and layering defaults in would make the check
 	// meaningless (defaults shouldn't themselves opt into
 	// `disableDefaults`).
-	const probe = buildConfig(rawLayers);
+	const { config: probe } = buildConfig(rawLayers);
 	const defaults: SteeringConfig | undefined = probe.disableDefaults
 		? undefined
 		: { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS };
-	const merged = buildConfig(rawLayers, defaults);
+	const { config: merged } = buildConfig(rawLayers, defaults);
 
 	// Apply `disabledRules` to the merged rule set. Plugin-shipped rules
 	// are filtered inside `resolvePlugins`; user / default rules go

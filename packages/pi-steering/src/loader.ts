@@ -299,28 +299,25 @@ export async function loadConfigs(cwd: string): Promise<{
 // ---------------------------------------------------------------------------
 
 /**
- * Soft-warn helper — shared by the collision detection branches below
- * so the phrasing is consistent and easy to adjust later.
+ * Collect plugins across layers, recording a diagnostic for each
+ * cross-layer duplicate plugin name. First-registered wins (inner
+ * layer is first — matches pi's project-local → global convention).
  */
-function warnCollision(kind: string, name: string): void {
-	console.warn(
-		`[pi-steering] duplicate ${kind} "${name}"; keeping first-registered entry.`,
-	);
-}
-
-/**
- * Collect plugins across layers, warning on duplicate plugin names.
- * First-registered wins (inner layer is first — matches pi's
- * project-local → global convention).
- */
-function mergePlugins(layers: readonly SteeringConfig[]): Plugin[] {
+function mergePlugins(
+	layers: readonly SteeringConfig[],
+	diagnostics: SteeringDiagnostic[],
+): Plugin[] {
 	const seen = new Set<string>();
 	const out: Plugin[] = [];
 	for (const layer of layers) {
 		if (!layer.plugins) continue;
 		for (const plugin of layer.plugins) {
 			if (seen.has(plugin.name)) {
-				warnCollision("plugin", plugin.name);
+				diagnostics.push({
+					type: "warning",
+					kind: "plugin-name-collision",
+					message: `duplicate plugin "${plugin.name}"; keeping first-registered entry.`,
+				});
 				continue;
 			}
 			seen.add(plugin.name);
@@ -335,22 +332,28 @@ function mergePlugins(layers: readonly SteeringConfig[]): Plugin[] {
  * Declaration order within a layer is preserved; cross-layer order is
  * "first layer that mentions a given rule name wins for its slot".
  *
- * Soft-warn on duplicate names WITHIN a single layer (authoring
- * mistake) — mirrors {@link mergeObservers}. Cross-layer collisions
- * stay silent: overriding a rule by name is the documented
+ * Records a diagnostic on duplicate names WITHIN a single layer
+ * (authoring mistake) — mirrors {@link mergeObservers}. Cross-layer
+ * collisions stay silent: overriding a rule by name is the documented
  * customization path.
  */
-function mergeRules(layers: readonly SteeringConfig[]): Rule[] {
+function mergeRules(
+	layers: readonly SteeringConfig[],
+	diagnostics: SteeringDiagnostic[],
+): Rule[] {
 	const byName = new Map<string, Rule>();
 	for (const layer of layers) {
 		if (!layer.rules) continue;
 		const seenInLayer = new Set<string>();
 		for (const rule of layer.rules) {
 			if (seenInLayer.has(rule.name)) {
-				console.warn(
-					`[pi-steering] duplicate rule "${rule.name}" within ` +
-						"single config layer; keeping first, dropping subsequent",
-				);
+				diagnostics.push({
+					type: "warning",
+					kind: "rule-name-collision",
+					message:
+						`duplicate rule "${rule.name}" within single config layer; ` +
+						"keeping first, dropping subsequent",
+				});
 				continue;
 			}
 			seenInLayer.add(rule.name);
@@ -358,8 +361,8 @@ function mergeRules(layers: readonly SteeringConfig[]): Rule[] {
 				byName.set(rule.name, rule);
 			}
 			// Else: an inner layer already placed this rule. We intentionally
-			// do NOT warn here — overriding a rule by name is the documented
-			// way to customize behavior from an outer layer.
+			// do NOT record a diagnostic here — overriding a rule by name is
+			// the documented way to customize behavior from an outer layer.
 		}
 	}
 	return [...byName.values()];
@@ -367,18 +370,25 @@ function mergeRules(layers: readonly SteeringConfig[]): Rule[] {
 
 /**
  * Merge observers across layers — inner layer's observer name
- * overrides outer. Soft-warn on duplicate names WITHIN a single layer
- * (authoring mistake); cross-layer overrides are silent (intentional
- * customization).
+ * overrides outer. Records a diagnostic on duplicate names WITHIN a
+ * single layer (authoring mistake); cross-layer overrides are silent
+ * (intentional customization).
  */
-function mergeObservers(layers: readonly SteeringConfig[]): Observer[] {
+function mergeObservers(
+	layers: readonly SteeringConfig[],
+	diagnostics: SteeringDiagnostic[],
+): Observer[] {
 	const byName = new Map<string, Observer>();
 	for (const layer of layers) {
 		if (!layer.observers) continue;
 		const seenInLayer = new Set<string>();
 		for (const obs of layer.observers) {
 			if (seenInLayer.has(obs.name)) {
-				warnCollision("observer", obs.name);
+				diagnostics.push({
+					type: "warning",
+					kind: "observer-name-collision",
+					message: `duplicate observer "${obs.name}"; keeping first-registered entry.`,
+				});
 				continue;
 			}
 			seenInLayer.add(obs.name);
@@ -439,63 +449,34 @@ function mergeBool(
 }
 
 /**
- * Assert no two plugins register a tracker with the same name — a hard
- * error per the ADR ("Precedence: first-wins everywhere" exception:
- * tracker name collisions are always a bug).
+ * Detect plugins registering a tracker under the same name and push
+ * an error-class diagnostic for each collision. Two plugins claiming
+ * the same state dimension is always a bug; the runtime escalates
+ * these to a thrown error regardless of the user's strict-mode
+ * preference.
  */
-function assertTrackerNameUnique(plugins: readonly Plugin[]): void {
+function detectTrackerNameCollisions(
+	plugins: readonly Plugin[],
+	diagnostics: SteeringDiagnostic[],
+): void {
 	const seen = new Map<string, string>(); // trackerName -> pluginName
 	for (const plugin of plugins) {
 		if (!plugin.trackers) continue;
 		for (const trackerName of Object.keys(plugin.trackers)) {
 			const prior = seen.get(trackerName);
 			if (prior !== undefined) {
-				throw new Error(
-					`[pi-steering] tracker name collision: ` +
-						`both plugins "${prior}" and "${plugin.name}" register ` +
-						`a tracker called "${trackerName}". Two plugins ` +
-						`claiming the same state dimension is always a bug — ` +
-						`rename one tracker or disable one plugin.`,
-				);
+				diagnostics.push({
+					type: "error",
+					kind: "tracker-name-collision",
+					message:
+						`tracker name collision: both plugins "${prior}" and ` +
+						`"${plugin.name}" register a tracker called "${trackerName}". ` +
+						"Two plugins claiming the same state dimension is always a " +
+						"bug — rename one tracker or disable one plugin.",
+				});
+				continue;
 			}
 			seen.set(trackerName, plugin.name);
-		}
-	}
-}
-
-/**
- * Warn on soft collisions — predicate keys and tracker extensions.
- * (Rule / observer / plugin collisions are warned during their own
- * merge passes.) First-registered wins in every case.
- */
-function warnSoftPluginCollisions(plugins: readonly Plugin[]): void {
-	const predicateSeen = new Map<string, string>();
-	const extensionSeen = new Map<string, string>(); // "tracker/basename" -> pluginName
-	for (const plugin of plugins) {
-		if (plugin.predicates) {
-			for (const key of Object.keys(plugin.predicates)) {
-				const prior = predicateSeen.get(key);
-				if (prior !== undefined) {
-					warnCollision(`predicate (\`when.${key}\`)`, key);
-					continue;
-				}
-				predicateSeen.set(key, plugin.name);
-			}
-		}
-		if (plugin.trackerExtensions) {
-			for (const trackerName of Object.keys(plugin.trackerExtensions)) {
-				const extns = plugin.trackerExtensions[trackerName];
-				if (!extns) continue;
-				for (const basename of Object.keys(extns)) {
-					const key = `${trackerName}/${basename}`;
-					const prior = extensionSeen.get(key);
-					if (prior !== undefined) {
-						warnCollision("tracker extension", key);
-						continue;
-					}
-					extensionSeen.set(key, plugin.name);
-				}
-			}
 		}
 	}
 }
@@ -506,24 +487,28 @@ function warnSoftPluginCollisions(plugins: readonly Plugin[]): void {
  * the OUTERMOST layer — its fields apply when no real layer specifies
  * them, otherwise real layers override.
  *
- * Emits soft-warn console.warn calls for non-fatal collisions; throws
- * for tracker-name collisions.
+ * Cross-layer plugin name collisions, within-layer rule + observer
+ * name collisions, and cross-layer tracker name collisions surface
+ * as structured {@link SteeringDiagnostic} entries on the returned
+ * object. Predicate-key + tracker-extension collisions are detected
+ * in `resolvePlugins`, not here — buildConfig handles cross-layer and
+ * within-layer name-collision shapes only.
  */
 export function buildConfig(
 	layers: readonly SteeringConfig[],
 	defaults?: SteeringConfig,
-): SteeringConfig {
+): { config: SteeringConfig; diagnostics: SteeringDiagnostic[] } {
 	// Build the effective inner-first layer list. `defaults` goes at
 	// the END (outermost position) so inner real layers override it.
 	const effective: SteeringConfig[] = [...layers];
 	if (defaults !== undefined) effective.push(defaults);
 
-	const plugins = mergePlugins(effective);
-	assertTrackerNameUnique(plugins);
-	warnSoftPluginCollisions(plugins);
+	const diagnostics: SteeringDiagnostic[] = [];
+	const plugins = mergePlugins(effective, diagnostics);
+	detectTrackerNameCollisions(plugins, diagnostics);
 
-	const rules = mergeRules(effective);
-	const observers = mergeObservers(effective);
+	const rules = mergeRules(effective, diagnostics);
+	const observers = mergeObservers(effective, diagnostics);
 
 	const out: SteeringConfig = {};
 	if (plugins.length > 0) out.plugins = plugins;
@@ -542,22 +527,23 @@ export function buildConfig(
 	const disableDefaults = mergeBool(effective, "disableDefaults");
 	if (disableDefaults !== undefined) out.disableDefaults = disableDefaults;
 
-	return out;
+	return { config: out, diagnostics };
 }
 
 /**
  * Convenience: load all layers for `cwd`, then merge with optional
  * `defaults`. Equivalent to
- * `buildConfig((await loadConfigs(cwd)).layers, defaults)`.
+ * `buildConfig((await loadConfigs(cwd)).layers, defaults).config`.
  *
- * Diagnostics produced by {@link loadConfigs} are discarded by this
- * convenience wrapper. Callers that want structured diagnostics
- * should call {@link loadConfigs} + {@link buildConfig} directly.
+ * Diagnostics produced by {@link loadConfigs} and {@link buildConfig}
+ * are discarded by this convenience wrapper. Callers that want
+ * structured diagnostics should call {@link loadConfigs} +
+ * {@link buildConfig} directly.
  */
 export async function loadSteeringConfig(
 	cwd: string,
 	defaults?: SteeringConfig,
 ): Promise<SteeringConfig> {
 	const { layers } = await loadConfigs(cwd);
-	return buildConfig(layers, defaults);
+	return buildConfig(layers, defaults).config;
 }

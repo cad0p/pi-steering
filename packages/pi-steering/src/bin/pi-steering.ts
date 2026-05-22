@@ -243,7 +243,7 @@ async function runList(args: string[]): Promise<number> {
 		return 0;
 	}
 
-	const config = buildConfig(layers);
+	const { config } = buildConfig(layers);
 
 	if (format === "json") {
 		process.stdout.write(

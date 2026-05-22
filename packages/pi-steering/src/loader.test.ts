@@ -438,20 +438,6 @@ describe("loader: loadConfigs", () => {
 // ---------------------------------------------------------------------------
 
 describe("loader: buildConfig", () => {
-	let warnings: string[];
-	let origWarn: typeof console.warn;
-
-	beforeEach(() => {
-		warnings = [];
-		origWarn = console.warn;
-		console.warn = (msg: unknown) => {
-			warnings.push(String(msg));
-		};
-	});
-	afterEach(() => {
-		console.warn = origWarn;
-	});
-
 	it("concatenates rules from all layers (inner-first)", () => {
 		const inner: SteeringConfig = {
 			rules: [
@@ -475,8 +461,9 @@ describe("loader: buildConfig", () => {
 				},
 			],
 		};
-		const merged = buildConfig([inner, outer]);
+		const { config: merged, diagnostics } = buildConfig([inner, outer]);
 		assert.deepEqual(merged.rules?.map((r) => r.name), ["inner", "outer"]);
+		assert.deepEqual(diagnostics, []);
 	});
 
 	it("inner rule by same name overrides outer (and stays silent)", () => {
@@ -502,15 +489,15 @@ describe("loader: buildConfig", () => {
 				},
 			],
 		};
-		const merged = buildConfig([inner, outer]);
+		const { config: merged, diagnostics } = buildConfig([inner, outer]);
 		assert.equal(merged.rules?.length, 1);
 		assert.equal(merged.rules?.[0]?.reason, "inner reason");
-		// Cross-layer rule overrides are intentional — no warning.
-		assert.deepEqual(warnings, []);
+		// Cross-layer rule overrides are intentional — no diagnostic.
+		assert.deepEqual(diagnostics, []);
 	});
 
-	it("soft-warns on within-layer duplicate rules (keeps first)", () => {
-		const merged = buildConfig([
+	it("records a rule-name-collision diagnostic for within-layer duplicate rules (keeps first)", () => {
+		const { config: merged, diagnostics } = buildConfig([
 			{
 				rules: [
 					{
@@ -536,16 +523,14 @@ describe("loader: buildConfig", () => {
 			"first-wins",
 			"first-registered rule should survive within a layer",
 		);
+		const hit = diagnostics.find((d) => d.kind === "rule-name-collision");
 		assert.ok(
-			warnings.some(
-				(w) =>
-					w.includes('duplicate rule "dup"') &&
-					w.includes("within single config layer"),
-			),
-			`expected within-layer rule-dup warning; got: ${JSON.stringify(
-				warnings,
-			)}`,
+			hit,
+			`expected a rule-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
 		);
+		assert.equal(hit.type, "warning");
+		assert.match(hit.message, /duplicate rule "dup"/);
+		assert.match(hit.message, /within single config layer/);
 	});
 
 	it("unions disabledRules / disabledPlugins across layers", () => {
@@ -557,24 +542,24 @@ describe("loader: buildConfig", () => {
 			disabledRules: ["b", "a"], // dup with inner — should coalesce
 			disabledPlugins: ["pB"],
 		};
-		const merged = buildConfig([inner, outer]);
+		const { config: merged } = buildConfig([inner, outer]);
 		assert.deepEqual(merged.disabledRules?.sort(), ["a", "b"]);
 		assert.deepEqual(merged.disabledPlugins?.sort(), ["pA", "pB"]);
 	});
 
 	it("inner `defaultNoOverride` wins; missing layer leaves outer in place", () => {
 		assert.equal(
-			buildConfig([{}, { defaultNoOverride: true }]).defaultNoOverride,
+			buildConfig([{}, { defaultNoOverride: true }]).config.defaultNoOverride,
 			true,
 			"outer sets it, inner doesn't — outer wins",
 		);
 		assert.equal(
 			buildConfig([{ defaultNoOverride: false }, { defaultNoOverride: true }])
-				.defaultNoOverride,
+				.config.defaultNoOverride,
 			false,
 			"inner explicitly false beats outer true",
 		);
-		assert.equal(buildConfig([]).defaultNoOverride, undefined);
+		assert.equal(buildConfig([]).config.defaultNoOverride, undefined);
 	});
 
 	it("inner `disableDefaults` wins", () => {
@@ -582,25 +567,31 @@ describe("loader: buildConfig", () => {
 			buildConfig([
 				{ disableDefaults: true },
 				{ disableDefaults: false },
-			]).disableDefaults,
+			]).config.disableDefaults,
 			true,
 		);
-		assert.equal(buildConfig([]).disableDefaults, undefined);
+		assert.equal(buildConfig([]).config.disableDefaults, undefined);
 	});
 
-	it("concatenates plugins; first-wins on duplicate plugin names", () => {
+	it("records a plugin-name-collision diagnostic for cross-layer duplicate plugin names; first-wins", () => {
 		const pInner: Plugin = { name: "p", rules: [] };
 		const pOuter: Plugin = { name: "p", rules: [] };
-		const merged = buildConfig([{ plugins: [pInner] }, { plugins: [pOuter] }]);
+		const { config: merged, diagnostics } = buildConfig([
+			{ plugins: [pInner] },
+			{ plugins: [pOuter] },
+		]);
 		assert.equal(merged.plugins?.length, 1);
+		const hit = diagnostics.find((d) => d.kind === "plugin-name-collision");
 		assert.ok(
-			warnings.some((w) => w.includes('duplicate plugin "p"')),
-			`expected a plugin-collision warning: ${JSON.stringify(warnings)}`,
+			hit,
+			`expected a plugin-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
 		);
+		assert.equal(hit.type, "warning");
+		assert.match(hit.message, /duplicate plugin "p"/);
 	});
 
-	it("concatenates observers; soft-warns on within-layer duplicates", () => {
-		const merged = buildConfig([
+	it("records an observer-name-collision diagnostic for within-layer duplicates", () => {
+		const { config: merged, diagnostics } = buildConfig([
 			{
 				observers: [
 					{ name: "o", onResult: () => {} },
@@ -609,13 +600,19 @@ describe("loader: buildConfig", () => {
 			},
 		]);
 		assert.equal(merged.observers?.length, 1);
-		assert.ok(warnings.some((w) => w.includes('duplicate observer "o"')));
+		const hit = diagnostics.find((d) => d.kind === "observer-name-collision");
+		assert.ok(
+			hit,
+			`expected an observer-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "warning");
+		assert.match(hit.message, /duplicate observer "o"/);
 	});
 
 	it("inner observer by same name overrides outer (and stays silent)", () => {
 		const innerFn = () => {};
 		const outerFn = () => {};
-		const merged = buildConfig([
+		const { config: merged, diagnostics } = buildConfig([
 			{ observers: [{ name: "shared", onResult: innerFn }] },
 			{ observers: [{ name: "shared", onResult: outerFn }] },
 		]);
@@ -627,57 +624,30 @@ describe("loader: buildConfig", () => {
 		);
 		// Cross-layer observer overrides are the intended customization
 		// path — mirror the cross-layer rule-override test and assert no
-		// warning fires. Only within-layer duplicates warn.
-		assert.deepEqual(warnings, []);
+		// diagnostic fires. Only within-layer duplicates record one.
+		assert.deepEqual(diagnostics, []);
 	});
 
-	it("hard-errors on tracker name collision across plugins", () => {
+	it("records an error-class tracker-name-collision diagnostic when two plugins claim the same tracker", () => {
 		const t = { initial: 0, unknown: -1, modifiers: {} } as const;
 		const a: Plugin = { name: "pa", trackers: { branch: t as never } };
 		const b: Plugin = { name: "pb", trackers: { branch: t as never } };
-		assert.throws(
-			() => buildConfig([{ plugins: [a] }, { plugins: [b] }]),
-			/tracker name collision/,
-		);
-	});
-
-	it("soft-warns on tracker-extension collision", () => {
-		const modifier = { scope: "per-command" as const, apply: () => "" };
-		const a: Plugin = {
-			name: "pa",
-			trackerExtensions: { cwd: { git: modifier as never } },
-		};
-		const b: Plugin = {
-			name: "pb",
-			trackerExtensions: { cwd: { git: modifier as never } },
-		};
-		buildConfig([{ plugins: [a] }, { plugins: [b] }]);
+		const { diagnostics } = buildConfig([
+			{ plugins: [a] },
+			{ plugins: [b] },
+		]);
+		const hit = diagnostics.find((d) => d.kind === "tracker-name-collision");
 		assert.ok(
-			warnings.some((w) =>
-				w.includes("duplicate tracker extension") && w.includes("cwd/git"),
-			),
-			`expected tracker-ext collision warning: ${JSON.stringify(warnings)}`,
+			hit,
+			`expected a tracker-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
 		);
-	});
-
-	it("soft-warns on predicate key collision", () => {
-		const handler = (_a: unknown, _c: unknown) => true;
-		const a: Plugin = {
-			name: "pa",
-			predicates: { branch: handler as never },
-		};
-		const b: Plugin = {
-			name: "pb",
-			predicates: { branch: handler as never },
-		};
-		buildConfig([{ plugins: [a] }, { plugins: [b] }]);
-		assert.ok(
-			warnings.some((w) => w.includes("duplicate predicate")),
-		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /tracker name collision/);
+		assert.match(hit.message, /branch/);
 	});
 
 	it("applies `defaults` as the outermost layer", () => {
-		const merged = buildConfig(
+		const { config: merged } = buildConfig(
 			[{ rules: [{ name: "user", tool: "bash", field: "command", pattern: /u/, reason: "u" }] }],
 			{
 				rules: [
@@ -700,7 +670,7 @@ describe("loader: buildConfig", () => {
 	});
 
 	it("user rule shadows a defaults rule of the same name", () => {
-		const merged = buildConfig(
+		const { config: merged } = buildConfig(
 			[
 				{
 					rules: [

@@ -1747,7 +1747,32 @@ export type SteeringDiagnosticKind =
 	 * other extensions are flagged so the user can rename or delete
 	 * the stray file.
 	 */
-	| "layer-stray-file";
+	| "layer-stray-file"
+	/**
+	 * Two layers register a plugin with the same `name`. The inner
+	 * (closer to cwd) layer wins; the outer layer's plugin is dropped.
+	 */
+	| "plugin-name-collision"
+	/**
+	 * A single layer declares two rules under the same `name`. The
+	 * first-declared rule survives; subsequent duplicates are dropped.
+	 * Cross-layer rule shadowing is intentional and not flagged.
+	 */
+	| "rule-name-collision"
+	/**
+	 * A single layer declares two observers under the same `name`.
+	 * The first-declared observer survives; subsequent duplicates are
+	 * dropped. Cross-layer observer shadowing is intentional and not
+	 * flagged.
+	 */
+	| "observer-name-collision"
+	/**
+	 * Two plugins both register a tracker under the same name. Always
+	 * an error — two plugins claiming the same state dimension is a
+	 * bug, not a soft override. Rename one tracker or disable one
+	 * plugin.
+	 */
+	| "tracker-name-collision";
 
 /**
  * Structured issue surfaced while loading a steering config.

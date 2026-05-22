@@ -24,7 +24,7 @@ import { FromJSONError, fromJSON } from "../compat.ts";
 import { EVALUATOR_BUILTIN_TRACKERS } from "../evaluator.ts";
 import {
 	formatSingleLineDiagnostic,
-	runMergerWithLoaderShortCircuit,
+	runMergerPipeline,
 } from "../internal/session-runtime.ts";
 import { loadConfigs } from "../loader.ts";
 import type {
@@ -274,7 +274,7 @@ async function runList(args: string[]): Promise<number> {
 	}
 
 	// User-config rule + observer name validation runs inside
-	// `runMergerWithLoaderShortCircuit` (between `buildConfig` and
+	// `runMergerPipeline` (between `buildConfig` and
 	// `resolvePlugins`) so every surface — production runtime,
 	// `loadHarness`, and this CLI — gets the same `invalid-name`
 	// diagnostic stream. Tradeoff: when the merge step short-circuits
@@ -295,7 +295,7 @@ async function runList(args: string[]): Promise<number> {
 
 /**
  * Run the merge+resolve pipeline through the shared
- * {@link runMergerWithLoaderShortCircuit} helper, intercepting
+ * {@link runMergerPipeline} helper, intercepting
  * `console.info` for the duration so the plugin-merger's disabled-
  * plugin / disabled-rule breadcrumbs go to stderr instead of
  * contaminating stdout (which carries the structured `--format=json`
@@ -313,7 +313,7 @@ function runCliMergeWithInfoCapture(
 		process.stderr.write(`${args.map((a) => String(a)).join(" ")}\n`);
 	};
 	try {
-		const { merged, diagnostics } = runMergerWithLoaderShortCircuit(
+		const { merged, diagnostics } = runMergerPipeline(
 			layers,
 			undefined,
 			EVALUATOR_BUILTIN_TRACKERS,

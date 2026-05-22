@@ -42,7 +42,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
-import { runMergerWithLoaderShortCircuit } from "./internal/session-runtime.ts";
+import { runMergerPipeline } from "./internal/session-runtime.ts";
 import type {
 	Observer,
 	Plugin,
@@ -636,7 +636,7 @@ export async function loadSteeringConfig(
 ): Promise<{ config: SteeringConfig; diagnostics: SteeringDiagnostic[] }> {
 	const { layers, diagnostics: loaderDiagnostics } = await loadConfigs(cwd);
 	const { merged, diagnostics: mergeAndResolveDiagnostics } =
-		runMergerWithLoaderShortCircuit(
+		runMergerPipeline(
 			layers,
 			defaults,
 			EVALUATOR_BUILTIN_TRACKERS,

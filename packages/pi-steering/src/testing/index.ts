@@ -80,7 +80,7 @@ import {
 	matchesWatch,
 	type ObserverDispatcher,
 } from "../observer-dispatcher.ts";
-import { runMergerWithLoaderShortCircuit } from "../internal/session-runtime.ts";
+import { runMergerPipeline } from "../internal/session-runtime.ts";
 import {
 	type ResolvedPluginState,
 } from "../plugin-merger.ts";
@@ -252,7 +252,7 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 		? { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS }
 		: undefined;
 	const { merged: mergedConfig, resolved, diagnostics } =
-		runMergerWithLoaderShortCircuit(
+		runMergerPipeline(
 			[inputConfig],
 			defaults,
 			EVALUATOR_BUILTIN_TRACKERS,

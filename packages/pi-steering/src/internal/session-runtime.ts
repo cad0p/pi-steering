@@ -72,7 +72,7 @@ import { dropUnusedObservers } from "./drop-unused-observers.ts";
  * thread those in separately. `loadHarness` operates on a single
  * in-memory layer and has no loader stream to thread.
  */
-export function runMergerWithLoaderShortCircuit(
+export function runMergerPipeline(
 	layers: readonly SteeringConfig[],
 	defaults: SteeringConfig | undefined,
 	builtinTrackers: readonly string[],
@@ -219,7 +219,7 @@ export async function buildSessionRuntime(
 	// short-circuit between the two passes is uniform across
 	// `buildSessionRuntime`, `loadHarness`, and the CLI's `runList`.
 	const { merged, resolved, diagnostics: mergeAndResolveDiagnostics } =
-		runMergerWithLoaderShortCircuit(
+		runMergerPipeline(
 			rawLayers,
 			defaults,
 			EVALUATOR_BUILTIN_TRACKERS,
@@ -261,7 +261,7 @@ export async function buildSessionRuntime(
 	// and the strict-mode throw above already fired in that case.
 	if (resolved === null) {
 		throw new Error(
-			"[pi-steering] internal: runMergerWithLoaderShortCircuit " +
+			"[pi-steering] internal: runMergerPipeline " +
 				"returned a null resolve without surfacing an error-class " +
 				"diagnostic",
 		);

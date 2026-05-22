@@ -1652,6 +1652,10 @@ export interface SteeringConfig {
 	 * the imperative flag {@link disableDefaults} (action: disable
 	 * the default plugins + rules).
 	 *
+	 * Disabling a rule is by-design behavior, not a configuration
+	 * issue — it does NOT contribute to the diagnostic stream. See
+	 * {@link SteeringDiagnosticKind} for the by-design-vs-issue carveout.
+	 *
 	 * **Navigation note:** these are string literals projected from
 	 * `DEFAULT_RULES` (engine defaults), `plugin.rules[*].name`, and
 	 * inline `rules[*].name`. Ctrl+Click on a literal jumps to the
@@ -1670,6 +1674,10 @@ export interface SteeringConfig {
 	 * Plugins to disable by name. Additive union across layers.
 	 * A disabled plugin contributes NOTHING - no rules, no observers,
 	 * no predicates, no trackers.
+	 *
+	 * Disabling a plugin is by-design behavior, not a configuration
+	 * issue — it does NOT contribute to the diagnostic stream. See
+	 * {@link SteeringDiagnosticKind} for the by-design-vs-issue carveout.
 	 *
 	 * **Navigation note:** same TypeScript-language limitation as
 	 * {@link disabledRules} — Ctrl+Click on a string literal jumps to
@@ -1740,11 +1748,21 @@ export interface SteeringConfig {
  *     `rule-name-collision`, `observer-name-collision`,
  *     `tracker-name-collision`) — produced while walking up the
  *     filesystem, importing per-layer config files, and merging
- *     layers into a single effective config.
+ *     layers into a single effective config. The collision kinds in
+ *     this group flag duplicates among user-authored declarations
+ *     across the discovered config layers.
  *   - PLUGIN-MERGER (`predicate-collision`, `observer-collision`,
  *     `rule-collision`, `extension-orphan`, `reserved-tracker-name`,
  *     `reserved-predicate-key`) — produced while resolving plugin
- *     shapes into the runtime registry.
+ *     shapes into the runtime registry. The collision kinds in this
+ *     group flag duplicates among plugin-author-shipped declarations
+ *     across the active plugin set.
+ *
+ * Naming asymmetry: loader-side kinds suffix `-name-collision`;
+ * plugin-merger-side kinds suffix bare `-collision`. The split is
+ * intentional but doesn't strictly track within-layer vs across-layer
+ * (e.g. `plugin-name-collision` is loader-side and fires across
+ * layers). Consumers should branch on `kind`, not on the suffix shape.
  *
  * Disabling a plugin via `config.disabledPlugins` or a plugin-shipped
  * rule via `config.disabledRules` is by-design behavior, not a
@@ -1850,6 +1868,27 @@ export type SteeringDiagnosticKind =
  * throw or log per the user's strict-mode preference. The shape is
  * stable so tests and future tooling can dispatch on {@link kind}
  * without scanning {@link message} substrings.
+ *
+ * Render-format matrix — the same diagnostic surfaces in three
+ * subtly different shapes depending on which renderer the runtime
+ * picks:
+ *
+ *   - Strict-mode aggregate (thrown `Error` from `buildSessionRuntime`):
+ *     a header line ("N config issues:") followed by a per-line bullet
+ *     `  - [type] <path: >?<message>`. One `Error.message`, multi-line.
+ *     Used when at least one diagnostic must abort the session.
+ *   - `failOnWarnings: false` legacy fall-through (`console.warn`):
+ *     single-line `[pi-steering] <path: >?<message>` per surviving
+ *     warning. Errors never reach this surface (they always throw).
+ *   - CLI `pi-steering list` stderr: same shape as the legacy
+ *     fall-through (`[pi-steering] <path: >?<message>`); errors are
+ *     prefixed with the literal `ERROR: ` after the bracket prefix.
+ *
+ * The CLI prints diagnostics inline as the loader yields them, rather
+ * than aggregating into a thrown error — the legacy single-line shape
+ * gives `pi-steering list` users immediate per-issue feedback. The
+ * three formats are deliberately distinct (different surfaces, different
+ * consumers); a future v0.2 may consolidate.
  */
 export interface SteeringDiagnostic {
 	/**

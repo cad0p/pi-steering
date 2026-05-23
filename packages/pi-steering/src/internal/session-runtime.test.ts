@@ -18,8 +18,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
@@ -28,6 +27,7 @@ import {
 	formatSingleLineDiagnostic,
 } from "./session-runtime.ts";
 import type { SteeringDiagnostic } from "../schema.ts";
+import { useIsolatedHome } from "../__test-helpers__.ts";
 
 /** Minimal evaluator host; the strict-mode tests don't drive evaluation. */
 const noopHost = {
@@ -47,15 +47,14 @@ function writeSteeringConfig(dir: string, body: string): void {
 
 describe("buildSessionRuntime: strict-mode contract", () => {
 	let tmpHome: string;
-	let priorHome: string | undefined;
 	let warnings: string[];
 	let origWarn: typeof console.warn;
 	let origInfo: typeof console.info;
+	useIsolatedHome("pi-steering-runtime-", (t) => {
+		tmpHome = t;
+	});
 
 	beforeEach(() => {
-		tmpHome = mkdtempSync(join(tmpdir(), "pi-steering-runtime-"));
-		priorHome = process.env["HOME"];
-		process.env["HOME"] = tmpHome;
 		warnings = [];
 		origWarn = console.warn;
 		origInfo = console.info;
@@ -70,9 +69,6 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 	afterEach(() => {
 		console.warn = origWarn;
 		console.info = origInfo;
-		if (priorHome === undefined) delete process.env["HOME"];
-		else process.env["HOME"] = priorHome;
-		rmSync(tmpHome, { recursive: true, force: true });
 	});
 
 	it("returns evaluator + dispatcher when there are no diagnostics", async () => {
@@ -385,15 +381,14 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 
 describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 	let tmpHome: string;
-	let priorHome: string | undefined;
 	let infos: string[];
 	let origInfo: typeof console.info;
 	let origWarn: typeof console.warn;
+	useIsolatedHome("pi-steering-runtime-", (t) => {
+		tmpHome = t;
+	});
 
 	beforeEach(() => {
-		tmpHome = mkdtempSync(join(tmpdir(), "pi-steering-runtime-"));
-		priorHome = process.env["HOME"];
-		process.env["HOME"] = tmpHome;
 		infos = [];
 		origInfo = console.info;
 		origWarn = console.warn;
@@ -408,9 +403,6 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 	afterEach(() => {
 		console.info = origInfo;
 		console.warn = origWarn;
-		if (priorHome === undefined) delete process.env["HOME"];
-		else process.env["HOME"] = priorHome;
-		rmSync(tmpHome, { recursive: true, force: true });
 	});
 
 	it("emits an `observer dropped` breadcrumb when the observer's only consumer rule is disabled via `disabledRules` (parity with CLI)", async () => {

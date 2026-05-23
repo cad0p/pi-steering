@@ -25,6 +25,7 @@ import {
 	loadSteeringConfig,
 } from "./loader.ts";
 import type { Plugin, SteeringConfig } from "./schema.ts";
+import { useIsolatedHome } from "./__test-helpers__.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -178,18 +179,8 @@ describe("loader: findConfigFile", () => {
 
 describe("loader: loadConfigs", () => {
 	let tmp: string;
-	let priorHome: string | undefined;
-
-	beforeEach(() => {
-		tmp = mkdtempSync(join(tmpdir(), "pi-steering-v2-loadcfgs-"));
-		priorHome = process.env["HOME"];
-		process.env["HOME"] = tmp;
-	});
-
-	afterEach(() => {
-		if (priorHome === undefined) delete process.env["HOME"];
-		else process.env["HOME"] = priorHome;
-		rmSync(tmp, { recursive: true, force: true });
+	useIsolatedHome("pi-steering-v2-loadcfgs-", (t) => {
+		tmp = t;
 	});
 
 	it("returns empty when no layer has a config", async () => {
@@ -865,21 +856,17 @@ describe("loader: buildConfig", () => {
 
 describe("loader: loadSteeringConfig", () => {
 	let tmp: string;
-	let priorHome: string | undefined;
 	let origWarn: typeof console.warn;
+	useIsolatedHome("pi-steering-v2-end2end-", (t) => {
+		tmp = t;
+	});
 
 	beforeEach(() => {
-		tmp = mkdtempSync(join(tmpdir(), "pi-steering-v2-end2end-"));
-		priorHome = process.env["HOME"];
-		process.env["HOME"] = tmp;
 		origWarn = console.warn;
 		console.warn = () => {};
 	});
 	afterEach(() => {
 		console.warn = origWarn;
-		if (priorHome === undefined) delete process.env["HOME"];
-		else process.env["HOME"] = priorHome;
-		rmSync(tmp, { recursive: true, force: true });
 	});
 
 	it("loads + merges a single-layer project", async () => {

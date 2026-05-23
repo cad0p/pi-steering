@@ -28,7 +28,53 @@ import type {
 	ExecResult as PiExecResult,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach } from "node:test";
 import type { EvaluatorHost } from "./evaluator-internals/context.ts";
+
+// ---------------------------------------------------------------------------
+// Isolated $HOME fixture
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-test scratch `$HOME` fixture. Registers `beforeEach` /
+ * `afterEach` that:
+ *
+ *   - `mkdtempSync` a fresh temp dir using `prefix`,
+ *   - save `process.env["HOME"]`, point it at the temp dir,
+ *   - restore `process.env["HOME"]` and recursively remove the temp
+ *     dir on teardown.
+ *
+ * Returns the temp dir path via a getter (`home()`) since
+ * `beforeEach` hasn't run at call time. An optional `onReady`
+ * callback fires inside `beforeEach` for tests that prefer to
+ * stash the path in a describe-scoped `let` for terser reads.
+ *
+ * Used by every test surface that exercises the loader walk-up
+ * (`index.test.ts`, `loader.test.ts`, `internal/session-runtime.test.ts`)
+ * so the per-file scratch-HOME boilerplate stays in one place.
+ */
+export function useIsolatedHome(
+	prefix: string,
+	onReady?: (tmp: string) => void,
+): { home: () => string } {
+	let tmp: string;
+	let priorHome: string | undefined;
+	beforeEach(() => {
+		tmp = mkdtempSync(join(tmpdir(), prefix));
+		priorHome = process.env["HOME"];
+		process.env["HOME"] = tmp;
+		onReady?.(tmp);
+	});
+	afterEach(() => {
+		if (priorHome === undefined) delete process.env["HOME"];
+		else process.env["HOME"] = priorHome;
+		rmSync(tmp, { recursive: true, force: true });
+	});
+	return { home: () => tmp };
+}
 
 // ---------------------------------------------------------------------------
 // Session-entry shape

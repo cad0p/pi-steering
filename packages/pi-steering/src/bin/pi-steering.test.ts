@@ -800,17 +800,11 @@ describe("pi-steering list: diagnostics on stderr", () => {
 	});
 
 	it("surfaces an `observer dropped` info-level breadcrumb on stderr when an observer's writes are unconsumed", async () => {
-		// `buildSessionRuntime` runs `dropUnusedObservers` over the
-		// resolved + user observer streams at session_start and emits a
-		// `[pi-steering] observer 'X' dropped; its writes (...) are not
-		// consumed by any rule` breadcrumb via `console.info`. The CLI
-		// mirrors that pass after `runMergerPipeline` so an author
-		// running `pi-steering list` to debug "why isn't my observer
-		// firing?" sees the same breadcrumb without first booting an
-		// agent session. The breadcrumb travels via the existing
-		// `console.info` interception in `runCliMergeWithInfoCapture`,
-		// landing on stderr so stdout (which carries the structured
-		// listing) stays clean.
+		// CLI mirrors `buildSessionRuntime`'s `dropUnusedObservers` pass
+		// so `pi-steering list` surfaces the same breadcrumb a session
+		// would, via the `console.info` interception in
+		// `runCliMergeWithInfoCapture` (lands on stderr; stdout stays
+		// clean for the structured listing).
 		writeScratchConfig(
 			scratch,
 			`export default {
@@ -847,15 +841,10 @@ describe("pi-steering list: diagnostics on stderr", () => {
 	});
 
 	it("surfaces an `observer dropped` breadcrumb when the consumer rule is disabled via `disabledRules` (parity with runtime)", async () => {
-		// Regression test for the CLI/runtime divergence in
-		// `runCliMergeWithInfoCapture`. The runtime
-		// (`buildSessionRuntime`) filters `merged.rules` against
-		// `disabledRules` BEFORE handing the union to
-		// `dropUnusedObservers`, so an observer whose only consumer is
-		// disabled gets dropped at session_start. The CLI must mirror
-		// that filter: otherwise `pi-steering list` shows the observer
-		// as kept, the production runtime drops it, and the author has
-		// no breadcrumb explaining why their observer doesn't fire.
+		// CLI must filter `merged.rules` against `disabledRules` before
+		// `dropUnusedObservers` so the observer set the runtime would
+		// drop at session_start matches what `pi-steering list`
+		// reports.
 		writeScratchConfig(
 			scratch,
 			`export default {
@@ -893,17 +882,10 @@ describe("pi-steering list: diagnostics on stderr", () => {
 	});
 
 	it("does NOT drop the observer when the consumer rule is enabled (inverse parity)", async () => {
-		// Inverse of the test above. Same fixture WITHOUT the
-		// `disabledRules: ["consumer"]` line: the consumer rule is
-		// alive, so the observer's writes ARE consumed and the
-		// observer is NOT dropped. Pins the inverse direction so a
-		// future refactor that flips the filter logic (e.g.
-		// `disabledRules.has(r.name)` flipped to
-		// `!disabledRules.has(r.name)`) is caught here — the
-		// disabledRules-true direction would still pass (observer
-		// drops because it's now over `disabledRules` itself, not
-		// its complement) but this inverse case would surface the
-		// regression.
+		// Pins the inverse direction so a refactor that flips the
+		// filter (`disabledRules.has(r.name)` ↔ `!disabledRules.has`)
+		// surfaces here — the disabled-true case alone would not catch
+		// it.
 		writeScratchConfig(
 			scratch,
 			`export default {

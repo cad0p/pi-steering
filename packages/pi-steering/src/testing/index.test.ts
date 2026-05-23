@@ -600,16 +600,10 @@ describe("loadHarness", () => {
 	});
 
 	it("surfaces BOTH a tracker-name-collision AND a malformed user-config rule name in one harness load", () => {
-		// Combined-error case: a config with both a merge-side error
-		// (tracker-name-collision) AND a user-config-side error
-		// (malformed rule name) should produce both diagnostics in a
-		// single load. Before this change, `runMergerPipeline`'s short-circuit
-		// gated `validateUserConfigNames` behind the merge-error
-		// branch — the user fixed the tracker, re-loaded, and only
-		// THEN saw the malformed name. After this change, user-config name
-		// validation runs unconditionally (it doesn't depend on
-		// `resolvePlugins` state), so both classes of error surface
-		// together and the user fixes them in one edit.
+		// Combined error: tracker-name-collision (merge-side) plus a
+		// malformed user-config rule name. Pins that user-config name
+		// validation runs unconditionally so both surface in one
+		// harness load, not on consecutive runs.
 		const t = {
 			initial: "?" as const,
 			unknown: "unknown" as const,

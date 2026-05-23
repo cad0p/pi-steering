@@ -684,25 +684,9 @@ describe("S3: validateUserConfigNames", () => {
 	});
 
 	it("does NOT flag default rule names as `(user config)` — validator iterates over input layers, not the post-merge config", () => {
-		// Regression test: before this change, the validator accepted
-		// `merged: SteeringConfig` and walked `merged.rules` — which
-		// after `buildConfig` includes `DEFAULT_RULES` injected when
-		// `disableDefaults` is false. That mis-attributed package-
-		// controlled default rule names (`no-force-push`,
-		// `no-hard-reset`, etc.) to a `(user config)` source. The fix: validator now operates on raw input layers,
-		// which never contain default rules — those are package-
-		// controlled and live in `DEFAULT_RULES`, only spliced in by
-		// `buildConfig` after this validator runs in `runMergerPipeline`.
-		//
-		// We verify by passing an EMPTY layer array and confirming the
-		// validator returns zero diagnostics. If the validator were
-		// somehow walking a default-injected merged config, default
-		// rule names would still pass NAME_REGEX (they're well-formed),
-		// so this assertion uses input-shape evidence instead: the
-		// validator's single argument is `layers`, not a merged
-		// `SteeringConfig`, and an empty `layers` array yields zero
-		// diagnostics regardless of what defaults `buildConfig` would
-		// inject downstream.
+		// Verify by passing an EMPTY layer array. The validator's single
+		// argument is `layers` (raw, never default-injected), so the
+		// shape itself proves default rules cannot leak in.
 		const out = validateUserConfigNames([]);
 		assert.equal(out.length, 0);
 	});

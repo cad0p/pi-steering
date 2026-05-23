@@ -1015,16 +1015,10 @@ describe("loader: loadSteeringConfig", () => {
 	});
 
 	it("surfaces BOTH a tracker-name-collision AND a malformed user-config rule name in one load", async () => {
-		// Combined-error case: a config with both a merge-side error
-		// (tracker-name-collision) AND a user-config-side error
-		// (malformed rule name) should produce both diagnostics in a
-		// single `loadSteeringConfig` call. Before this change,
-		// `runMergerPipeline`'s short-circuit gated
-		// `validateUserConfigNames` behind the merge-error branch — the
-		// embedder fixed the tracker, re-loaded, and only THEN saw the
-		// malformed name. After this change, user-config name validation runs
-		// unconditionally, so embedders see both classes of error in
-		// one read.
+		// Combined error: tracker-name-collision (merge-side) plus a
+		// malformed user-config rule name. Pins that user-config name
+		// validation runs unconditionally so embedders see both in one
+		// `loadSteeringConfig` call.
 		const cwd = join(tmp, "p");
 		mkdirSync(cwd, { recursive: true });
 		writeConfig(

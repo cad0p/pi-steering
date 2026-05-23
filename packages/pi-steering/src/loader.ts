@@ -463,37 +463,18 @@ function mergeStringUnion(
 }
 
 /**
- * Merge a boolean field across layers using inner-wins precedence.
- * Inner wins. If no layer specifies the field AND the caller
- * supplied a `defaults` config, that layer's value is used (since
- * `defaults` is appended at the END of the inner-first layer list).
- * Otherwise returns `undefined` — buildConfig callers typically
- * coerce the final undefined according to field-specific semantics
- * (e.g. evaluator-side `defaultNoOverride ?? true` fail-closed,
- * runtime-side `failOnWarnings !== false` strict-default).
+ * Inner-wins boolean merge over walked-up layers — walks `layers`
+ * left-to-right (inner-first), returns the first explicit
+ * boolean, or `undefined` if no layer sets the field.
  *
- * NOTE we intentionally do NOT bake field-specific defaults into the
- * merged config here. The merged config reflects what the user
- * declared; consumers apply the appropriate fallback at use time.
- * Keeping the two concerns separate lets tests assert "layers were
- * merged correctly" without also asserting "the field-specific
- * default was applied".
+ * Used by `buildConfig` to merge `defaultNoOverride`,
+ * `disableDefaults`, and `failOnWarnings`, and by
+ * `buildSessionRuntime` to peek at `disableDefaults` before
+ * deciding whether to inject `DEFAULT_PLUGINS` / `DEFAULT_RULES`.
  *
- * Exported across the loader/internal boundary so the internal
- * `buildSessionRuntime` can peek at one boolean field across raw
- * layers without paying for a full `buildConfig` merge —
- * `buildSessionRuntime` is currently the only caller and uses this
- * to read `disableDefaults` before deciding whether to inject
- * `DEFAULT_PLUGINS` / `DEFAULT_RULES`. NOT part of the public
- * package surface (not re-exported from `index.ts`); external
- * callers that need a similar field-level peek should call
- * `loadSteeringConfig` (which runs the full merge+resolve pipeline
- * and returns aggregated diagnostics) or maintain their own pre-
- * merge inspection. The testing harness
- * `loadHarness` exposes the same `disableDefaults` decision via the
- * explicit `LoadHarnessOptions.includeDefaults` boolean instead, so
- * tests can choose harness contents directly without embedding the
- * flag in the config under test.
+ * Exported across the loader/internal boundary for that runtime
+ * peek; not part of the public package surface (not re-exported
+ * from `index.ts`).
  */
 export function mergeBool(
 	layers: readonly SteeringConfig[],
@@ -637,29 +618,16 @@ export function buildConfig(
  * Production-strictness divergence: `loadSteeringConfig` does NOT
  * apply the strict-mode `failOnWarnings` throw policy that
  * `buildSessionRuntime` does. The function never throws on
- * diagnostics — every diagnostic is returned in the array,
- * regardless of `merged.failOnWarnings` or `type`. Embedders decide
- * both the throw policy and the warning escalation policy
- * themselves. Production-faithful pre-flight semantics:
+ * diagnostics; embedders apply their own throw + warning policy.
+ * See `failOnWarnings` on {@link SteeringConfig} for production-
+ * faithful pre-flight semantics. Same shape as the divergence note
+ * on `Harness.diagnostics`.
  *
- *     const wouldRefuse = diagnostics.some(
- *       (d) =>
- *         d.type === "error" ||
- *         (config.failOnWarnings !== false && d.type === "warning"),
- *     );
+ * The runtime (`buildSessionRuntime`) does not use this wrapper
+ * because it needs the raw layer list for the disable-defaults peek.
  *
- * Same shape as the divergence note on `Harness.diagnostics`.
- *
- * The runtime (`buildSessionRuntime`) does NOT use this wrapper
- * directly because it needs the raw layer list for the
- * disable-defaults peek. External callers building their own
- * extensions or CLIs that want the full effective config + every
- * diagnostic in one call should reach for this.
- *
- * @throws when Node is older than {@link MIN_NODE_MAJOR} (propagated
- * from `loadConfigs` via the synchronous `assertNodeVersion`
- * pre-flight check). This is the only throw path; no diagnostic
- * class triggers a throw.
+ * @throws when Node < {@link MIN_NODE_MAJOR} (propagated from
+ * `loadConfigs`).
  */
 export async function loadSteeringConfig(
 	cwd: string,

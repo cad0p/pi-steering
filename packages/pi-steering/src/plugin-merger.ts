@@ -53,20 +53,12 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the message body for a `tracker-name-collision` diagnostic.
- *
- * Two surfaces detect this collision independently:
- *   - `buildConfig` (loader.ts) walks `plugins[*].trackers` after
- *     applying `disabledPlugins`, so the diagnostic is available even
- *     for callers that never reach `resolvePlugins`.
- *   - `resolvePlugins` (this file) detects the collision again while
- *     composing the runtime tracker map.
- *
- * `runMergerPipeline`'s short-circuit means a session sees only one of
- * the two emissions, but both detectors must produce the SAME message
- * text — otherwise a maintainer updating one copy silently drifts the
- * other. Centralizing the formatter here keeps the two surfaces in
- * lock-step.
+ * Single source of truth for the `tracker-name-collision` diagnostic
+ * message text. Both `loader.ts:detectTrackerNameCollisions` and
+ * `plugin-merger.ts:resolvePlugins` call this so a wording update
+ * lands in one place; `runMergerPipeline`'s short-circuit means a
+ * given session sees only one of the two emissions, but the strings
+ * stay in lock-step.
  */
 export function formatTrackerNameCollisionMessage(
 	prior: string,
@@ -497,24 +489,12 @@ export function resolvePlugins(
 			// pinned by the `_RESERVED_PREDICATE_KEYS_COVERS_TYPE` assertion
 			// in `evaluator-internals/predicates.ts`.
 			if (isReservedPredicateKey(key)) {
-				// Key-specific suggestion: `not` collides with the operator
-				// field, `onUnknown` with the modifier surface.
-				//
-				// Convention for future {@link PredicateModifiers} /
-				// {@link OperatorField} additions:
-				//   - For OPERATOR collisions (a new logical operator like
-				//     `"or"` / `"and"`): prefer alternative verb forms that
-				//     avoid logical-operator vocabulary (`"either"`,
-				//     `"matchAny"` for `or`; `"all"`, `"matchAll"` for `and`).
-				//   - For MODIFIER collisions (a new modifier like a v0.2
-				//     `priority?:`): prefer names that include the modifier's
-				//     domain (`"rulePriority"`, `"orderingPriority"`) so the
-				//     suggestion clarifies which surface the registration
-				//     collided with.
-				// `Record<ReservedPredicateKey, string>` is type-exhaustive
-				// — every reserved key has a suggestion, so a future modifier
-				// addition forces an entry rather than silently flowing
-				// through a generic fallback.
+				// Per-key suggestion list for the diagnostic message.
+				// `Record<ReservedPredicateKey, string>` is type-exhaustive,
+				// so adding a new modifier to `PredicateModifiers` (which
+				// auto-extends `RESERVED_PREDICATE_KEYS`) forces a new entry
+				// here rather than silently flowing through a generic
+				// fallback.
 				const suggestions: Record<ReservedPredicateKey, string> = {
 					not: '"isNot", "negate"',
 					onUnknown: '"unknownPolicy", "walkerUnknownPolicy"',

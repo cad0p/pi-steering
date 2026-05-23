@@ -43,46 +43,26 @@ import type { SteeringConfig, SteeringDiagnostic } from "../schema.ts";
 import { dropUnusedObservers } from "./drop-unused-observers.ts";
 
 /**
- * Run `buildConfig` over the raw layer list, validate user-config
- * rule + observer names, then run `resolvePlugins` — short-circuiting
- * before `resolvePlugins` if any merge-side diagnostic is
- * error-class. Both `buildConfig` (`detectTrackerNameCollisions`)
- * and `resolvePlugins` independently flag tracker-name collisions;
- * running the merger after the loader has already flagged one would
- * emit the same diagnostic twice. The short-circuit centralizes that
- * gate so every surface that runs the full merge+resolve pipeline
- * (`buildSessionRuntime`, `loadHarness`, the `pi-steering list` CLI)
- * emits each error-class diagnostic exactly once.
+ * Run `buildConfig` then `resolvePlugins` over the raw layer list,
+ * short-circuiting before `resolvePlugins` if any merge-side
+ * diagnostic is error-class. The short-circuit avoids double-emitting
+ * `tracker-name-collision`, which both `buildConfig` and
+ * `resolvePlugins` independently detect.
  *
- * User-config rule and observer name validation runs
- * unconditionally between `buildConfig` and the merge short-circuit
- * — so every surface gets the same `invalid-name` diagnostic stream
- * including the case where a merge-side error fires alongside a
- * malformed user-config name. The validation reads each input
- * layer's `rules[*].name` and `observers[*].name` from the raw
- * `layers` array — NOT the post-merge `merged` config, which can
- * include `DEFAULT_RULES` injected by `buildConfig` (validating
- * those would mis-attribute package-controlled names to a `(user
- * config)` source). It does not depend on any `resolvePlugins`
- * state. No surface routes user-config malformed names through the
- * plain-Error throw inside `buildEvaluator` /
- * `buildObserverDispatcher`. Plugin-shipped names are still
- * validated inside `resolvePlugins` (gated behind the short-
- * circuit, since `resolvePlugins` is the surface that consumes
- * them).
+ * `validateUserConfigNames` runs unconditionally — between
+ * `buildConfig` and the short-circuit — so a config with both a
+ * merge-side error AND a malformed user-config name surfaces both in
+ * one pass. It reads names off the raw input `layers` (NOT the
+ * post-merge `merged` config, which can carry `DEFAULT_RULES` and
+ * would mis-attribute package-controlled names to `(user config)`).
  *
- * Returns the merged `SteeringConfig`, the `ResolvedPluginState` (or
- * `null` when the short-circuit fired), and the aggregated
- * diagnostics array (merge-side, then user-config name validation,
- * then resolve-side, in order). On short-circuit `diagnostics`
- * contains the merge-side stream PLUS the user-config name
- * validation stream — resolve-side is skipped together with
- * `resolvePlugins`.
- *
- * Loader-side diagnostics from `loadConfigs` are NOT included here —
+ * Loader-side diagnostics from `loadConfigs` are NOT included here;
  * callers that walked up from a cwd (`buildSessionRuntime`, the CLI)
- * thread those in separately. `loadHarness` operates on a single
- * in-memory layer and has no loader stream to thread.
+ * thread those in separately.
+ *
+ * Returns the merged config, the `ResolvedPluginState` (or `null` on
+ * short-circuit), and the aggregated diagnostics in declaration order
+ * (merge-side, user-config name validation, resolve-side).
  */
 export function runMergerPipeline(
 	layers: readonly SteeringConfig[],
@@ -97,20 +77,6 @@ export function runMergerPipeline(
 		layers,
 		defaults,
 	);
-	// User-config name validation runs unconditionally — BEFORE the
-	// merge short-circuit — so a config with a merge-side error AND a
-	// malformed user-config name surfaces both diagnostics in one
-	// run. The pass reads each input layer's `rules[*].name` and
-	// `observers[*].name` (NOT the post-merge `merged` config, which
-	// can include `DEFAULT_RULES` injected by `buildConfig` —
-	// validating those would mis-attribute package-controlled names
-	// to a `(user config)` source). Validation does not depend on any
-	// `resolvePlugins` state, so there's no risk of cascading false-
-	// positives from a partially-merged config. Resolve-side
-	// (`resolvePlugins`) IS still gated behind the short-circuit
-	// because running it over a config with e.g. a tracker-name
-	// collision could surface confusing diagnostics from the
-	// inconsistent state.
 	const userConfigNameDiagnostics = validateUserConfigNames(layers);
 	if (mergeDiagnostics.some((d) => d.type === "error")) {
 		return {
@@ -286,16 +252,10 @@ export async function buildSessionRuntime(
 		}
 	}
 
-	// At this point `resolved` cannot be null: the helper only returns
-	// `null` when merge-side diagnostics include an error-class entry,
-	// and the strict-mode throw above already fired in that case.
-	if (resolved === null) {
-		throw new Error(
-			"[pi-steering] internal: runMergerPipeline " +
-				"returned a null resolve without surfacing an error-class " +
-				"diagnostic",
-		);
-	}
+	// `resolved` is non-null at this point: `runMergerPipeline` returns
+	// `resolved: null` only when merge-side diagnostics include an
+	// error-class entry, and the strict-mode throw above fires on any
+	// error-class diagnostic.
 
 	// Apply `disabledRules` to the merged rule set. Plugin-shipped rules
 	// are filtered inside `resolvePlugins`; user / default rules go
@@ -325,8 +285,8 @@ export async function buildSessionRuntime(
 	// isn't my observer firing?" has a breadcrumb to follow without
 	// it bubbling up as a diagnostic the user has to action.
 	const userObservers = filteredConfig.observers ?? [];
-	const allRules = [...(filteredConfig.rules ?? []), ...resolved.rules];
-	const pluginDrop = dropUnusedObservers(resolved.observers, allRules);
+	const allRules = [...(filteredConfig.rules ?? []), ...resolved!.rules];
+	const pluginDrop = dropUnusedObservers(resolved!.observers, allRules);
 	const userDrop = dropUnusedObservers(userObservers, allRules);
 	for (const d of [...pluginDrop.dropped, ...userDrop.dropped]) {
 		console.info(
@@ -334,7 +294,10 @@ export async function buildSessionRuntime(
 				`(${d.writes.join(", ")}) are not consumed by any rule`,
 		);
 	}
-	const filteredResolved = { ...resolved, observers: [...pluginDrop.kept] };
+	const filteredResolved = {
+		...resolved!,
+		observers: [...pluginDrop.kept],
+	};
 
 	const evaluator = buildEvaluator(filteredConfig, filteredResolved, host);
 	const dispatcher = buildObserverDispatcher(

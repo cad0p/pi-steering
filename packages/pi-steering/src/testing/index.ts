@@ -179,14 +179,10 @@ export interface Harness {
 	 * `resolved.diagnostics` carries the FULL diagnostic list (merge-
 	 * side + user-config-name + resolve-side) to mirror
 	 * `harness.diagnostics`. In the regular path, `resolved.diagnostics`
-	 * carries only the resolve-side stream (predicate-collision,
-	 * observer-collision, rule-collision, extension-orphan, reserved-
-	 * tracker-name, reserved-predicate-key, plugin-shipped
-	 * invalid-name). `tracker-name-collision` is gated upstream by
-	 * `runMergerPipeline`'s short-circuit; it only appears in
-	 * `resolved.diagnostics` via the no-op mirror, never via the
-	 * regular path. Consumers should prefer `harness.diagnostics` for
-	 * the canonical full list.
+	 * carries only the resolve-side stream — see
+	 * {@link SteeringDiagnosticKind} for the per-kind
+	 * loader-vs-merger split. Consumers should prefer
+	 * `harness.diagnostics` for the canonical full list.
 	 */
 	readonly resolved: ResolvedPluginState;
 	/**

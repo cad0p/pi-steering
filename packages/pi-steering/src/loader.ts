@@ -480,9 +480,6 @@ export function mergeBool(
 	layers: readonly SteeringConfig[],
 	key: "defaultNoOverride" | "disableDefaults" | "failOnWarnings",
 ): boolean | undefined {
-	// Layers are passed inner-first. Walk left-to-right and keep the
-	// FIRST layer that sets the field — that's the innermost explicit
-	// value.
 	for (const layer of layers) {
 		const v = layer[key];
 		if (typeof v === "boolean") return v;

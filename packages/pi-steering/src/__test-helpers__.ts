@@ -47,19 +47,18 @@ import type { EvaluatorHost } from "./evaluator-internals/context.ts";
  *   - restore `process.env["HOME"]` and recursively remove the temp
  *     dir on teardown.
  *
- * Returns the temp dir path via a getter (`home()`) since
- * `beforeEach` hasn't run at call time. An optional `onReady`
- * callback fires inside `beforeEach` for tests that prefer to
- * stash the path in a describe-scoped `let` for terser reads.
- *
  * Used by every test surface that exercises the loader walk-up
  * (`index.test.ts`, `loader.test.ts`, `internal/session-runtime.test.ts`)
  * so the per-file scratch-HOME boilerplate stays in one place.
+ *
+ * The temp dir path is exposed via the optional `onReady` callback,
+ * fired inside `beforeEach`; tests typically stash it in a
+ * describe-scoped `let` for terser reads.
  */
 export function useIsolatedHome(
 	prefix: string,
 	onReady?: (tmp: string) => void,
-): { home: () => string } {
+): void {
 	let tmp: string;
 	let priorHome: string | undefined;
 	beforeEach(() => {
@@ -73,7 +72,6 @@ export function useIsolatedHome(
 		else process.env["HOME"] = priorHome;
 		rmSync(tmp, { recursive: true, force: true });
 	});
-	return { home: () => tmp };
 }
 
 // ---------------------------------------------------------------------------

@@ -84,7 +84,7 @@ import { runMergerPipeline } from "../internal/session-runtime.ts";
 import {
 	type ResolvedPluginState,
 } from "../plugin-merger.ts";
-import { dropUnusedObservers } from "../internal/drop-unused-observers.ts";
+import { finalizePluginState } from "../internal/finalize-plugin-state.ts";
 
 // ---------------------------------------------------------------------------
 // Capture tracking
@@ -305,23 +305,19 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 	// Mirror session-runtime's unused-observer drop so loadHarness
 	// tests produce the same verdicts as production for rules that
 	// rely on observer writes.
-	const userObservers = filteredConfig.observers ?? [];
-	const allRules = [...(filteredConfig.rules ?? []), ...resolved.rules];
-	const pluginDrop = dropUnusedObservers(resolved.observers, allRules);
-	const userDrop = dropUnusedObservers(userObservers, allRules);
-	for (const d of [...pluginDrop.dropped, ...userDrop.dropped]) {
-		console.info(
-			`[pi-steering] observer '${d.name}' dropped; its writes ` +
-				`(${d.writes.join(", ")}) are not consumed by any rule`,
-		);
-	}
-	const filteredResolved = { ...resolved, observers: [...pluginDrop.kept] };
+	const { pluginKept, userKept } = finalizePluginState(
+		filteredConfig.rules ?? [],
+		resolved.rules,
+		filteredConfig.observers ?? [],
+		resolved.observers,
+	);
+	const filteredResolved = { ...resolved, observers: [...pluginKept] };
 
 	const host = options.host ?? defaultHarnessHost();
 	const evaluator = buildEvaluator(filteredConfig, filteredResolved, host);
 	const dispatcher = buildObserverDispatcher(
 		filteredResolved,
-		userDrop.kept,
+		userKept,
 		host,
 	);
 

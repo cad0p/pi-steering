@@ -40,7 +40,7 @@ import {
 	type ResolvedPluginState,
 } from "../plugin-merger.ts";
 import type { SteeringConfig, SteeringDiagnostic } from "../schema.ts";
-import { dropUnusedObservers } from "./drop-unused-observers.ts";
+import { finalizePluginState } from "./finalize-plugin-state.ts";
 
 /**
  * Run `buildConfig` then `resolvePlugins` over the raw layer list,
@@ -269,40 +269,25 @@ export async function buildSessionRuntime(
 		else delete filteredConfig.rules;
 	}
 
-	// Drop observers whose declared writes are unconsumed. Applied
-	// across plugin-merged observers AND user-authored observers using
-	// the union of all rule `happened` references. Dropped observers
-	// stop firing on tool_result AND stop contributing speculative
-	// entries to the evaluator (single source of truth via this
-	// orchestration-layer filter).
-	//
-	// `console.info` is the only `console.*` call this function makes
-	// in steady state. It survives the strict-mode refactor because
-	// dropping unused observers is a by-design behavior, not a
-	// configuration issue: no rule references the observer's writes,
-	// so silently skipping them is the only sensible outcome. The
-	// info-level message exists so a plugin author debugging "why
-	// isn't my observer firing?" has a breadcrumb to follow without
-	// it bubbling up as a diagnostic the user has to action.
-	const userObservers = filteredConfig.observers ?? [];
-	const allRules = [...(filteredConfig.rules ?? []), ...resolved!.rules];
-	const pluginDrop = dropUnusedObservers(resolved!.observers, allRules);
-	const userDrop = dropUnusedObservers(userObservers, allRules);
-	for (const d of [...pluginDrop.dropped, ...userDrop.dropped]) {
-		console.info(
-			`[pi-steering] observer '${d.name}' dropped; its writes ` +
-				`(${d.writes.join(", ")}) are not consumed by any rule`,
-		);
-	}
+	// Drop observers whose declared writes are unconsumed across
+	// plugin-merged + user-authored streams. Single source of truth
+	// for the orchestration-layer filter; `finalizePluginState` owns
+	// the breadcrumb format.
+	const { pluginKept, userKept } = finalizePluginState(
+		filteredConfig.rules ?? [],
+		resolved!.rules,
+		filteredConfig.observers ?? [],
+		resolved!.observers,
+	);
 	const filteredResolved = {
 		...resolved!,
-		observers: [...pluginDrop.kept],
+		observers: [...pluginKept],
 	};
 
 	const evaluator = buildEvaluator(filteredConfig, filteredResolved, host);
 	const dispatcher = buildObserverDispatcher(
 		filteredResolved,
-		userDrop.kept,
+		userKept,
 		host,
 	);
 	return { evaluator, dispatcher };

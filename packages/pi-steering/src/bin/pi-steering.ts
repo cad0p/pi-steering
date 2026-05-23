@@ -22,7 +22,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { FromJSONError, fromJSON } from "../compat.ts";
 import { EVALUATOR_BUILTIN_TRACKERS } from "../evaluator.ts";
-import { dropUnusedObservers } from "../internal/drop-unused-observers.ts";
+import { finalizePluginState } from "../internal/finalize-plugin-state.ts";
 import {
 	formatSingleLineDiagnostic,
 	runMergerPipeline,
@@ -345,26 +345,21 @@ function runCliMergeWithInfoCapture(
 			const userObservers = merged.observers ?? [];
 			// Mirror the runtime's `disabledRules` filter (see
 			// `buildSessionRuntime` in `internal/session-runtime.ts`)
-			// before passing to `dropUnusedObservers`. Without this
+			// before invoking `finalizePluginState`. Without this
 			// filter, observers whose only consumer is a disabled rule
 			// would appear consumed in the CLI but get dropped by the
-			// runtime — a divergence between `pi-steering list` and what
-			// production sees. `dropUnusedObservers`'s contract
-			// (`internal/drop-unused-observers.ts`) requires callers to
-			// pre-filter disabled rules.
+			// runtime — a divergence between `pi-steering list` and
+			// what production sees.
 			const disabledRules = new Set(merged.disabledRules ?? []);
 			const userRules = (merged.rules ?? []).filter(
 				(r) => !disabledRules.has(r.name),
 			);
-			const allRules = [...userRules, ...resolved.rules];
-			const pluginDrop = dropUnusedObservers(resolved.observers, allRules);
-			const userDrop = dropUnusedObservers(userObservers, allRules);
-			for (const d of [...pluginDrop.dropped, ...userDrop.dropped]) {
-				console.info(
-					`[pi-steering] observer '${d.name}' dropped; its writes ` +
-						`(${d.writes.join(", ")}) are not consumed by any rule`,
-				);
-			}
+			finalizePluginState(
+				userRules,
+				resolved.rules,
+				userObservers,
+				resolved.observers,
+			);
 		}
 		return { config: merged, diagnostics };
 	} finally {

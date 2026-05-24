@@ -145,7 +145,7 @@ describe("git plugin: registration + resolution", () => {
 		// declaration, not implicit knowledge of built-in trackers.
 		const resolved = resolvePlugins([gitPlugin], {});
 		assert.ok(
-			resolved.warnings.some((w) => w.kind === "extension-orphan"),
+			resolved.diagnostics.some((w) => w.kind === "extension-orphan"),
 			"expected orphan warning when cwd isn't declared as built-in",
 		);
 		assert.ok(

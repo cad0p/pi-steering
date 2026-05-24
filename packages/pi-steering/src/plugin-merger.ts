@@ -19,7 +19,9 @@
  *     Extensions targeting an unregistered tracker are warned about and
  *     ignored.
  *   - config.disabledRules / config.disabledPlugins — filter rules and
- *     whole plugins by name. `config.disableDefaults` is the caller's
+ *     whole plugins by name. Disabled entries are surfaced via
+ *     `console.info` breadcrumbs (NOT diagnostics, since disabling is
+ *     by-design behavior). `config.disableDefaults` is the caller's
  *     problem:
  *     the caller chooses whether to include DEFAULT_PLUGINS in the input
  *     list (handled upstream by the extension runtime).
@@ -39,11 +41,37 @@ import type {
 	ReservedPredicateKey,
 	Rule,
 	SteeringConfig,
+	SteeringDiagnostic,
 } from "./schema.ts";
 import {
 	isReservedPredicateKey,
 	RESERVED_PREDICATE_KEYS,
 } from "./evaluator-internals/predicates.ts";
+
+// ---------------------------------------------------------------------------
+// Shared diagnostic message formatters
+// ---------------------------------------------------------------------------
+
+/**
+ * Single source of truth for the `tracker-name-collision` diagnostic
+ * message text. Both `loader.ts:detectTrackerNameCollisions` and
+ * `plugin-merger.ts:resolvePlugins` call this so a wording update
+ * lands in one place; `runMergerPipeline`'s short-circuit means a
+ * given session sees only one of the two emissions, but the strings
+ * stay in lock-step.
+ */
+export function formatTrackerNameCollisionMessage(
+	prior: string,
+	current: string,
+	trackerName: string,
+): string {
+	return (
+		`tracker name collision: both plugins "${prior}" and ` +
+		`"${current}" register a tracker called "${trackerName}". ` +
+		"Two plugins claiming the same state dimension is always a " +
+		"bug — rename one tracker or disable one plugin."
+	);
+}
 
 // ---------------------------------------------------------------------------
 // Name validation (S3)
@@ -74,12 +102,18 @@ const NAME_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
  *     name: "phony] ALL CLEAR [real"
  *     → reason: "[steering:phony] ALL CLEAR [real@user] ..."
  *
- * Load-time validation catches this before the first tool_call, with
- * a message naming the offending field + kind. Throws a plain Error
- * because this is a config-author mistake that must be fixed in
- * source — no runtime recovery path makes sense.
+ * Returns an error-class `SteeringDiagnostic` with `kind:
+ * "invalid-name"` when the name is malformed; `undefined` when the
+ * name passes. Callers in the diagnostic-aggregation flow
+ * (`resolvePlugins`) push the returned diagnostic onto their local
+ * stream so the strict-mode runtime sees it alongside other
+ * error-class diagnostics. Direct callers outside the aggregation
+ * flow (`buildEvaluator`, `buildObserverDispatcher`) translate the
+ * returned diagnostic into a thrown `Error` at build time so the
+ * malformed name short-circuits the user-config wiring before the
+ * first tool_call.
  *
- * The validation kind is plumbed through to the error message so the
+ * The validation kind is plumbed through to the message so the
  * author knows exactly which of their objects is at fault (`rule
  * name`, `plugin name`, `observer name`).
  */
@@ -87,43 +121,63 @@ export function validateName(
 	kind: "rule" | "plugin" | "observer",
 	value: unknown,
 	context?: string,
-): asserts value is string {
+): SteeringDiagnostic | undefined {
 	if (typeof value !== "string" || !NAME_REGEX.test(value)) {
 		const shown =
 			typeof value === "string" ? JSON.stringify(value) : String(value);
 		const suffix = context !== undefined ? ` (${context})` : "";
-		throw new Error(
-			`pi-steering: ${kind} name ${shown}${suffix} contains disallowed ` +
+		return {
+			type: "error",
+			kind: "invalid-name",
+			message:
+				`${kind} name ${shown}${suffix} contains disallowed ` +
 				`characters. Allowed: letters, digits, underscores, dashes; ` +
 				`must start with a letter or digit.`,
-		);
+		};
 	}
+	return undefined;
 }
 
 /**
- * Soft warning surfaced during plugin resolution. The runtime logs these
- * at startup; tests consume the array directly.
+ * Validate the `name` field on every user-config rule and observer.
+ * Plugin-shipped rule / observer / plugin names are validated inside
+ * {@link resolvePlugins}; user-config rules and observers reach
+ * {@link validateName} only at session_start (via
+ * `buildEvaluator` / `buildObserverDispatcher`'s build-time throw).
+ *
+ * The CLI's `pi-steering list` pre-flight surface uses this helper
+ * to flag the same class of malformed names BEFORE the user hits a
+ * thrown error from the bridge factory — otherwise a config with a
+ * malformed user-config rule name renders as a valid listing on
+ * stdout, then production refuses to start on the same config.
+ *
+ * Operates on the raw user-authored `layers` array — NOT on the
+ * post-merge `SteeringConfig`. The merged config can include
+ * default rules injected by `buildConfig` (when `disableDefaults`
+ * is false); validating those would attribute package-controlled
+ * names to a `(user config)` source, which is a misnomer. Default
+ * rule names ship in `DEFAULT_RULES` and are package-controlled —
+ * they don't pass through this validator.
+ *
+ * Note: `layer.observers` covers user-authored observers only.
+ * Plugin-shipped observers live under `layer.plugins[].observers`
+ * and are validated by {@link resolvePlugins}.
  */
-export interface PluginResolveWarning {
-	/**
-	 * Discriminator for what kind of collision / misconfiguration fired.
-	 *
-	 *   - `"predicate-collision"`  — two plugins register `when.<same-key>`.
-	 *   - `"observer-collision"`   — two observers share the same name.
-	 *   - `"rule-collision"`       — two plugin-shipped rules share a name.
-	 *   - `"plugin-disabled"`      — a plugin was skipped via `disabledPlugins`.
-	 *   - `"extension-orphan"`     — trackerExtension targets a tracker no
-	 *                                plugin registers.
-	 *   - `"rule-disabled"`        — a rule was removed via `config.disabledRules`.
-	 */
-	kind:
-		| "predicate-collision"
-		| "observer-collision"
-		| "rule-collision"
-		| "plugin-disabled"
-		| "extension-orphan"
-		| "rule-disabled";
-	message: string;
+export function validateUserConfigNames(
+	layers: readonly SteeringConfig[],
+): SteeringDiagnostic[] {
+	const diagnostics: SteeringDiagnostic[] = [];
+	for (const layer of layers) {
+		for (const rule of layer.rules ?? []) {
+			const d = validateName("rule", rule.name, "user config");
+			if (d !== undefined) diagnostics.push(d);
+		}
+		for (const observer of layer.observers ?? []) {
+			const d = validateName("observer", observer.name, "user config");
+			if (d !== undefined) diagnostics.push(d);
+		}
+	}
+	return diagnostics;
 }
 
 /**
@@ -175,14 +229,19 @@ export interface ResolvedPluginState {
 	 */
 	rulePluginOwners: Record<string, string>;
 
-	/** Non-fatal issues observed during merge. */
-	warnings: PluginResolveWarning[];
+	/**
+	 * Diagnostics observed while resolving plugins. Includes both
+	 * non-fatal collisions (warning class) and reserved-name violations
+	 * that the runtime escalates to a thrown error regardless of
+	 * strict-mode settings.
+	 */
+	diagnostics: SteeringDiagnostic[];
 }
 
 /**
- * Treat either a single Modifier or an array of them as an array, without
- * allocating when the input is already an array. Returns a fresh array
- * so callers can mutate safely.
+ * Treat either a single Modifier or an array of them as a fresh
+ * array. Always allocates so callers can mutate safely without
+ * affecting the input plugin's modifier map.
  */
 function toModifierList<T>(
 	value: Modifier<T> | readonly Modifier<T>[],
@@ -243,10 +302,20 @@ function composeTracker(
  *
  * Collision semantics per the ADR:
  *   - predicate / observer / plugin-shipped-rule name collision — first
- *     wins, WARN logged.
- *   - tracker name collision — THROWS.
- *   - trackerExtension targeting an unregistered tracker — WARN,
- *     extension ignored.
+ *     wins, recorded as a warning-class diagnostic.
+ *   - tracker name collision — recorded as an error-class diagnostic.
+ *     The loader-side `buildConfig` (`detectTrackerNameCollisions`)
+ *     records this same kind for callers going through the standard
+ *     pipeline; this in-merger check covers direct `resolvePlugins`
+ *     callers (testing, external embed) that bypass `buildConfig`.
+ *     Direct callers should check `result.diagnostics.some(d => d.type === "error")`
+ *     before using the resolved state — same contract as `loadHarness`.
+ *   - reserved tracker name (`events`) and reserved predicate keys
+ *     (operator/modifier surface) — recorded as error-class
+ *     diagnostics; the runtime escalates to a thrown error regardless
+ *     of strict-mode settings.
+ *   - trackerExtension targeting an unregistered tracker — recorded
+ *     as a warning-class diagnostic, extension ignored.
  *
  * `knownBuiltinTrackers` lists tracker names the caller guarantees are
  * injected at a later wiring stage (e.g. the evaluator's built-in
@@ -261,38 +330,58 @@ export function resolvePlugins(
 	config: SteeringConfig,
 	knownBuiltinTrackers: readonly string[] = [],
 ): ResolvedPluginState {
-	const warnings: PluginResolveWarning[] = [];
+	const diagnostics: SteeringDiagnostic[] = [];
 	const disabledPlugins = new Set(config.disabledPlugins ?? []);
 	const disabledRules = new Set(config.disabledRules ?? []);
 
-	// S3: validate plugin names (and, below, their rule + observer
-	// names) at load time so an evil / careless plugin can't plant a
-	// name like "phony] ALL CLEAR [real" that forges the
+	// S3: validate plugin names (and their rule + observer names) at
+	// load time so an evil / careless plugin can't plant a name like
+	// "phony] ALL CLEAR [real" that forges the
 	// `[steering:<name>@<source>]` tag the block reason exposes to the
-	// LLM. Plugin validation runs BEFORE the disabledPlugins filter so a
-	// malformed-named plugin still throws even if the user tried to
-	// disable it — the name is written on disk and shouldn't be
-	// tolerated silently.
+	// LLM. Plugin validation runs BEFORE the disabledPlugins filter so
+	// a malformed-named plugin still records a diagnostic even if the
+	// user tried to disable it — the name is written on disk and
+	// shouldn't be tolerated silently. Plugins with malformed names
+	// are skipped from the rest of the merger so the bad name doesn't
+	// leak into downstream collision keys.
+	const validNamedPlugins: Plugin[] = [];
 	for (const plugin of plugins) {
-		validateName("plugin", plugin.name);
+		let pluginValid = true;
+		const pluginD = validateName("plugin", plugin.name);
+		if (pluginD !== undefined) {
+			diagnostics.push(pluginD);
+			pluginValid = false;
+		}
 		for (const rule of plugin.rules ?? []) {
-			validateName("rule", rule.name, `plugin "${plugin.name}"`);
+			const d = validateName("rule", rule.name, `plugin "${plugin.name}"`);
+			if (d !== undefined) {
+				diagnostics.push(d);
+				pluginValid = false;
+			}
 		}
 		for (const obs of plugin.observers ?? []) {
-			validateName("observer", obs.name, `plugin "${plugin.name}"`);
+			const d = validateName("observer", obs.name, `plugin "${plugin.name}"`);
+			if (d !== undefined) {
+				diagnostics.push(d);
+				pluginValid = false;
+			}
 		}
+		if (pluginValid) validNamedPlugins.push(plugin);
 	}
 
-	// Filter plugins honoring `disabledPlugins`. Record disabled ones so
-	// callers see them in the warning log (handy for debugging a rule
-	// that inexplicably stopped firing).
+	// Filter plugins honoring `disabledPlugins`. Disabled plugins are a
+	// by-design behavior, not a configuration issue, so they don't
+	// contribute to the diagnostic stream (escalating them to a throw
+	// under strict mode would make `disabledPlugins` unusable). Surface
+	// them via `console.info` for plugin authors debugging "why isn't
+	// my plugin firing?" — mirrors the breadcrumb pattern used for
+	// dropped observers in `internal/session-runtime.ts`.
 	const activePlugins: Plugin[] = [];
-	for (const plugin of plugins) {
+	for (const plugin of validNamedPlugins) {
 		if (disabledPlugins.has(plugin.name)) {
-			warnings.push({
-				kind: "plugin-disabled",
-				message: `plugin "${plugin.name}" disabled via config.disabledPlugins`,
-			});
+			console.info(
+				`[pi-steering] plugin "${plugin.name}" disabled via config.disabledPlugins`,
+			);
 			continue;
 		}
 		activePlugins.push(plugin);
@@ -310,23 +399,29 @@ export function resolvePlugins(
 			// the evaluator merges synthesized speculative entries under that
 			// name (see schema.ts `PredicateContext.walkerState` JSDoc).
 			if (name === "events") {
-				throw new Error(
-					`[pi-steering] tracker name "events" is reserved: ` +
-						`plugin "${plugin.name}" registers a tracker under that ` +
-						`name but the evaluator uses it on \`walkerState\` for ` +
-						`speculative-entry synthesis consumed by the built-in ` +
-						`\`when.happened\` predicate. Rename the tracker.`,
-				);
+				diagnostics.push({
+					type: "error",
+					kind: "reserved-tracker-name",
+					message:
+						`tracker name "events" is reserved: plugin "${plugin.name}" ` +
+						"registers a tracker under that name but the evaluator uses " +
+						"it on `walkerState` for speculative-entry synthesis consumed " +
+						"by the built-in `when.happened` predicate. Rename the tracker.",
+				});
+				continue;
 			}
 			const prior = trackerOwner.get(name);
 			if (prior !== undefined) {
-				throw new Error(
-					`[pi-steering] tracker name collision: ` +
-						`both plugins "${prior}" and "${plugin.name}" register ` +
-						`a tracker called "${name}". Two plugins claiming the ` +
-						`same state dimension is always a bug — rename one ` +
-						`tracker or disable one plugin.`,
-				);
+				diagnostics.push({
+					type: "error",
+					kind: "tracker-name-collision",
+					message: formatTrackerNameCollisionMessage(
+						prior,
+						plugin.name,
+						name,
+					),
+				});
+				continue;
 			}
 			trackerOwner.set(name, plugin.name);
 			trackers[name] = tracker;
@@ -349,7 +444,8 @@ export function resolvePlugins(
 			plugin.trackerExtensions,
 		)) {
 			if (!(trackerName in trackers) && !builtins.has(trackerName)) {
-				warnings.push({
+				diagnostics.push({
+					type: "warning",
 					kind: "extension-orphan",
 					message:
 						`plugin "${plugin.name}" extends tracker "${trackerName}" ` +
@@ -393,24 +489,12 @@ export function resolvePlugins(
 			// pinned by the `_RESERVED_PREDICATE_KEYS_COVERS_TYPE` assertion
 			// in `evaluator-internals/predicates.ts`.
 			if (isReservedPredicateKey(key)) {
-				// Key-specific suggestion: `not` collides with the operator
-				// field, `onUnknown` with the modifier surface.
-				//
-				// Convention for future {@link PredicateModifiers} /
-				// {@link OperatorField} additions:
-				//   - For OPERATOR collisions (a new logical operator like
-				//     `"or"` / `"and"`): prefer alternative verb forms that
-				//     avoid logical-operator vocabulary (`"either"`,
-				//     `"matchAny"` for `or`; `"all"`, `"matchAll"` for `and`).
-				//   - For MODIFIER collisions (a new modifier like a v0.2
-				//     `priority?:`): prefer names that include the modifier's
-				//     domain (`"rulePriority"`, `"orderingPriority"`) so the
-				//     suggestion clarifies which surface the registration
-				//     collided with.
-				// `Record<ReservedPredicateKey, string>` is type-exhaustive
-				// — every reserved key has a suggestion, so a future modifier
-				// addition forces an entry rather than silently flowing
-				// through a generic fallback.
+				// Per-key suggestion list for the diagnostic message.
+				// `Record<ReservedPredicateKey, string>` is type-exhaustive,
+				// so adding a new modifier to `PredicateModifiers` (which
+				// auto-extends `RESERVED_PREDICATE_KEYS`) forces a new entry
+				// here rather than silently flowing through a generic
+				// fallback.
 				const suggestions: Record<ReservedPredicateKey, string> = {
 					not: '"isNot", "negate"',
 					onUnknown: '"unknownPolicy", "walkerUnknownPolicy"',
@@ -418,17 +502,22 @@ export function resolvePlugins(
 				// `key` is narrowed to `ReservedPredicateKey` by the
 				// `isReservedPredicateKey` type guard above.
 				const suggestion = suggestions[key];
-				throw new Error(
-					`[pi-steering] Plugin "${plugin.name}" attempted to register ` +
-						`reserved predicate key "${key}". This name conflicts with ` +
-						`the schema's operator/modifier surface ` +
-						`(${RESERVED_PREDICATE_KEYS.join(", ")}). Choose a different ` +
-						`name (e.g., ${suggestion}).`,
-				);
+				diagnostics.push({
+					type: "error",
+					kind: "reserved-predicate-key",
+					message:
+						`Plugin "${plugin.name}" attempted to register reserved ` +
+						`predicate key "${key}". This name conflicts with the ` +
+						`schema's operator/modifier surface ` +
+						`(${RESERVED_PREDICATE_KEYS.join(", ")}). Choose a ` +
+						`different name (e.g., ${suggestion}).`,
+				});
+				continue;
 			}
 			const prior = predicateOwner.get(key);
 			if (prior !== undefined) {
-				warnings.push({
+				diagnostics.push({
+					type: "warning",
 					kind: "predicate-collision",
 					message:
 						`duplicate predicate "when.${key}" — plugins "${prior}" ` +
@@ -449,7 +538,8 @@ export function resolvePlugins(
 		for (const observer of plugin.observers) {
 			const prior = observerOwner.get(observer.name);
 			if (prior !== undefined) {
-				warnings.push({
+				diagnostics.push({
+					type: "warning",
 					kind: "observer-collision",
 					message:
 						`duplicate observer "${observer.name}" — plugins "${prior}" ` +
@@ -473,15 +563,21 @@ export function resolvePlugins(
 		if (!plugin.rules) continue;
 		for (const rule of plugin.rules) {
 			if (disabledRules.has(rule.name)) {
-				warnings.push({
-					kind: "rule-disabled",
-					message: `rule "${rule.name}" (from plugin "${plugin.name}") disabled via config.disabledRules`,
-				});
+				// Disabled plugin-shipped rules are by-design behavior, not a
+				// configuration issue. Mirror the `disabledPlugins` breadcrumb
+				// above: `console.info` for plugin authors debugging "why
+				// isn't my rule firing?" without escalating to the diagnostic
+				// stream (which strict mode would throw on).
+				console.info(
+					`[pi-steering] rule "${rule.name}" (from plugin "${plugin.name}") ` +
+						`disabled via config.disabledRules`,
+				);
 				continue;
 			}
 			const prior = ruleOwner.get(rule.name);
 			if (prior !== undefined) {
-				warnings.push({
+				diagnostics.push({
+					type: "warning",
 					kind: "rule-collision",
 					message:
 						`duplicate rule "${rule.name}" — plugins "${prior}" ` +
@@ -502,6 +598,6 @@ export function resolvePlugins(
 		composedTrackers,
 		rules,
 		rulePluginOwners: Object.fromEntries(ruleOwner),
-		warnings,
+		diagnostics,
 	};
 }

@@ -24,8 +24,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type {
@@ -36,6 +35,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import register from "./index.ts";
 import { buildSessionRuntime } from "./internal/session-runtime.ts";
+import { useIsolatedHome } from "./__test-helpers__.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Mock ExtensionAPI                                                          */
@@ -200,19 +200,12 @@ async function fireBashToolResult(
 /* Test harness: isolated $HOME per test                                      */
 /* -------------------------------------------------------------------------- */
 
-let origHome: string | undefined;
 let tmpHome: string;
 
-function useIsolatedHome() {
-	beforeEach(() => {
-		origHome = process.env["HOME"];
-		tmpHome = mkdtempSync(join(tmpdir(), "pi-steering-register-v2-"));
-		process.env["HOME"] = tmpHome;
-	});
-	afterEach(() => {
-		if (origHome === undefined) delete process.env["HOME"];
-		else process.env["HOME"] = origHome;
-		rmSync(tmpHome, { recursive: true, force: true });
+/** Bind a fresh `$HOME` for each test in the enclosing `describe`. */
+function useScratchHome(): void {
+	useIsolatedHome("pi-steering-register-v2-", (t) => {
+		tmpHome = t;
 	});
 }
 
@@ -235,7 +228,7 @@ function writeSteeringConfig(dir: string, body: string): void {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): default rules wiring", () => {
-	useIsolatedHome();
+	useScratchHome();
 
 	it("blocks `git push --force` via default rule", async () => {
 		const mock = makeMockPi();
@@ -324,7 +317,7 @@ describe("register(): default rules wiring", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): inline override escape hatch", () => {
-	useIsolatedHome();
+	useScratchHome();
 
 	it("accepts override comment, does not block, appends audit entry", async () => {
 		// The v2 default is `defaultNoOverride: true` (fail-closed per
@@ -400,7 +393,7 @@ describe("register(): inline override escape hatch", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): user-defined rules via .pi/steering.ts", () => {
-	useIsolatedHome();
+	useScratchHome();
 
 	it("blocks a write to a .env file via a user-defined write rule", async () => {
 		writeSteeringConfig(
@@ -540,7 +533,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): observer dispatcher wiring", () => {
-	useIsolatedHome();
+	useScratchHome();
 
 	it("runs observers on matching tool_result events", async () => {
 		// Use a module-scoped sentinel so the dynamically-imported config
@@ -625,7 +618,7 @@ describe("register(): observer dispatcher wiring", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): unrelated tool calls pass through", () => {
-	useIsolatedHome();
+	useScratchHome();
 
 	it("returns undefined for a tool call that matches no rule", async () => {
 		const mock = makeMockPi();
@@ -659,7 +652,7 @@ describe("register(): unrelated tool calls pass through", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): agent_start bumps agentLoopIndex threaded into evaluator", () => {
-	useIsolatedHome();
+	useScratchHome();
 
 	it("passes the current agentLoopIndex into predicate context", async () => {
 		// Rule uses when.condition to assert agentLoopIndex threading.
@@ -812,14 +805,18 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 /* Fail-open on config load error                                             */
 /* -------------------------------------------------------------------------- */
 
-describe("register(): fail-open on config load error", () => {
-	useIsolatedHome();
+describe("register(): broken config layer", () => {
+	useScratchHome();
 
-	it("broken config layer is skipped by the loader (per-layer fail-open)", async () => {
-		// The loader's per-layer error handling (throws inside
-		// import'd module) logs a warn but doesn't stop the session.
-		// Write a syntactically-invalid TS config to prove the session
-		// still starts and the defaults still apply.
+	it("strict mode (default) throws on a broken config layer; bridge disables itself and tool calls pass through", async () => {
+		// Under the strict-mode contract, the loader's per-layer import
+		// failure surfaces as a warning-class diagnostic that escalates
+		// to a thrown error. The bridge's session_start catch logs the
+		// throw and resets evaluator + dispatcher to null — every
+		// subsequent tool call passes through with no verdict. Once the
+		// bridge moves to factory-time loading, this throw will land in
+		// pi's [Extension issues] block; for now it surfaces only on
+		// stderr.
 		mkdirSync(join(tmpHome, ".pi"), { recursive: true });
 		writeFileSync(
 			join(tmpHome, ".pi", "steering.ts"),
@@ -827,31 +824,30 @@ describe("register(): fail-open on config load error", () => {
 			"utf8",
 		);
 
-		// Suppress the expected console.warn from the loader.
+		// Suppress the expected console.error / console.info emissions.
 		const origWarn = console.warn;
-		const warnings: string[] = [];
-		console.warn = (msg: unknown) => {
-			warnings.push(String(msg));
-		};
+		const origError = console.error;
+		const origInfo = console.info;
+		console.warn = () => {};
+		console.error = () => {};
+		console.info = () => {};
 
 		try {
 			const mock = makeMockPi();
 			register(mock.api as never);
 			await fireSessionStart(mock, tmpHome);
 
-			// Defaults still apply (broken layer skipped, not fatal).
 			const result = await fireBashToolCall(
 				mock,
 				"git push --force",
 				tmpHome,
 			);
-			assert.equal(result?.block, true);
-			assert.ok(
-				warnings.some((w) => w.includes("failed to load config")),
-				"expected loader warn about the broken layer",
-			);
+			// Strict mode aborted setup; tool calls pass through.
+			assert.equal(result, undefined);
 		} finally {
 			console.warn = origWarn;
+			console.error = origError;
+			console.info = origInfo;
 		}
 	});
 });
@@ -861,62 +857,58 @@ describe("register(): fail-open on config load error", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("buildSessionRuntime: two-pass disableDefaults merge", () => {
-	useIsolatedHome();
+	useScratchHome();
 
 	it("inner `disableDefaults: true` wins — defaults are NOT injected", async () => {
 		writeSteeringConfig(tmpHome, "{ disableDefaults: true }");
 
-		const host = {
-			exec: async () => ({
-				stdout: "",
-				stderr: "",
-				code: 0,
-				killed: false,
-			}),
-			appendEntry: () => {},
-		};
-		const { config } = await buildSessionRuntime(tmpHome, host);
-		// `disableDefaults: true` in the user layer suppresses DEFAULT_RULES
-		// entirely — config.rules ends up undefined (merger returns a
-		// rules-absent SteeringConfig when no layer ships rules and
-		// defaults are skipped).
-		assert.equal(config.rules, undefined);
-		assert.equal(config.disableDefaults, true);
+		const mock = makeMockPi();
+		register(mock.api as never);
+		await fireSessionStart(mock, tmpHome);
+
+		// `disableDefaults: true` in the user layer suppresses
+		// DEFAULT_RULES entirely, so the canonical default-rule guard
+		// against `git push --force` no longer fires.
+		const result = await fireBashToolCall(mock, "git push --force", tmpHome);
+		assert.equal(result, undefined);
 	});
 
 	it("no `disableDefaults` — DEFAULT_RULES are injected", async () => {
 		// No config file at all.
-		const host = {
-			exec: async () => ({
-				stdout: "",
-				stderr: "",
-				code: 0,
-				killed: false,
-			}),
-			appendEntry: () => {},
-		};
-		const { config } = await buildSessionRuntime(tmpHome, host);
-		assert.ok(config.rules);
-		const names = config.rules.map((r) => r.name);
-		assert.ok(names.includes("no-force-push"));
-		assert.ok(names.includes("no-rm-rf-slash"));
+		const mock = makeMockPi();
+		register(mock.api as never);
+		await fireSessionStart(mock, tmpHome);
+
+		const pushResult = await fireBashToolCall(
+			mock,
+			"git push --force",
+			tmpHome,
+		);
+		assert.equal(pushResult?.block, true);
+		assert.match(pushResult?.reason ?? "", /no-force-push/);
+
+		const rmResult = await fireBashToolCall(mock, "rm -rf /", tmpHome);
+		assert.equal(rmResult?.block, true);
+		assert.match(rmResult?.reason ?? "", /no-rm-rf-slash/);
 	});
 
 	it("`disabledRules` filters default rules out of the merged config", async () => {
 		writeSteeringConfig(tmpHome, '{ disabledRules: ["no-force-push"] }');
-		const host = {
-			exec: async () => ({
-				stdout: "",
-				stderr: "",
-				code: 0,
-				killed: false,
-			}),
-			appendEntry: () => {},
-		};
-		const { config } = await buildSessionRuntime(tmpHome, host);
-		const names = (config.rules ?? []).map((r) => r.name);
-		assert.ok(!names.includes("no-force-push"));
+		const mock = makeMockPi();
+		register(mock.api as never);
+		await fireSessionStart(mock, tmpHome);
+
+		// `no-force-push` is disabled — the rule that would have blocked
+		// `git push --force` is gone.
+		const pushResult = await fireBashToolCall(
+			mock,
+			"git push --force",
+			tmpHome,
+		);
+		assert.equal(pushResult, undefined);
+
 		// Other defaults still present.
-		assert.ok(names.includes("no-rm-rf-slash"));
+		const rmResult = await fireBashToolCall(mock, "rm -rf /", tmpHome);
+		assert.equal(rmResult?.block, true);
 	});
 });

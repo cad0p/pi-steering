@@ -95,6 +95,24 @@ import type {
 } from "./schema.ts";
 
 // ---------------------------------------------------------------------------
+// Built-in trackers
+// ---------------------------------------------------------------------------
+
+/**
+ * Names of trackers the evaluator wires in directly (not via a plugin).
+ * `resolvePlugins` accepts this list as `knownBuiltinTrackers`: plugin
+ * `trackerExtensions` targeting these names are kept (so plugins can
+ * compose modifiers onto them) without emitting an `extension-orphan`
+ * diagnostic.
+ *
+ * All call sites (`buildSessionRuntime`, `loadHarness`,
+ * `loadSteeringConfig`, the `pi-steering list` CLI) import this
+ * constant so a future addition (e.g. an `argv` tracker) lights up
+ * uniformly across production and the test harness.
+ */
+export const EVALUATOR_BUILTIN_TRACKERS = ["cwd", "env"] as const;
+
+// ---------------------------------------------------------------------------
 // Public surface
 // ---------------------------------------------------------------------------
 
@@ -150,11 +168,28 @@ export function buildEvaluator(
 ): EvaluatorRuntime {
 	// S3: validate user-authored rule names up front so a name like
 	// "phony] ALL CLEAR [real" can't slip into the block-reason tag
-	// shown to the LLM. Plugin-shipped rule / plugin / observer names
-	// are validated inside `resolvePlugins`; here we cover the
-	// user-config side (config.rules).
+	// shown to the LLM. Production callers go through
+	// `runMergerPipeline`, which produces an `invalid-name` diagnostic
+	// for malformed user-config names and aggregates it into the
+	// strict-mode throw — so this throw is unreachable from the
+	// standard pipeline. It remains as defense-in-depth for direct
+	// callers (unit tests, future SDK embedders) that build an
+	// evaluator without going through `buildSessionRuntime` /
+	// `loadHarness` / `loadSteeringConfig`. Plugin-shipped rule /
+	// plugin / observer names are validated inside `resolvePlugins`
+	// and surface through the diagnostic stream.
+	//
+	// Latent mis-attribution risk: this loop iterates `config.rules`,
+	// which on a default-defaults run includes `DEFAULT_RULES`. If a
+	// future DEFAULT_RULES entry ever lands with a malformed name,
+	// this throw will mis-label it as `(user config)`. The
+	// `validateUserConfigNames` helper at the production pipeline
+	// correctly partitions user vs. plugin/default; this defensive
+	// path does not. Defaults are package-controlled and reviewed,
+	// so the case is currently unreachable.
 	for (const rule of config.rules ?? []) {
-		validateName("rule", rule.name, "user config");
+		const d = validateName("rule", rule.name, "user config");
+		if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);
 	}
 
 	// Validate every rule's `when:` clause shape at config-resolve time.

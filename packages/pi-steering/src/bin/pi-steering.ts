@@ -14,20 +14,25 @@
  *
  * Exit codes:
  *   0 - success
- *   1 - invalid arguments / file read / parse error
+ *   1 - invalid arguments / file read / parse error / `list`
+ *       surfaced one or more error-class diagnostics (CI-lint signal)
  *   2 - import-json conversion error ({@link FromJSONError})
  */
 
 import { readFile, writeFile } from "node:fs/promises";
 import { FromJSONError, fromJSON } from "../compat.ts";
+import { EVALUATOR_BUILTIN_TRACKERS } from "../evaluator.ts";
+import { finalizePluginState } from "../internal/finalize-plugin-state.ts";
 import {
-	buildConfig,
-	loadConfigs,
-} from "../loader.ts";
+	formatSingleLineDiagnostic,
+	runMergerPipeline,
+} from "../internal/session-runtime.ts";
+import { loadConfigs } from "../loader.ts";
 import type {
 	Observer,
 	Rule,
 	SteeringConfig,
+	SteeringDiagnostic,
 	TopLevelWhenClause,
 } from "../schema.ts";
 
@@ -221,8 +226,11 @@ async function runList(args: string[]): Promise<number> {
 	// wanting to see built-ins can check the package README or run with
 	// a verbose flag we can add later.
 	let layers;
+	let loaderDiagnostics: readonly SteeringDiagnostic[] = [];
 	try {
-		layers = await loadConfigs(process.cwd());
+		({ layers, diagnostics: loaderDiagnostics } = await loadConfigs(
+			process.cwd(),
+		));
 	} catch (err) {
 		process.stderr.write(
 			`pi-steering: failed to load config: ${
@@ -230,6 +238,23 @@ async function runList(args: string[]): Promise<number> {
 			}\n`,
 		);
 		return 1;
+	}
+
+	// Surface loader-side diagnostics on stderr in the legacy shape so
+	// users running `pi-steering list` against a tree with broken layers,
+	// dual-form coexistence, stray files, or cross-layer collisions see
+	// them — restores the pre-refactor visibility the loader's direct
+	// `console.warn` calls used to provide. Track whether any error-
+	// class diagnostic was emitted so the CLI can exit non-zero, giving
+	// CI lint pipelines a binary signal that the config would refuse to
+	// start in production.
+	let sawError = false;
+	const recordDiagnostic = (d: SteeringDiagnostic) => {
+		if (d.type === "error") sawError = true;
+		process.stderr.write(`${formatSingleLineDiagnostic(d)}\n`);
+	};
+	for (const d of loaderDiagnostics) {
+		recordDiagnostic(d);
 	}
 
 	if (layers.length === 0) {
@@ -240,10 +265,27 @@ async function runList(args: string[]): Promise<number> {
 		} else {
 			process.stdout.write("No steering config found.\n");
 		}
-		return 0;
+		return sawError ? 1 : 0;
 	}
 
-	const config = buildConfig(layers);
+	const { config, diagnostics: mergeAndResolveDiagnostics } =
+		runCliMergeWithInfoCapture(layers);
+	for (const d of mergeAndResolveDiagnostics) {
+		recordDiagnostic(d);
+	}
+
+	// User-config rule + observer name validation runs inside
+	// `runMergerPipeline` (unconditionally, between `buildConfig` and
+	// the merge short-circuit) so every surface — production runtime,
+	// `loadHarness`, and this CLI — gets the same `invalid-name`
+	// diagnostic stream. When the merge step short-circuits on an
+	// error-class diagnostic (e.g. `tracker-name-collision`), the
+	// CLI still surfaces the user-config name validation diagnostics
+	// alongside the merge error so a config with both classes of
+	// problem flags both in one run. Plugin-shipped name validation
+	// (which lives inside `resolvePlugins`) IS gated behind the
+	// short-circuit, since `resolvePlugins` is the surface that
+	// consumes plugin names.
 
 	if (format === "json") {
 		process.stdout.write(
@@ -252,7 +294,77 @@ async function runList(args: string[]): Promise<number> {
 	} else {
 		process.stdout.write(renderListText(config));
 	}
-	return 0;
+	return sawError ? 1 : 0;
+}
+
+/**
+ * Run the merge+resolve pipeline through the shared
+ * {@link runMergerPipeline} helper, intercepting
+ * `console.info` for the duration so the plugin-merger's disabled-
+ * plugin / disabled-rule breadcrumbs go to stderr instead of
+ * contaminating stdout (which carries the structured `--format=json`
+ * output). The save/restore is wrapped in `try`/`finally` so a throw
+ * inside the helper still restores the original `console.info`.
+ *
+ * After the pipeline completes successfully (no merge short-circuit),
+ * also run `dropUnusedObservers` over the plugin-merger and
+ * user-authored observer streams. The runtime emits an info-level
+ * breadcrumb for each dropped observer ("observer 'X' dropped; its
+ * writes (...) are not consumed by any rule"). The CLI's
+ * `console.info` interception captures those breadcrumbs onto stderr
+ * for the same reason as the disabled-plugin breadcrumbs above:
+ * stdout stays clean for `--format=json` consumers, but a plugin
+ * author running `pi-steering list` to debug "why isn't my observer
+ * firing?" sees the same breadcrumb the production runtime would
+ * have emitted at session_start.
+ */
+function runCliMergeWithInfoCapture(
+	layers: readonly SteeringConfig[],
+): {
+	config: SteeringConfig;
+	diagnostics: SteeringDiagnostic[];
+} {
+	const originalInfo = console.info;
+	console.info = (...args: unknown[]) => {
+		process.stderr.write(`${args.map((a) => String(a)).join(" ")}\n`);
+	};
+	try {
+		const { merged, resolved, diagnostics } = runMergerPipeline(
+			layers,
+			undefined,
+			EVALUATOR_BUILTIN_TRACKERS,
+		);
+		// Mirror `buildSessionRuntime`'s observer-drop pass so the CLI
+		// surfaces the same `[pi-steering] observer 'X' dropped` info-
+		// level breadcrumbs the production runtime emits at
+		// session_start. Skipped on merge short-circuit (`resolved ===
+		// null`) — without a resolved plugin state we can't enumerate
+		// plugin-side observers, and the merge-error short-circuit
+		// suppresses downstream surfaces uniformly.
+		if (resolved !== null) {
+			const userObservers = merged.observers ?? [];
+			// Mirror the runtime's `disabledRules` filter (see
+			// `buildSessionRuntime` in `internal/session-runtime.ts`)
+			// before invoking `finalizePluginState`. Without this
+			// filter, observers whose only consumer is a disabled rule
+			// would appear consumed in the CLI but get dropped by the
+			// runtime — a divergence between `pi-steering list` and
+			// what production sees.
+			const disabledRules = new Set(merged.disabledRules ?? []);
+			const userRules = (merged.rules ?? []).filter(
+				(r) => !disabledRules.has(r.name),
+			);
+			finalizePluginState(
+				userRules,
+				resolved.rules,
+				userObservers,
+				resolved.observers,
+			);
+		}
+		return { config: merged, diagnostics };
+	} finally {
+		console.info = originalInfo;
+	}
 }
 
 function printListHelp(): void {
@@ -269,6 +381,12 @@ FLAGS
   --format=text   (default) human-readable grouped output
   --format=json   machine-readable JSON
   -h, --help      show this help
+
+EXIT CODES
+  0   resolved successfully (warnings, if any, are fail-soft)
+  1   one or more error-class diagnostics surfaced — production
+      runtime would refuse to start on this config; CI lint pipelines
+      can gate on this code
 
 EXAMPLES
   pi-steering list

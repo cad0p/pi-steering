@@ -24,15 +24,20 @@ import type { ObserverDispatcher } from "./observer-dispatcher.ts";
  *                       tool_call / tool_result handlers can forward it
  *                       into the evaluator + dispatcher. One agent loop
  *                       = one user prompt + all the tool calls it spawns.
- *   - `session_start` — load the walk-up config (inner-first), merge
- *                       with DEFAULT_RULES + DEFAULT_PLUGINS unless
- *                       `disableDefaults: true` is set anywhere in the
- *                       walk-up chain, then build the evaluator +
- *                       dispatcher. A broken config layer is logged
- *                       and skipped by the loader; a thrown error at
- *                       build time disables the extension for this
- *                       session (fail-open rather than blocking every
- *                       tool call).
+ *   - `session_start` — build the per-session evaluator + dispatcher
+ *                       via {@link buildSessionRuntime}: walk-up load,
+ *                       merge with DEFAULT_RULES + DEFAULT_PLUGINS
+ *                       unless `disableDefaults: true` is set anywhere
+ *                       in the walk-up chain, then aggregate every
+ *                       {@link SteeringDiagnostic} from the loader and
+ *                       plugin merger and apply the strict-mode
+ *                       contract. If the runtime throws (any error-
+ *                       class diagnostic, or any warning-class
+ *                       diagnostic when `failOnWarnings !== false`),
+ *                       the bridge logs the aggregated message via
+ *                       `console.error` and disables the extension
+ *                       for the session (fail-open rather than
+ *                       blocking every tool call).
  *   - `tool_call`     — gate via the evaluator. Returns a
  *                       ToolCallEventResult to block or `undefined` to
  *                       allow.
@@ -69,7 +74,7 @@ export default function register(pi: ExtensionAPI): void {
 		} catch (err) {
 			console.error(
 				`[pi-steering] Failed to load steering config: ` +
-					`${err instanceof Error ? err.message : String(err)}. ` +
+					`${err instanceof Error ? err.message : String(err)}\n` +
 					`Extension will not block any tool calls for this session.`,
 			);
 			evaluator = null;
@@ -158,6 +163,8 @@ export type {
 	ReservedPredicateKey,
 	Rule,
 	SteeringConfig,
+	SteeringDiagnostic,
+	SteeringDiagnosticKind,
 	ToolResultEvent,
 	TopLevelWhenClause,
 	TopLevelWhenClauseNoRecurse,

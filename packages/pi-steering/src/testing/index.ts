@@ -52,6 +52,7 @@ import type {
 	PredicateToolInput,
 	PredicateVerdict,
 	SteeringConfig,
+	SteeringDiagnostic,
 	ToolResultEvent as SchemaToolResultEvent,
 	WhenWalkerState,
 } from "../schema.ts";
@@ -70,6 +71,7 @@ import {
 } from "../evaluator-internals/context.ts";
 import {
 	buildEvaluator,
+	EVALUATOR_BUILTIN_TRACKERS,
 	type EvaluatorHost,
 	type EvaluatorRuntime,
 } from "../evaluator.ts";
@@ -78,11 +80,11 @@ import {
 	matchesWatch,
 	type ObserverDispatcher,
 } from "../observer-dispatcher.ts";
+import { runMergerPipeline } from "../internal/session-runtime.ts";
 import {
-	resolvePlugins,
 	type ResolvedPluginState,
 } from "../plugin-merger.ts";
-import { dropUnusedObservers } from "../internal/drop-unused-observers.ts";
+import { finalizePluginState } from "../internal/finalize-plugin-state.ts";
 
 // ---------------------------------------------------------------------------
 // Capture tracking
@@ -155,10 +157,65 @@ export interface Harness {
 	/**
 	 * The effective config the harness was built from (after default
 	 * injection and `disable` filtering).
+	 *
+	 * No-op short-circuit caveat: when `harness.diagnostics` has an
+	 * error-class entry, treat `harness.config` as the post-merge,
+	 * post-disabledRules-filter snapshot pi-steering would have
+	 * handed to `buildEvaluator` if the diagnostics had been clean —
+	 * provided as a debugging artifact, NOT an executable config
+	 * production would accept (production would have thrown).
+	 * Inspect `harness.diagnostics` first to learn which surface
+	 * flagged a problem, then fix the source config and re-load
+	 * before reading `config` for any "production would have run on
+	 * this shape" interpretation.
 	 */
 	readonly config: SteeringConfig;
-	/** The plugin merger's resolved state, for introspection / assertions. */
+	/**
+	 * The plugin merger's resolved state, for introspection /
+	 * assertions.
+	 *
+	 * No-op short-circuit caveat: when an error-class diagnostic fires
+	 * and the harness returns the no-op evaluator/dispatcher pair,
+	 * `resolved.diagnostics` carries the FULL diagnostic list (merge-
+	 * side + user-config-name + resolve-side) to mirror
+	 * `harness.diagnostics`. In the regular path, `resolved.diagnostics`
+	 * carries only the resolve-side stream — see
+	 * {@link SteeringDiagnosticKind} for the per-kind
+	 * loader-vs-merger split. Consumers should prefer
+	 * `harness.diagnostics` for the canonical full list.
+	 */
 	readonly resolved: ResolvedPluginState;
+	/**
+	 * Every {@link SteeringDiagnostic} produced while building the
+	 * harness — merge-side (within-layer collisions, cross-config
+	 * collisions when {@link LoadHarnessOptions.includeDefaults} is
+	 * `true`) and plugin-merger-side (predicate / observer / rule /
+	 * extension-orphan / reserved-name / invalid-name diagnostics,
+	 * plus user-config rule and observer name validation).
+	 *
+	 * Unlike production, `loadHarness` does NOT throw on error-class
+	 * diagnostics. Plugin-author tests assert directly on this array
+	 * (e.g. `harness.diagnostics.some(d => d.kind === "reserved-tracker-name")`)
+	 * so the failure surface is observable in test output rather than
+	 * a thrown error that hides which other diagnostics fired. Both
+	 * plugin-shipped and user-config malformed names route through the
+	 * same `kind: "invalid-name"` diagnostic stream — plugin-author
+	 * tests can use a uniform matrix of malformed-name cases without
+	 * worrying about which surface raised the issue.
+	 *
+	 * Production-strictness divergence: `loadHarness` does NOT honor
+	 * the merged config's `failOnWarnings` flag. Production's
+	 * `buildSessionRuntime` throws when `failOnWarnings !== false`
+	 * (default `true`) AND any warning-class diagnostic is present;
+	 * the harness ignores `failOnWarnings` and returns a real
+	 * evaluator/dispatcher running on the post-collision merged
+	 * state. Tests intending to use the harness as a "production
+	 * prediction" should check this array against the strict-mode
+	 * rule themselves, e.g.
+	 * `harness.diagnostics.some(d => d.type === "error" || (config.failOnWarnings !== false && d.type === "warning"))`
+	 * before treating the harness's verdict as production-faithful.
+	 */
+	readonly diagnostics: readonly SteeringDiagnostic[];
 }
 
 /**
@@ -198,24 +255,28 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 	const inputConfig = options.config;
 	const includeDefaults = options.includeDefaults ?? false;
 
-	// Layer defaults at the INNERMOST position — user-declared rules
-	// and plugins still win on name collision, matching production's
-	// walk-up-first-wins semantics for the innermost layer vs defaults.
-	const mergedConfig: SteeringConfig = { ...inputConfig };
-	if (includeDefaults) {
-		mergedConfig.plugins = [
-			...(inputConfig.plugins ?? []),
-			...DEFAULT_PLUGINS,
-		];
-		mergedConfig.rules = [
-			...(inputConfig.rules ?? []),
-			...DEFAULT_RULES,
-		];
-	}
+	// Run the same merge that production does (single layer here, since
+	// loadHarness operates on an in-memory config rather than a walk-up
+	// chain). The shared helper short-circuits between buildConfig and
+	// resolvePlugins on error-class merge diagnostics so a
+	// `tracker-name-collision` flagged by `buildConfig` is not also
+	// re-flagged by `resolvePlugins`. The diagnostics surface within-
+	// layer rule-name and observer-name collisions, plus tracker-name
+	// collisions and the cross-config plugin-name collisions that
+	// `includeDefaults: true` can introduce against DEFAULT_PLUGINS.
+	const defaults: SteeringConfig | undefined = includeDefaults
+		? { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS }
+		: undefined;
+	const { merged: mergedConfig, resolved, diagnostics } =
+		runMergerPipeline(
+			[inputConfig],
+			defaults,
+			EVALUATOR_BUILTIN_TRACKERS,
+		);
 
 	// Apply `config.disabledRules` to user + default rules. Plugin-shipped
 	// rules are filtered inside `resolvePlugins`. Mirrors
-	// `buildSessionRuntime` in src/index.ts.
+	// `buildSessionRuntime`.
 	const disabled = new Set(mergedConfig.disabledRules ?? []);
 	const filteredConfig: SteeringConfig = { ...mergedConfig };
 	if (mergedConfig.rules !== undefined) {
@@ -224,36 +285,39 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 		else delete filteredConfig.rules;
 	}
 
-	const resolved = resolvePlugins(
-		filteredConfig.plugins ?? [],
-		filteredConfig,
-		// `cwd` and `env` are injected by the evaluator (built-in
-		// cwdTracker + envTracker); extensions targeting them are valid
-		// and must not be treated as orphans. Keep in sync with
-		// `buildSessionRuntime`.
-		["cwd", "env"],
-	);
+	// Aggregate every diagnostic produced during construction. Unlike
+	// `buildSessionRuntime`, loadHarness does NOT throw on error-class
+	// diagnostics — plugin-author tests assert on the array directly so
+	// they can see every diagnostic that fired in one read.
+	//
+	// Short-circuit on ANY error-class diagnostic — from the cross-
+	// layer merge (`buildConfig`'s `detectTrackerNameCollisions`) or
+	// from the plugin merger (`reserved-tracker-name`,
+	// `reserved-predicate-key`, `invalid-name`, `tracker-name-collision`).
+	// All error-class diagnostics produce the same no-op harness so
+	// plugin-author tests see uniform behavior regardless of which
+	// surface flagged the problem. Mirrors production's bridge-disabled
+	// state under the same conditions.
+	if (resolved === null || diagnostics.some((d) => d.type === "error")) {
+		return buildNoopHarness(filteredConfig, diagnostics);
+	}
 
 	// Mirror session-runtime's unused-observer drop so loadHarness
 	// tests produce the same verdicts as production for rules that
 	// rely on observer writes.
-	const userObservers = filteredConfig.observers ?? [];
-	const allRules = [...(filteredConfig.rules ?? []), ...resolved.rules];
-	const pluginDrop = dropUnusedObservers(resolved.observers, allRules);
-	const userDrop = dropUnusedObservers(userObservers, allRules);
-	for (const d of [...pluginDrop.dropped, ...userDrop.dropped]) {
-		console.info(
-			`[pi-steering] observer '${d.name}' dropped; its writes ` +
-				`(${d.writes.join(", ")}) are not consumed by any rule`,
-		);
-	}
-	const filteredResolved = { ...resolved, observers: [...pluginDrop.kept] };
+	const { pluginKept, userKept } = finalizePluginState(
+		filteredConfig.rules ?? [],
+		resolved.rules,
+		filteredConfig.observers ?? [],
+		resolved.observers,
+	);
+	const filteredResolved = { ...resolved, observers: [...pluginKept] };
 
 	const host = options.host ?? defaultHarnessHost();
 	const evaluator = buildEvaluator(filteredConfig, filteredResolved, host);
 	const dispatcher = buildObserverDispatcher(
 		filteredResolved,
-		userDrop.kept,
+		userKept,
 		host,
 	);
 
@@ -262,6 +326,42 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
 		dispatch: dispatcher.dispatch,
 		config: filteredConfig,
 		resolved: filteredResolved,
+		diagnostics,
+	};
+}
+
+/**
+ * Build a no-op {@link Harness} that surfaces the given diagnostics
+ * but doesn't drive the evaluator / dispatcher. Used when an
+ * error-class loader diagnostic prevents safe construction of the
+ * runtime; mirrors production's bridge-disabled state under the same
+ * conditions.
+ */
+function buildNoopHarness(
+	config: SteeringConfig,
+	diagnostics: readonly SteeringDiagnostic[],
+): Harness {
+	const emptyResolved: ResolvedPluginState = {
+		predicates: {},
+		observers: [],
+		trackers: {},
+		trackerModifiers: {},
+		composedTrackers: {},
+		rules: [],
+		rulePluginOwners: {},
+		// Mirror harness.diagnostics so consumers reading either surface
+		// (harness.resolved.diagnostics or harness.diagnostics) see the
+		// same list. Otherwise harness.resolved.diagnostics would be
+		// silently empty in the no-op short-circuit branch while the
+		// outer harness.diagnostics carries the real entries.
+		diagnostics: [...diagnostics],
+	};
+	return {
+		evaluate: async () => {},
+		dispatch: async () => {},
+		config,
+		resolved: emptyResolved,
+		diagnostics: [...diagnostics],
 	};
 }
 

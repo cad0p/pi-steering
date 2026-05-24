@@ -1652,6 +1652,10 @@ export interface SteeringConfig {
 	 * the imperative flag {@link disableDefaults} (action: disable
 	 * the default plugins + rules).
 	 *
+	 * Disabling a rule is by-design behavior, not a configuration
+	 * issue — it does NOT contribute to the diagnostic stream. See
+	 * {@link SteeringDiagnosticKind} for the by-design-vs-issue carveout.
+	 *
 	 * **Navigation note:** these are string literals projected from
 	 * `DEFAULT_RULES` (engine defaults), `plugin.rules[*].name`, and
 	 * inline `rules[*].name`. Ctrl+Click on a literal jumps to the
@@ -1670,6 +1674,10 @@ export interface SteeringConfig {
 	 * Plugins to disable by name. Additive union across layers.
 	 * A disabled plugin contributes NOTHING - no rules, no observers,
 	 * no predicates, no trackers.
+	 *
+	 * Disabling a plugin is by-design behavior, not a configuration
+	 * issue — it does NOT contribute to the diagnostic stream. See
+	 * {@link SteeringDiagnosticKind} for the by-design-vs-issue carveout.
 	 *
 	 * **Navigation note:** same TypeScript-language limitation as
 	 * {@link disabledRules} — Ctrl+Click on a string literal jumps to
@@ -1695,6 +1703,33 @@ export interface SteeringConfig {
 	 */
 	disableDefaults?: boolean;
 
+	/**
+	 * Strict-mode opt-out. When `true` (default), any warning-class
+	 * {@link SteeringDiagnostic} produced while loading the config
+	 * escalates to a thrown error that disables the bridge for the
+	 * session. When explicitly set to `false`, warnings fall through
+	 * to `console.warn` and the bridge keeps running with whatever
+	 * subset of plugins / rules / observers loaded successfully.
+	 *
+	 * Error-class diagnostics ALWAYS throw regardless of this flag
+	 * (e.g. tracker name collision, reserved name violation) — the
+	 * engine cannot operate safely with those issues present.
+	 *
+	 * Walk-up merge: inner layer wins when specified, identical to
+	 * {@link disableDefaults}.
+	 *
+	 * Note: a broken layer cannot communicate its OWN `failOnWarnings:
+	 * false` opt-out, since the loader can't read the failed file. To
+	 * recover from a `layer-import-failed` diagnostic on an outer
+	 * (ancestor) layer, set `failOnWarnings: false` on a successfully-
+	 * loaded inner layer; the inner-wins merge picks up the opt-out
+	 * before the broken layer's warning-class diagnostic escalates to
+	 * a thrown error. Alternatively, fix the broken file.
+	 *
+	 * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
+	 */
+	failOnWarnings?: boolean;
+
 	/** Plugins to load. Order matters for first-wins name collisions. */
 	plugins?: readonly Plugin[];
 
@@ -1703,4 +1738,242 @@ export interface SteeringConfig {
 
 	/** Inline observers (rules reference by name). */
 	observers?: readonly Observer[];
+}
+
+// ---------------------------------------------------------------------------
+// SteeringDiagnostic
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminator categorizing what kind of issue a diagnostic
+ * describes. Stable across versions so tooling and tests can dispatch
+ * on `kind` without parsing the human-readable {@link
+ * SteeringDiagnostic.message}.
+ *
+ * The set is split between two surfaces:
+ *   - LOADER (`layer-form-coexistence`, `layer-import-failed`,
+ *     `layer-stray-file`, `plugin-name-collision`,
+ *     `rule-name-collision`, `observer-name-collision`,
+ *     `tracker-name-collision`) — produced while walking up the
+ *     filesystem, importing per-layer config files, and merging
+ *     layers into a single effective config. The collision kinds in
+ *     this group flag duplicates surfaced during layer merge — most
+ *     are user-authored (`plugin-name-collision`, `rule-name-collision`,
+ *     `observer-name-collision`), but `tracker-name-collision` flags
+ *     duplicate plugin-shipped trackers when those plugins surface
+ *     together via the merge.
+ *   - PLUGIN-MERGER (`predicate-collision`, `observer-collision`,
+ *     `rule-collision`, `extension-orphan`, `reserved-tracker-name`,
+ *     `reserved-predicate-key`, `invalid-name`) — produced while
+ *     resolving plugin shapes into the runtime registry. The
+ *     collision kinds in this group flag duplicates among
+ *     plugin-author-shipped declarations across the active plugin
+ *     set; `invalid-name` flags a plugin / rule / observer name
+ *     containing characters that are disallowed in source-tagged
+ *     block reasons.
+ *
+ * Naming asymmetry: loader-side kinds suffix `-name-collision`;
+ * plugin-merger-side kinds suffix bare `-collision`. The split is
+ * intentional but doesn't strictly track within-layer vs across-layer
+ * (e.g. `plugin-name-collision` is loader-side and fires across
+ * layers). Consumers should branch on `kind`, not on the suffix shape.
+ *
+ * Disabling a plugin via `config.disabledPlugins` or a plugin-shipped
+ * rule via `config.disabledRules` is by-design behavior, not a
+ * configuration issue, so neither contributes to the diagnostic
+ * stream. Both surface as `console.info` breadcrumbs from
+ * `resolvePlugins` for plugin authors debugging "why isn't my plugin
+ * firing?" — mirrors the unused-observer drop pattern in
+ * `internal/session-runtime.ts`.
+ */
+export type SteeringDiagnosticKind =
+	/**
+	 * Both `.pi/steering/index.ts` AND `.pi/steering.ts` exist at the
+	 * same directory. The directory form wins; the flat form is
+	 * ignored. Almost always a forgotten cleanup; delete the unused
+	 * file to silence the diagnostic.
+	 */
+	| "layer-form-coexistence"
+	/**
+	 * A layer's `.pi/steering/index.ts` (or `.pi/steering.ts`) was
+	 * found on disk but its dynamic import threw — typically a syntax
+	 * error or a missing default export. The layer is skipped; outer
+	 * layers continue to load.
+	 */
+	| "layer-import-failed"
+	/**
+	 * A non-`.ts` file lives under `<dir>/.pi/steering/` (e.g.
+	 * `rules.json`, `rules.mjs`). Helpers ending in `.ts` are allowed;
+	 * other extensions are flagged so the user can rename or delete
+	 * the stray file.
+	 */
+	| "layer-stray-file"
+	/**
+	 * Two layers register a plugin with the same `name`. The inner
+	 * (closer to cwd) layer wins; the outer layer's plugin is dropped.
+	 */
+	| "plugin-name-collision"
+	/**
+	 * A single layer declares two rules under the same `name`. The
+	 * first-declared rule survives; subsequent duplicates are dropped.
+	 * Cross-layer rule shadowing is intentional and not flagged.
+	 */
+	| "rule-name-collision"
+	/**
+	 * A single layer declares two observers under the same `name`.
+	 * The first-declared observer survives; subsequent duplicates are
+	 * dropped. Cross-layer observer shadowing is intentional and not
+	 * flagged.
+	 */
+	| "observer-name-collision"
+	/**
+	 * Two plugins both register a tracker under the same name. Always
+	 * an error — two plugins claiming the same state dimension is a
+	 * bug, not a soft override. Rename one tracker or disable one
+	 * plugin.
+	 */
+	| "tracker-name-collision"
+	/**
+	 * Two plugins both register a predicate handler under the same
+	 * `when.<key>`. The first-registered handler wins; the later
+	 * plugin's handler is dropped.
+	 */
+	| "predicate-collision"
+	/**
+	 * Two plugins both register an observer with the same `name`.
+	 * The first-registered observer wins; the later plugin's observer
+	 * is dropped. Distinct from `observer-name-collision` which
+	 * applies to within-layer duplicates in user-authored config.
+	 */
+	| "observer-collision"
+	/**
+	 * Two plugins both ship a rule with the same `name`. The
+	 * first-registered rule wins; the later plugin's rule is dropped.
+	 * Distinct from `rule-name-collision` which applies to
+	 * within-layer duplicates in user-authored config.
+	 */
+	| "rule-collision"
+	/**
+	 * A plugin's `trackerExtensions` references a tracker name that
+	 * no plugin (and no built-in walker tracker) registers. The
+	 * extension is ignored.
+	 */
+	| "extension-orphan"
+	/**
+	 * A plugin attempts to register a tracker under a reserved name
+	 * (e.g. `events`). Always an error — reserved names are owned by
+	 * the engine. Rename the tracker.
+	 */
+	| "reserved-tracker-name"
+	/**
+	 * A plugin attempts to register a predicate handler under a
+	 * reserved key (an operator field like `not` or a modifier key
+	 * like `onUnknown`). Always an error — reserved keys collide
+	 * with the schema's operator/modifier surface. Rename the
+	 * predicate.
+	 */
+	| "reserved-predicate-key"
+	/**
+	 * A plugin / rule / observer name contains characters that are
+	 * disallowed in the `[steering:<name>@<source>]` block-reason
+	 * tag shown to the LLM, in `disabledRules` / `disabledPlugins`
+	 * config references, or in override-comment targets. Always an
+	 * error — names flow into user-visible strings and a malformed
+	 * (or maliciously-crafted) name lets a config author forge
+	 * block reasons that deceive the agent. Allowed: letters,
+	 * digits, underscores, dashes; must start with a letter or
+	 * digit. Rename the offending object in source.
+	 */
+	| "invalid-name";
+
+/**
+ * Structured issue surfaced while loading a steering config.
+ *
+ * Diagnostics flow up from the loader (and, in later refactor steps,
+ * the plugin merger) into the bridge runtime, which decides whether to
+ * throw or log per the user's strict-mode preference. The shape is
+ * stable so tests and future tooling can dispatch on {@link kind}
+ * without scanning {@link message} substrings.
+ *
+ * Channel-ownership split (loader / merger vs. runtime). Diagnostics
+ * captured in this stream are by-design surfaced to the strict-mode
+ * runtime so it can decide whether to throw or pass through to
+ * `console.warn`. The loader (`loader.ts`) does not call
+ * `console.*` directly — the runtime owns the policy decision.
+ * However, by-design info breadcrumbs that are NOT configuration
+ * issues (`plugin-disabled`, `rule-disabled` from `resolvePlugins`,
+ * dropped-observer notices from `dropUnusedObservers`) go directly
+ * to `console.info` from where they're produced. They're not in
+ * this kind union because they describe normal behavior the user
+ * opted into, not problems that need actioning.
+ *
+ * Render-format matrix — the same diagnostic surfaces in two
+ * shapes depending on which renderer the runtime picks:
+ *
+ *   - Multi-line aggregate (thrown `Error` from `buildSessionRuntime`):
+ *     a header line ("N config issues:") followed by a per-line bullet
+ *     `  - [type] <path: >?<message>`. One `Error.message`, multi-line.
+ *     Used when at least one diagnostic must abort the session.
+ *     Produced by `formatAggregatedDiagnostics`.
+ *   - Single-line per-diagnostic (`formatSingleLineDiagnostic`):
+ *     `[pi-steering] <ERROR: >?<path: >?<message>` per diagnostic.
+ *     Routed to `console.warn` for legacy fail-soft mode
+ *     (`failOnWarnings: false`). Only warnings reach this route in
+ *     practice — error-class diagnostics escalate to a thrown error
+ *     via the aggregated form before warnings are flushed. Also
+ *     routed to stderr for the CLI `pi-steering list` pre-flight
+ *     surface (both warnings and errors render here, with `ERROR: `
+ *     distinguishing the latter). The function itself accepts both
+ *     severities; the warnings-only narrowing is a property of the
+ *     `console.warn` route's caller, not the formatter.
+ *
+ * The CLI prints diagnostics inline as the loader yields them, rather
+ * than aggregating into a thrown error — the single-line shape
+ * gives `pi-steering list` users immediate per-issue feedback.
+ */
+export interface SteeringDiagnostic {
+	/**
+	 * Severity of the diagnostic.
+	 *
+	 *   - `"warning"` — informational; safe to ignore in legacy
+	 *     fail-soft mode.
+	 *   - `"error"` — pi-steering cannot operate safely with this
+	 *     issue present (e.g. tracker name collision); always escalates
+	 *     to a thrown error regardless of the user's strict-mode
+	 *     preference.
+	 */
+	type: "warning" | "error";
+
+	/** Discriminator for programmatic dispatch and test assertions. */
+	kind: SteeringDiagnosticKind;
+
+	/** Agent-facing message; includes context like layer path or names. */
+	message: string;
+
+	/**
+	 * Source path, when applicable. Per kind:
+	 *   - `layer-import-failed`: the source file the loader couldn't import.
+	 *   - `layer-stray-file`: the stray file under `.pi/steering/`.
+	 *   - `layer-form-coexistence`: the directory holding both forms
+	 *     (`.pi/steering.ts` AND `.pi/steering/index.ts`); the dir is
+	 *     intentional rather than picking one of the two coexisting files
+	 *     arbitrarily.
+	 *   - Within-layer collisions (`rule-name-collision`,
+	 *     `observer-name-collision` produced by `mergeRules` /
+	 *     `mergeObservers` from a per-layer `seenInLayer` Set):
+	 *     COULD carry the offending layer's source path — there is
+	 *     a single source path — but the loader does not currently
+	 *     thread it through. Treat unset for now; path plumbing for
+	 *     within-layer collisions is a v0.2 follow-up.
+	 *   - Cross-layer collisions and plugin-shipped diagnostics
+	 *     (`plugin-name-collision`, `tracker-name-collision`,
+	 *     `predicate-collision`, `observer-collision`, `rule-collision`,
+	 *     `extension-orphan`, `reserved-tracker-name`,
+	 *     `reserved-predicate-key`, `invalid-name`): unset by design.
+	 *     These diagnostics name the participants (layer paths or
+	 *     plugin names) inside `message` because there is no single
+	 *     source path — the collision spans multiple layers or
+	 *     plugins.
+	 */
+	path?: string;
 }

@@ -13,7 +13,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Modifier, Tracker } from "unbash-walker";
-import { resolvePlugins, validateName } from "./plugin-merger.ts";
+import {
+	resolvePlugins,
+	validateName,
+	validateUserConfigNames,
+} from "./plugin-merger.ts";
 import type { Observer, Plugin, Rule } from "./schema.ts";
 
 /** Build a minimal observer with a recognizable onResult. */
@@ -59,7 +63,7 @@ describe("resolvePlugins: empty input", () => {
 		assert.deepEqual(state.trackerModifiers, {});
 		assert.deepEqual(state.composedTrackers, {});
 		assert.deepEqual(state.rules, []);
-		assert.deepEqual(state.warnings, []);
+		assert.deepEqual(state.diagnostics, []);
 	});
 });
 
@@ -87,7 +91,7 @@ describe("resolvePlugins: single plugin surface", () => {
 		assert.equal(state.composedTrackers["t"], tracker);
 		assert.deepEqual(state.rules, [rule]);
 		assert.deepEqual(state.rulePluginOwners, { r: "p" });
-		assert.deepEqual(state.warnings, []);
+		assert.deepEqual(state.diagnostics, []);
 	});
 });
 
@@ -119,11 +123,11 @@ describe("resolvePlugins: predicate collision (soft)", () => {
 
 		const state = resolvePlugins([p1, p2], {});
 		assert.equal(state.predicates["branch"], keptHandler);
-		assert.equal(state.warnings.length, 1);
-		assert.equal(state.warnings[0]?.kind, "predicate-collision");
-		assert.match(state.warnings[0]?.message ?? "", /when\.branch/);
-		assert.match(state.warnings[0]?.message ?? "", /first/);
-		assert.match(state.warnings[0]?.message ?? "", /second/);
+		assert.equal(state.diagnostics.length, 1);
+		assert.equal(state.diagnostics[0]?.kind, "predicate-collision");
+		assert.match(state.diagnostics[0]?.message ?? "", /when\.branch/);
+		assert.match(state.diagnostics[0]?.message ?? "", /first/);
+		assert.match(state.diagnostics[0]?.message ?? "", /second/);
 	});
 });
 
@@ -137,8 +141,8 @@ describe("resolvePlugins: observer collision (soft)", () => {
 		const state = resolvePlugins([p1, p2], {});
 		assert.deepEqual(state.observers, [kept]);
 		assert.equal(state.observers[0], kept, "first-registered instance kept");
-		assert.equal(state.warnings.length, 1);
-		assert.equal(state.warnings[0]?.kind, "observer-collision");
+		assert.equal(state.diagnostics.length, 1);
+		assert.equal(state.diagnostics[0]?.kind, "observer-collision");
 	});
 });
 
@@ -152,13 +156,13 @@ describe("resolvePlugins: rule collision (soft)", () => {
 		const state = resolvePlugins([p1, p2], {});
 		assert.equal(state.rules.length, 1);
 		assert.equal(state.rules[0], kept);
-		assert.equal(state.warnings.length, 1);
-		assert.equal(state.warnings[0]?.kind, "rule-collision");
+		assert.equal(state.diagnostics.length, 1);
+		assert.equal(state.diagnostics[0]?.kind, "rule-collision");
 	});
 });
 
-describe("resolvePlugins: tracker collision (hard error)", () => {
-	it("throws when two plugins register the same tracker name", () => {
+describe("resolvePlugins: tracker collision (error-class diagnostic)", () => {
+	it("records an error-class tracker-name-collision diagnostic when two plugins register the same tracker name", () => {
 		const p1: Plugin = {
 			name: "first",
 			trackers: { branch: mkTracker("one") as Tracker<unknown> },
@@ -168,27 +172,80 @@ describe("resolvePlugins: tracker collision (hard error)", () => {
 			trackers: { branch: mkTracker("two") as Tracker<unknown> },
 		};
 
-		assert.throws(
-			() => resolvePlugins([p1, p2], {}),
-			/tracker name collision/,
+		const state = resolvePlugins([p1, p2], {});
+		const hit = state.diagnostics.find(
+			(d) => d.kind === "tracker-name-collision",
+		);
+		assert.ok(
+			hit,
+			`expected a tracker-name-collision diagnostic; got: ${JSON.stringify(state.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /tracker name collision/);
+		assert.match(hit.message, /"first".*"second"/);
+		// Direct callers (those that bypass `buildConfig`) check
+		// `result.diagnostics.some(d => d.type === "error")` before using
+		// the resolved state — same contract as `loadHarness`.
+		assert.ok(
+			state.diagnostics.some((d) => d.type === "error"),
+			"expected at least one error-class diagnostic",
+		);
+		// The colliding tracker is dropped from the second plugin; the first
+		// plugin's registration wins (matches the loader's first-wins ordering).
+		assert.equal((state.trackers.branch as Tracker<string>).initial, "one:init");
+	});
+
+	it("preserves warning-class diagnostics from earlier plugins alongside the tracker-name-collision error", () => {
+		// Convert-to-diagnostic guarantees: a tracker-name collision no
+		// longer aborts the merger. Earlier plugins' warning-class
+		// diagnostics (e.g. duplicate predicate names) survive on the
+		// returned `diagnostics` array, so direct callers of
+		// `resolvePlugins` see the full picture in one read instead of
+		// catching a throw and losing visibility into prior issues.
+		const p1: Plugin = {
+			name: "first",
+			predicates: { dup: () => true },
+			trackers: { branch: mkTracker("one") as Tracker<unknown> },
+		};
+		const p2: Plugin = {
+			name: "second",
+			predicates: { dup: () => false },
+			trackers: { branch: mkTracker("two") as Tracker<unknown> },
+		};
+		const state = resolvePlugins([p1, p2], {});
+		assert.ok(
+			state.diagnostics.some((d) => d.kind === "predicate-collision"),
+			"expected the predicate-collision warning to survive alongside the tracker error",
+		);
+		assert.ok(
+			state.diagnostics.some((d) => d.kind === "tracker-name-collision"),
+			"expected the tracker-name-collision error",
 		);
 	});
 
-	it('throws when a plugin registers the reserved tracker name "events"', () => {
+	it('records an error-class diagnostic when a plugin registers the reserved tracker name "events"', () => {
 		// `walkerState.events` is written by the evaluator's speculative-
 		// entry synthesis pass (see evaluator.ts `prepareBashState`). A
 		// plugin-registered `events` tracker would be silently clobbered
 		// when the evaluator merges synthesized entries in, breaking
-		// `when.happened` with `in: "tool_call"`. Schema JSDoc promises rejection;
-		// this test holds the promise honest.
+		// `when.happened` with `in: "tool_call"`. Schema JSDoc promises
+		// rejection; this test holds the promise honest.
 		const p: Plugin = {
 			name: "broken",
 			trackers: { events: mkTracker("x") as Tracker<unknown> },
 		};
-		assert.throws(
-			() => resolvePlugins([p], {}),
-			/tracker name "events" is reserved/,
+		const state = resolvePlugins([p], {});
+		const hit = state.diagnostics.find(
+			(d) => d.kind === "reserved-tracker-name",
 		);
+		assert.ok(
+			hit,
+			`expected a reserved-tracker-name diagnostic; got: ${JSON.stringify(state.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /tracker name "events" is reserved/);
+		// The reserved tracker is dropped, not added to the trackers map.
+		assert.ok(!("events" in state.trackers));
 	});
 });
 
@@ -211,7 +268,7 @@ describe("resolvePlugins: tracker extensions", () => {
 		};
 
 		const state = resolvePlugins([owner, extender], {});
-		assert.deepEqual(state.warnings, []);
+		assert.deepEqual(state.diagnostics, []);
 		assert.equal(state.trackers["cwd"], tracker, "raw tracker preserved");
 		const composed = state.composedTrackers["cwd"]!;
 		assert.notEqual(
@@ -235,9 +292,9 @@ describe("resolvePlugins: tracker extensions", () => {
 			},
 		};
 		const state = resolvePlugins([extender], {});
-		assert.equal(state.warnings.length, 1);
-		assert.equal(state.warnings[0]?.kind, "extension-orphan");
-		assert.match(state.warnings[0]?.message ?? "", /"nosuch"/);
+		assert.equal(state.diagnostics.length, 1);
+		assert.equal(state.diagnostics[0]?.kind, "extension-orphan");
+		assert.match(state.diagnostics[0]?.message ?? "", /"nosuch"/);
 		assert.deepEqual(state.trackerModifiers, {});
 		assert.deepEqual(state.composedTrackers, {});
 	});
@@ -258,7 +315,7 @@ describe("resolvePlugins: tracker extensions", () => {
 		};
 		const state = resolvePlugins([extender], {}, ["cwd"]);
 		assert.equal(
-			state.warnings.filter((w) => w.kind === "extension-orphan").length,
+			state.diagnostics.filter((w) => w.kind === "extension-orphan").length,
 			0,
 			"no orphan warning when the tracker name is declared built-in",
 		);
@@ -333,6 +390,21 @@ describe("resolvePlugins: tracker extensions", () => {
 });
 
 describe("resolvePlugins: config filters", () => {
+	let origInfo: typeof console.info;
+	let infos: string[];
+
+	function captureInfos(): void {
+		origInfo = console.info;
+		infos = [];
+		console.info = (msg: unknown) => {
+			infos.push(String(msg));
+		};
+	}
+
+	function restoreInfos(): void {
+		console.info = origInfo;
+	}
+
 	it("applies config.disabledRules to plugin-shipped rules", () => {
 		const kept = mkRule("keep-me");
 		const dropped = mkRule("drop-me");
@@ -340,11 +412,32 @@ describe("resolvePlugins: config filters", () => {
 			name: "p",
 			rules: [kept, dropped],
 		};
-		const state = resolvePlugins([plugin], { disabledRules: ["drop-me"] });
-		assert.equal(state.rules.length, 1);
-		assert.equal(state.rules[0]?.name, "keep-me");
-		const warn = state.warnings.find((w) => w.kind === "rule-disabled");
-		assert.ok(warn, "expected rule-disabled warning");
+		captureInfos();
+		try {
+			const state = resolvePlugins([plugin], { disabledRules: ["drop-me"] });
+			assert.equal(state.rules.length, 1);
+			assert.equal(state.rules[0]?.name, "keep-me");
+			// Disabling a plugin-shipped rule is by-design behavior, not a
+			// diagnostic-stream entry. Surfaced via console.info so authors
+			// debugging "why isn't my rule firing?" still get a breadcrumb.
+			assert.deepEqual(
+				state.diagnostics.filter((d) =>
+					d.message.includes("disabled"),
+				),
+				[],
+			);
+			assert.ok(
+				infos.some(
+					(m) =>
+						m.includes("[pi-steering]") &&
+						m.includes('rule "drop-me"') &&
+						m.includes("disabled via config.disabledRules"),
+				),
+				`expected a console.info breadcrumb for the disabled rule; got: ${JSON.stringify(infos)}`,
+			);
+		} finally {
+			restoreInfos();
+		}
 	});
 
 	it("applies config.disabledPlugins to skip an entire plugin", () => {
@@ -358,15 +451,50 @@ describe("resolvePlugins: config filters", () => {
 			name: "kept",
 			predicates: { other: () => true },
 		};
-		const state = resolvePlugins([p1, p2], { disabledPlugins: ["git"] });
+		captureInfos();
+		try {
+			const state = resolvePlugins([p1, p2], { disabledPlugins: ["git"] });
 
-		assert.deepEqual(state.observers, []);
-		assert.deepEqual(state.rules, []);
-		assert.ok(!("branch" in state.predicates));
-		assert.ok("other" in state.predicates);
-		const warn = state.warnings.find((w) => w.kind === "plugin-disabled");
-		assert.ok(warn, "expected plugin-disabled warning");
-		assert.match(warn?.message ?? "", /"git"/);
+			assert.deepEqual(state.observers, []);
+			assert.deepEqual(state.rules, []);
+			assert.ok(!("branch" in state.predicates));
+			assert.ok("other" in state.predicates);
+			// No diagnostic for the disabled plugin — by-design behavior.
+			assert.deepEqual(
+				state.diagnostics.filter((d) =>
+					d.message.includes("disabled"),
+				),
+				[],
+			);
+			assert.ok(
+				infos.some(
+					(m) =>
+						m.includes("[pi-steering]") &&
+						m.includes('plugin "git"') &&
+						m.includes("disabled via config.disabledPlugins"),
+				),
+				`expected a console.info breadcrumb for the disabled plugin; got: ${JSON.stringify(infos)}`,
+			);
+		} finally {
+			restoreInfos();
+		}
+	});
+
+	it("disabledPlugins covering a default plugin does NOT throw under strict default", () => {
+		// Regression for the case where `disabledPlugins: ["git"]`
+		// previously emitted a `plugin-disabled` warning that strict
+		// mode (the new default) escalated to a thrown error, breaking
+		// the most common opt-out path on first activation.
+		captureInfos();
+		try {
+			const state = resolvePlugins(
+				[{ name: "git", predicates: { branch: () => true } }],
+				{ disabledPlugins: ["git"] },
+			);
+			assert.deepEqual(state.diagnostics, []);
+		} finally {
+			restoreInfos();
+		}
 	});
 });
 
@@ -425,7 +553,7 @@ describe("S3: validateName", () => {
 	];
 	for (const n of okNames) {
 		it(`accepts ${JSON.stringify(n)}`, () => {
-			assert.doesNotThrow(() => validateName("rule", n));
+			assert.equal(validateName("rule", n), undefined);
 		});
 	}
 
@@ -447,82 +575,214 @@ describe("S3: validateName", () => {
 	];
 	for (const [label, value] of badNames) {
 		it(`rejects ${label}`, () => {
-			assert.throws(
-				() => validateName("rule", value),
-				/contains disallowed characters/,
-				`expected throw for ${label}`,
-			);
+			const d = validateName("rule", value);
+			assert.ok(d, `expected diagnostic for ${label}`);
+			assert.equal(d?.type, "error");
+			assert.equal(d?.kind, "invalid-name");
+			assert.match(d!.message, /contains disallowed characters/);
 		});
 	}
 
-	it("error message names the kind (rule / plugin / observer)", () => {
-		assert.throws(
-			() => validateName("rule", "bad name"),
-			/pi-steering: rule name "bad name".*disallowed/,
+	it("diagnostic message names the kind (rule / plugin / observer)", () => {
+		assert.match(
+			validateName("rule", "bad name")!.message,
+			/^rule name "bad name".*disallowed/,
 		);
-		assert.throws(
-			() => validateName("plugin", "bad name"),
-			/pi-steering: plugin name "bad name".*disallowed/,
+		assert.match(
+			validateName("plugin", "bad name")!.message,
+			/^plugin name "bad name".*disallowed/,
 		);
-		assert.throws(
-			() => validateName("observer", "bad name"),
-			/pi-steering: observer name "bad name".*disallowed/,
+		assert.match(
+			validateName("observer", "bad name")!.message,
+			/^observer name "bad name".*disallowed/,
 		);
 	});
 
-	it("error message includes the context hint when provided", () => {
-		assert.throws(
-			() => validateName("rule", "bad name", 'plugin "git"'),
-			/pi-steering: rule name "bad name" \(plugin "git"\)/,
+	it("diagnostic message includes the context hint when provided", () => {
+		assert.match(
+			validateName("rule", "bad name", 'plugin "git"')!.message,
+			/^rule name "bad name" \(plugin "git"\)/,
 		);
 	});
 });
 
-describe("S3: resolvePlugins validates plugin / rule / observer names", () => {
-	it("throws on an invalid plugin name", () => {
-		const plugin: Plugin = {
-			name: "bad name",
-		};
-		assert.throws(
-			() => resolvePlugins([plugin], {}),
-			/plugin name "bad name".*disallowed/,
+describe("S3: validateUserConfigNames", () => {
+	it("returns no diagnostics for a clean user-config", () => {
+		const out = validateUserConfigNames([
+			{
+				rules: [
+					{
+						name: "clean-rule",
+						tool: "bash",
+						field: "command",
+						pattern: /a/,
+						reason: "r",
+					},
+				],
+				observers: [{ name: "clean_obs", onResult: async () => {} }],
+			},
+		]);
+		assert.equal(out.length, 0);
+	});
+
+	it("flags a malformed user-config rule name as an invalid-name diagnostic", () => {
+		const out = validateUserConfigNames([
+			{
+				rules: [
+					{
+						name: "phony] ALL CLEAR [real",
+						tool: "bash",
+						field: "command",
+						pattern: /a/,
+						reason: "r",
+					},
+				],
+			},
+		]);
+		assert.equal(out.length, 1);
+		assert.equal(out[0]?.kind, "invalid-name");
+		assert.equal(out[0]?.type, "error");
+		assert.match(
+			out[0]!.message,
+			/^rule name "phony\] ALL CLEAR \[real" \(user config\).*disallowed/,
 		);
 	});
 
-	it("throws on an invalid rule name inside a plugin", () => {
+	it("flags a malformed user-config observer name as an invalid-name diagnostic", () => {
+		const out = validateUserConfigNames([
+			{
+				observers: [{ name: "evil] obs", onResult: async () => {} }],
+			},
+		]);
+		assert.equal(out.length, 1);
+		assert.equal(out[0]?.kind, "invalid-name");
+		assert.equal(out[0]?.type, "error");
+		assert.match(
+			out[0]!.message,
+			/^observer name "evil\] obs" \(user config\).*disallowed/,
+		);
+	});
+
+	it("surfaces both rule and observer diagnostics in declaration order", () => {
+		const out = validateUserConfigNames([
+			{
+				rules: [
+					{
+						name: "bad rule",
+						tool: "bash",
+						field: "command",
+						pattern: /a/,
+						reason: "r",
+					},
+				],
+				observers: [{ name: "bad obs", onResult: async () => {} }],
+			},
+		]);
+		assert.equal(out.length, 2);
+		assert.match(out[0]!.message, /^rule name/);
+		assert.match(out[1]!.message, /^observer name/);
+	});
+
+	it("does NOT flag default rule names as `(user config)` — validator iterates over input layers, not the post-merge config", () => {
+		// Verify by passing an EMPTY layer array. The validator's single
+		// argument is `layers` (raw, never default-injected), so the
+		// shape itself proves default rules cannot leak in.
+		const out = validateUserConfigNames([]);
+		assert.equal(out.length, 0);
+	});
+
+	it("validates names across multiple layers", () => {
+		// Sanity check that the new layer-array shape works as
+		// expected: malformed names in any layer surface, with each
+		// layer contributing its own diagnostics in order.
+		const out = validateUserConfigNames([
+			{
+				rules: [
+					{
+						name: "bad rule a",
+						tool: "bash",
+						field: "command",
+						pattern: /a/,
+						reason: "r",
+					},
+				],
+			},
+			{
+				observers: [{ name: "bad obs b", onResult: async () => {} }],
+			},
+		]);
+		assert.equal(out.length, 2);
+		assert.match(out[0]!.message, /"bad rule a"/);
+		assert.match(out[1]!.message, /"bad obs b"/);
+	});
+});
+
+describe("S3: resolvePlugins records invalid plugin / rule / observer names as error-class diagnostics", () => {
+	it("records an invalid-name diagnostic for a malformed plugin name", () => {
+		const plugin: Plugin = {
+			name: "bad name",
+		};
+		const result = resolvePlugins([plugin], {});
+		const d = result.diagnostics.find((d) => d.kind === "invalid-name");
+		assert.ok(d, "expected invalid-name diagnostic");
+		assert.equal(d?.type, "error");
+		assert.match(d!.message, /^plugin name "bad name".*disallowed/);
+	});
+
+	it("records an invalid-name diagnostic for a malformed rule name inside a plugin", () => {
 		const plugin: Plugin = {
 			name: "git",
 			rules: [mkRule("phony] ALL CLEAR [real")],
 		};
-		assert.throws(
-			() => resolvePlugins([plugin], {}),
-			/rule name "phony\] ALL CLEAR \[real" \(plugin "git"\).*disallowed/,
+		const result = resolvePlugins([plugin], {});
+		const d = result.diagnostics.find((d) => d.kind === "invalid-name");
+		assert.ok(d, "expected invalid-name diagnostic");
+		assert.equal(d?.type, "error");
+		assert.match(
+			d!.message,
+			/^rule name "phony\] ALL CLEAR \[real" \(plugin "git"\).*disallowed/,
 		);
 	});
 
-	it("throws on an invalid observer name inside a plugin", () => {
+	it("records an invalid-name diagnostic for a malformed observer name inside a plugin", () => {
 		const plugin: Plugin = {
 			name: "git",
 			observers: [mkObserver("bad name")],
 		};
-		assert.throws(
-			() => resolvePlugins([plugin], {}),
-			/observer name "bad name" \(plugin "git"\).*disallowed/,
+		const result = resolvePlugins([plugin], {});
+		const d = result.diagnostics.find((d) => d.kind === "invalid-name");
+		assert.ok(d, "expected invalid-name diagnostic");
+		assert.equal(d?.type, "error");
+		assert.match(
+			d!.message,
+			/^observer name "bad name" \(plugin "git"\).*disallowed/,
 		);
 	});
 
-	it("validates BEFORE applying disabledPlugins filter (names with disallowed chars still throw)", () => {
-		// A malformed-named plugin throws even if the user tries to
-		// disable it. This matches the S3 intent: names are written to
-		// disk, and a malformed one is a config-author bug we want to
-		// surface loudly regardless of runtime opt-outs.
+	it("validates BEFORE applying disabledPlugins filter (malformed names still record a diagnostic)", () => {
+		// A malformed-named plugin still records a diagnostic even if the
+		// user tries to disable it. This matches the S3 intent: names are
+		// written to disk, and a malformed one is a config-author bug we
+		// want to surface loudly regardless of runtime opt-outs.
 		const plugin: Plugin = {
 			name: "bad name",
 		};
-		assert.throws(
-			() =>
-				resolvePlugins([plugin], { disabledPlugins: ["bad name"] }),
-			/plugin name "bad name".*disallowed/,
-		);
+		const result = resolvePlugins([plugin], { disabledPlugins: ["bad name"] });
+		const d = result.diagnostics.find((d) => d.kind === "invalid-name");
+		assert.ok(d, "expected invalid-name diagnostic");
+	});
+
+	it("skips a malformed-named plugin from downstream merger work", () => {
+		// A plugin with a malformed name records the diagnostic and is
+		// excluded from tracker / rule / observer registration so the bad
+		// name doesn't leak into downstream collision keys.
+		const plugin: Plugin = {
+			name: "bad name",
+			trackers: { branch: mkTracker("branch") },
+			rules: [mkRule("valid-rule")],
+		};
+		const result = resolvePlugins([plugin], {});
+		assert.equal(result.rules.length, 0);
+		assert.deepEqual(result.trackers, {});
 	});
 });

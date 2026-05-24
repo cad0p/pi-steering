@@ -25,6 +25,7 @@ import {
 	loadSteeringConfig,
 } from "./loader.ts";
 import type { Plugin, SteeringConfig } from "./schema.ts";
+import { useIsolatedHome } from "./__test-helpers__.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -136,55 +137,58 @@ describe("loader: findConfigFile", () => {
 			join(tmp, ".pi", "steering", "index.ts"),
 			configModule("{}"),
 		);
-		assert.equal(
-			findConfigFile(tmp),
-			join(tmp, ".pi", "steering", "index.ts"),
-		);
+		const { file } = findConfigFile(tmp);
+		assert.equal(file, join(tmp, ".pi", "steering", "index.ts"));
 	});
 
 	it("falls back to .pi/steering.ts when index.ts is absent", () => {
 		writeConfig(join(tmp, ".pi", "steering.ts"), configModule("{}"));
-		assert.equal(findConfigFile(tmp), join(tmp, ".pi", "steering.ts"));
+		const { file, diagnostic } = findConfigFile(tmp);
+		assert.equal(file, join(tmp, ".pi", "steering.ts"));
+		assert.equal(diagnostic, null);
 	});
 
 	it("returns null when neither candidate exists", () => {
-		assert.equal(findConfigFile(tmp), null);
+		assert.deepEqual(findConfigFile(tmp), { file: null, diagnostic: null });
+	});
+
+	it("reports a coexistence diagnostic when both forms exist", () => {
+		writeConfig(join(tmp, ".pi", "steering.ts"), configModule("{}"));
+		writeConfig(
+			join(tmp, ".pi", "steering", "index.ts"),
+			configModule("{}"),
+		);
+		const { file, diagnostic } = findConfigFile(tmp);
+		assert.equal(file, join(tmp, ".pi", "steering", "index.ts"));
+		assert.ok(diagnostic, "expected a diagnostic when both forms coexist");
+		assert.equal(diagnostic.kind, "layer-form-coexistence");
+		assert.equal(diagnostic.type, "warning");
+		// `path` points at the parent directory — the renderer's `${path}:`
+		// prefix surfaces the dir once and the message names the conflict.
+		assert.equal(diagnostic.path, tmp);
+		assert.match(
+			diagnostic.message,
+			/both .pi\/steering.ts and .pi\/steering\/index.ts/,
+		);
 	});
 });
 
 // ---------------------------------------------------------------------------
-// loadConfigs — walk-up, stray-file warning, bad layer handling
+// loadConfigs — walk-up, stray-file diagnostic, bad layer handling
 // ---------------------------------------------------------------------------
 
 describe("loader: loadConfigs", () => {
 	let tmp: string;
-	let priorHome: string | undefined;
-	let warnings: string[];
-	let origWarn: typeof console.warn;
-
-	beforeEach(() => {
-		tmp = mkdtempSync(join(tmpdir(), "pi-steering-v2-loadcfgs-"));
-		priorHome = process.env["HOME"];
-		process.env["HOME"] = tmp;
-		warnings = [];
-		origWarn = console.warn;
-		console.warn = (msg: unknown) => {
-			warnings.push(String(msg));
-		};
-	});
-
-	afterEach(() => {
-		console.warn = origWarn;
-		if (priorHome === undefined) delete process.env["HOME"];
-		else process.env["HOME"] = priorHome;
-		rmSync(tmp, { recursive: true, force: true });
+	useIsolatedHome("pi-steering-v2-loadcfgs-", (t) => {
+		tmp = t;
 	});
 
 	it("returns empty when no layer has a config", async () => {
 		const cwd = join(tmp, "a", "b");
 		mkdirSync(cwd, { recursive: true });
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(layers, []);
+		assert.deepEqual(diagnostics, []);
 	});
 
 	it("collects ancestor configs inner-first", async () => {
@@ -199,7 +203,7 @@ describe("loader: loadConfigs", () => {
 			join(inner, ".pi", "steering.ts"),
 			configModule("{ disabledRules: ['inner-only'] }"),
 		);
-		const layers = await loadConfigs(inner);
+		const { layers } = await loadConfigs(inner);
 		// Inner (b) → outer (a) order.
 		assert.deepEqual(layers.map((l) => l.disabledRules?.[0]), [
 			"inner-only",
@@ -218,12 +222,12 @@ describe("loader: loadConfigs", () => {
 			join(cwd, ".pi", "steering", "index.ts"),
 			configModule("{ disabledRules: ['directory'] }"),
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers } = await loadConfigs(cwd);
 		assert.equal(layers.length, 1);
 		assert.deepEqual(layers[0]?.disabledRules, ["directory"]);
 	});
 
-	it("warns when BOTH steering.ts and steering/index.ts coexist, uses directory form", async () => {
+	it("reports a layer-form-coexistence diagnostic when both forms exist, uses directory form", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		writeConfig(
@@ -234,24 +238,26 @@ describe("loader: loadConfigs", () => {
 			join(cwd, ".pi", "steering", "index.ts"),
 			configModule("{ disabledRules: ['dir-form'] }"),
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.equal(layers.length, 1);
 		assert.deepEqual(
 			layers[0]?.disabledRules,
 			["dir-form"],
 			"directory form should win on ambiguous coexistence",
 		);
+		const hit = diagnostics.find((d) => d.kind === "layer-form-coexistence");
 		assert.ok(
-			warnings.some(
-				(w) =>
-					w.includes("both .pi/steering.ts and .pi/steering/index.ts") &&
-					w.includes("using directory form"),
-			),
-			`expected coexistence warning; got: ${JSON.stringify(warnings)}`,
+			hit,
+			`expected a layer-form-coexistence diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "warning");
+		assert.match(
+			hit.message,
+			/both .pi\/steering.ts and .pi\/steering\/index.ts/,
 		);
 	});
 
-	it("warns about non-.ts files under .pi/steering/", async () => {
+	it("emits a layer-stray-file diagnostic per non-.ts file under .pi/steering/", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		// Create the steering/ dir with stray non-.ts files AND no
@@ -280,18 +286,18 @@ describe("loader: loadConfigs", () => {
 			"// plain js",
 			"utf8",
 		);
-		await loadConfigs(cwd);
-		const relevant = warnings.filter((w) =>
-			w.includes("ignoring non-.ts file"),
-		);
-		assert.equal(relevant.length, 4);
-		assert.ok(relevant.some((w) => w.endsWith("rules.mjs")));
-		assert.ok(relevant.some((w) => w.endsWith("rules.json")));
-		assert.ok(relevant.some((w) => w.endsWith("rules.mts")));
-		assert.ok(relevant.some((w) => w.endsWith("rules.js")));
+		const { diagnostics } = await loadConfigs(cwd);
+		const stray = diagnostics.filter((d) => d.kind === "layer-stray-file");
+		assert.equal(stray.length, 4);
+		assert.ok(stray.every((d) => d.type === "warning"));
+		const paths = stray.map((d) => d.path ?? "");
+		assert.ok(paths.some((p) => p.endsWith("rules.mjs")));
+		assert.ok(paths.some((p) => p.endsWith("rules.json")));
+		assert.ok(paths.some((p) => p.endsWith("rules.mts")));
+		assert.ok(paths.some((p) => p.endsWith("rules.js")));
 	});
 
-	it("does NOT warn about .ts helpers under .pi/steering/", async () => {
+	it("does NOT report stray-file diagnostics for .ts helpers under .pi/steering/", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		writeConfig(
@@ -302,45 +308,51 @@ describe("loader: loadConfigs", () => {
 			join(cwd, ".pi", "steering", "helpers.ts"),
 			"export const x = 1;",
 		);
-		await loadConfigs(cwd);
+		const { diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(
-			warnings.filter((w) => w.includes("ignoring")),
+			diagnostics.filter((d) => d.kind === "layer-stray-file"),
 			[],
 		);
 	});
 
-	it("logs + skips a layer whose module fails to import", async () => {
+	it("records a layer-import-failed diagnostic and skips a layer whose module fails to import", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		writeConfig(
 			join(cwd, ".pi", "steering.ts"),
 			"export default { rules: {{ not valid ts }} };",
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(layers, []);
+		const hit = diagnostics.find((d) => d.kind === "layer-import-failed");
 		assert.ok(
-			warnings.some((w) => w.includes("failed to load config")),
-			`expected an import-failure warning, got: ${JSON.stringify(warnings)}`,
+			hit,
+			`expected a layer-import-failed diagnostic; got: ${JSON.stringify(diagnostics)}`,
 		);
+		assert.equal(hit.type, "warning");
+		assert.equal(hit.path, join(cwd, ".pi", "steering.ts"));
+		assert.match(hit.message, /failed to import/);
 	});
 
-	it("logs + skips a module whose default export isn't an object", async () => {
+	it("records a layer-import-failed diagnostic when the default export is not an object", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		writeConfig(
 			join(cwd, ".pi", "steering.ts"),
 			"export default 42;",
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(layers, []);
 		assert.ok(
-			warnings.some((w) =>
-				w.includes("must be a SteeringConfig object"),
+			diagnostics.some(
+				(d) =>
+					d.kind === "layer-import-failed" &&
+					d.message.includes("must be a SteeringConfig object"),
 			),
 		);
 	});
 
-	it("logs + skips a module with no default export", async () => {
+	it("records a layer-import-failed diagnostic when the module has no default export", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		// Named exports only — no `export default`. This used to silently
@@ -350,17 +362,21 @@ describe("loader: loadConfigs", () => {
 			join(cwd, ".pi", "steering.ts"),
 			"export const rules = [];\nexport const plugins = [];\n",
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(layers, []);
 		assert.ok(
-			warnings.some((w) => w.includes("must have a default export")),
-			`expected 'must have a default export' warning; got: ${JSON.stringify(
-				warnings,
+			diagnostics.some(
+				(d) =>
+					d.kind === "layer-import-failed" &&
+					d.message.includes("must have a default export"),
+			),
+			`expected 'must have a default export' diagnostic; got: ${JSON.stringify(
+				diagnostics,
 			)}`,
 		);
 	});
 
-	it("logs + skips a module whose default export is an array", async () => {
+	it("records a layer-import-failed diagnostic when the default export is an array", async () => {
 		const cwd = join(tmp, "project");
 		mkdirSync(cwd, { recursive: true });
 		// Arrays pass `typeof === 'object'`; the hardened guard (Fix 3)
@@ -369,15 +385,40 @@ describe("loader: loadConfigs", () => {
 			join(cwd, ".pi", "steering.ts"),
 			"export default [];",
 		);
-		const layers = await loadConfigs(cwd);
+		const { layers, diagnostics } = await loadConfigs(cwd);
 		assert.deepEqual(layers, []);
 		assert.ok(
-			warnings.some(
-				(w) =>
-					w.includes("must be a SteeringConfig object") &&
-					w.includes("got array"),
+			diagnostics.some(
+				(d) =>
+					d.kind === "layer-import-failed" &&
+					d.message.includes("must be a SteeringConfig object") &&
+					d.message.includes("got array"),
 			),
-			`expected array-rejection warning; got: ${JSON.stringify(warnings)}`,
+			`expected array-rejection diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+	});
+
+	it("layer-import-failed message does not duplicate the path that the diagnostic's `path` field already carries", async () => {
+		const cwd = join(tmp, "project");
+		mkdirSync(cwd, { recursive: true });
+		const configPath = join(cwd, ".pi", "steering.ts");
+		writeConfig(configPath, "export const rules = [];\n");
+		const { diagnostics } = await loadConfigs(cwd);
+		const hit = diagnostics.find((d) => d.kind === "layer-import-failed");
+		assert.ok(hit, "expected a layer-import-failed diagnostic");
+		assert.equal(hit.path, configPath);
+		// The path is on the diagnostic's `path` field; the message body
+		// must not embed the same absolute path. Locked here so a future
+		// edit that reintroduces the prefix fails the test.
+		assert.ok(
+			!hit.message.includes(configPath),
+			`message should not embed the path; got: ${hit.message}`,
+		);
+		assert.equal(
+			hit.message,
+			"failed to import: config file must have a default export. " +
+				"Use `export default { ... } satisfies SteeringConfig` or " +
+				"`export default defineConfig({ ... })`.",
 		);
 	});
 
@@ -397,7 +438,7 @@ describe("loader: loadConfigs", () => {
 			join(outer, ".pi", "steering", "index.ts"),
 			configModule("{ disabledRules: ['outer-dir'] }"),
 		);
-		const layers = await loadConfigs(inner);
+		const { layers } = await loadConfigs(inner);
 		assert.deepEqual(
 			layers.map((l) => l.disabledRules?.[0]),
 			["inner-flat", "outer-dir"],
@@ -411,20 +452,6 @@ describe("loader: loadConfigs", () => {
 // ---------------------------------------------------------------------------
 
 describe("loader: buildConfig", () => {
-	let warnings: string[];
-	let origWarn: typeof console.warn;
-
-	beforeEach(() => {
-		warnings = [];
-		origWarn = console.warn;
-		console.warn = (msg: unknown) => {
-			warnings.push(String(msg));
-		};
-	});
-	afterEach(() => {
-		console.warn = origWarn;
-	});
-
 	it("concatenates rules from all layers (inner-first)", () => {
 		const inner: SteeringConfig = {
 			rules: [
@@ -448,8 +475,9 @@ describe("loader: buildConfig", () => {
 				},
 			],
 		};
-		const merged = buildConfig([inner, outer]);
+		const { config: merged, diagnostics } = buildConfig([inner, outer]);
 		assert.deepEqual(merged.rules?.map((r) => r.name), ["inner", "outer"]);
+		assert.deepEqual(diagnostics, []);
 	});
 
 	it("inner rule by same name overrides outer (and stays silent)", () => {
@@ -475,15 +503,15 @@ describe("loader: buildConfig", () => {
 				},
 			],
 		};
-		const merged = buildConfig([inner, outer]);
+		const { config: merged, diagnostics } = buildConfig([inner, outer]);
 		assert.equal(merged.rules?.length, 1);
 		assert.equal(merged.rules?.[0]?.reason, "inner reason");
-		// Cross-layer rule overrides are intentional — no warning.
-		assert.deepEqual(warnings, []);
+		// Cross-layer rule overrides are intentional — no diagnostic.
+		assert.deepEqual(diagnostics, []);
 	});
 
-	it("soft-warns on within-layer duplicate rules (keeps first)", () => {
-		const merged = buildConfig([
+	it("records a rule-name-collision diagnostic for within-layer duplicate rules (keeps first)", () => {
+		const { config: merged, diagnostics } = buildConfig([
 			{
 				rules: [
 					{
@@ -509,16 +537,14 @@ describe("loader: buildConfig", () => {
 			"first-wins",
 			"first-registered rule should survive within a layer",
 		);
+		const hit = diagnostics.find((d) => d.kind === "rule-name-collision");
 		assert.ok(
-			warnings.some(
-				(w) =>
-					w.includes('duplicate rule "dup"') &&
-					w.includes("within single config layer"),
-			),
-			`expected within-layer rule-dup warning; got: ${JSON.stringify(
-				warnings,
-			)}`,
+			hit,
+			`expected a rule-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
 		);
+		assert.equal(hit.type, "warning");
+		assert.match(hit.message, /duplicate rule "dup"/);
+		assert.match(hit.message, /within single config layer/);
 	});
 
 	it("unions disabledRules / disabledPlugins across layers", () => {
@@ -530,24 +556,24 @@ describe("loader: buildConfig", () => {
 			disabledRules: ["b", "a"], // dup with inner — should coalesce
 			disabledPlugins: ["pB"],
 		};
-		const merged = buildConfig([inner, outer]);
+		const { config: merged } = buildConfig([inner, outer]);
 		assert.deepEqual(merged.disabledRules?.sort(), ["a", "b"]);
 		assert.deepEqual(merged.disabledPlugins?.sort(), ["pA", "pB"]);
 	});
 
 	it("inner `defaultNoOverride` wins; missing layer leaves outer in place", () => {
 		assert.equal(
-			buildConfig([{}, { defaultNoOverride: true }]).defaultNoOverride,
+			buildConfig([{}, { defaultNoOverride: true }]).config.defaultNoOverride,
 			true,
 			"outer sets it, inner doesn't — outer wins",
 		);
 		assert.equal(
 			buildConfig([{ defaultNoOverride: false }, { defaultNoOverride: true }])
-				.defaultNoOverride,
+				.config.defaultNoOverride,
 			false,
 			"inner explicitly false beats outer true",
 		);
-		assert.equal(buildConfig([]).defaultNoOverride, undefined);
+		assert.equal(buildConfig([]).config.defaultNoOverride, undefined);
 	});
 
 	it("inner `disableDefaults` wins", () => {
@@ -555,25 +581,57 @@ describe("loader: buildConfig", () => {
 			buildConfig([
 				{ disableDefaults: true },
 				{ disableDefaults: false },
-			]).disableDefaults,
+			]).config.disableDefaults,
 			true,
 		);
-		assert.equal(buildConfig([]).disableDefaults, undefined);
+		assert.equal(buildConfig([]).config.disableDefaults, undefined);
 	});
 
-	it("concatenates plugins; first-wins on duplicate plugin names", () => {
-		const pInner: Plugin = { name: "p", rules: [] };
-		const pOuter: Plugin = { name: "p", rules: [] };
-		const merged = buildConfig([{ plugins: [pInner] }, { plugins: [pOuter] }]);
-		assert.equal(merged.plugins?.length, 1);
-		assert.ok(
-			warnings.some((w) => w.includes('duplicate plugin "p"')),
-			`expected a plugin-collision warning: ${JSON.stringify(warnings)}`,
+	it("inner `failOnWarnings` wins; default left undefined when no layer specifies", () => {
+		// Inner-wins precedence is identical to `disableDefaults` /
+		// `defaultNoOverride` since all three flow through `mergeBool`.
+		assert.equal(
+			buildConfig([
+				{ failOnWarnings: false },
+				{ failOnWarnings: true },
+			]).config.failOnWarnings,
+			false,
+			"inner explicitly false beats outer true",
+		);
+		assert.equal(
+			buildConfig([
+				{},
+				{ failOnWarnings: true },
+			]).config.failOnWarnings,
+			true,
+			"missing inner layer leaves outer's explicit true in place",
+		);
+		assert.equal(
+			buildConfig([]).config.failOnWarnings,
+			undefined,
+			"buildConfig leaves the field undefined when no layer specifies it; runtime applies the !== false default",
 		);
 	});
 
-	it("concatenates observers; soft-warns on within-layer duplicates", () => {
-		const merged = buildConfig([
+	it("records a plugin-name-collision diagnostic for cross-layer duplicate plugin names; first-wins", () => {
+		const pInner: Plugin = { name: "p", rules: [] };
+		const pOuter: Plugin = { name: "p", rules: [] };
+		const { config: merged, diagnostics } = buildConfig([
+			{ plugins: [pInner] },
+			{ plugins: [pOuter] },
+		]);
+		assert.equal(merged.plugins?.length, 1);
+		const hit = diagnostics.find((d) => d.kind === "plugin-name-collision");
+		assert.ok(
+			hit,
+			`expected a plugin-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "warning");
+		assert.match(hit.message, /duplicate plugin "p"/);
+	});
+
+	it("records an observer-name-collision diagnostic for within-layer duplicates", () => {
+		const { config: merged, diagnostics } = buildConfig([
 			{
 				observers: [
 					{ name: "o", onResult: () => {} },
@@ -582,13 +640,19 @@ describe("loader: buildConfig", () => {
 			},
 		]);
 		assert.equal(merged.observers?.length, 1);
-		assert.ok(warnings.some((w) => w.includes('duplicate observer "o"')));
+		const hit = diagnostics.find((d) => d.kind === "observer-name-collision");
+		assert.ok(
+			hit,
+			`expected an observer-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "warning");
+		assert.match(hit.message, /duplicate observer "o"/);
 	});
 
 	it("inner observer by same name overrides outer (and stays silent)", () => {
 		const innerFn = () => {};
 		const outerFn = () => {};
-		const merged = buildConfig([
+		const { config: merged, diagnostics } = buildConfig([
 			{ observers: [{ name: "shared", onResult: innerFn }] },
 			{ observers: [{ name: "shared", onResult: outerFn }] },
 		]);
@@ -600,57 +664,139 @@ describe("loader: buildConfig", () => {
 		);
 		// Cross-layer observer overrides are the intended customization
 		// path — mirror the cross-layer rule-override test and assert no
-		// warning fires. Only within-layer duplicates warn.
-		assert.deepEqual(warnings, []);
+		// diagnostic fires. Only within-layer duplicates record one.
+		assert.deepEqual(diagnostics, []);
 	});
 
-	it("hard-errors on tracker name collision across plugins", () => {
+	it("records an error-class tracker-name-collision diagnostic when two plugins claim the same tracker", () => {
 		const t = { initial: 0, unknown: -1, modifiers: {} } as const;
 		const a: Plugin = { name: "pa", trackers: { branch: t as never } };
 		const b: Plugin = { name: "pb", trackers: { branch: t as never } };
-		assert.throws(
-			() => buildConfig([{ plugins: [a] }, { plugins: [b] }]),
-			/tracker name collision/,
+		const { diagnostics } = buildConfig([
+			{ plugins: [a] },
+			{ plugins: [b] },
+		]);
+		const hit = diagnostics.find((d) => d.kind === "tracker-name-collision");
+		assert.ok(
+			hit,
+			`expected a tracker-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /tracker name collision/);
+		assert.match(hit.message, /branch/);
+	});
+
+	it("suppresses the tracker-name-collision diagnostic when disabledPlugins covers one of the participants", () => {
+		// The diagnostic message itself directs the user to "rename one
+		// tracker or disable one plugin". Following that remedy must
+		// resolve the diagnostic in the same edit — same disable-then-
+		// detect ordering as plugin-name-collision and rule-name-collision.
+		const t = { initial: 0, unknown: -1, modifiers: {} } as const;
+		const a: Plugin = { name: "pa", trackers: { branch: t as never } };
+		const b: Plugin = { name: "pb", trackers: { branch: t as never } };
+		const { diagnostics } = buildConfig([
+			{ plugins: [a, b], disabledPlugins: ["pa"] },
+		]);
+		assert.equal(
+			diagnostics.filter((d) => d.kind === "tracker-name-collision").length,
+			0,
+			`disabling one participant should suppress the diagnostic; got: ${JSON.stringify(diagnostics)}`,
 		);
 	});
 
-	it("soft-warns on tracker-extension collision", () => {
-		const modifier = { scope: "per-command" as const, apply: () => "" };
-		const a: Plugin = {
-			name: "pa",
-			trackerExtensions: { cwd: { git: modifier as never } },
-		};
-		const b: Plugin = {
-			name: "pb",
-			trackerExtensions: { cwd: { git: modifier as never } },
-		};
-		buildConfig([{ plugins: [a] }, { plugins: [b] }]);
-		assert.ok(
-			warnings.some((w) =>
-				w.includes("duplicate tracker extension") && w.includes("cwd/git"),
-			),
-			`expected tracker-ext collision warning: ${JSON.stringify(warnings)}`,
+	it("still emits a tracker-name-collision diagnostic without the disable", () => {
+		// Inverse of the previous test — same colliding plugins, no
+		// disabledPlugins, the diagnostic still fires.
+		const t = { initial: 0, unknown: -1, modifiers: {} } as const;
+		const a: Plugin = { name: "pa", trackers: { branch: t as never } };
+		const b: Plugin = { name: "pb", trackers: { branch: t as never } };
+		const { diagnostics } = buildConfig([{ plugins: [a, b] }]);
+		assert.equal(
+			diagnostics.filter((d) => d.kind === "tracker-name-collision").length,
+			1,
 		);
 	});
 
-	it("soft-warns on predicate key collision", () => {
-		const handler = (_a: unknown, _c: unknown) => true;
-		const a: Plugin = {
-			name: "pa",
-			predicates: { branch: handler as never },
-		};
-		const b: Plugin = {
-			name: "pb",
-			predicates: { branch: handler as never },
-		};
-		buildConfig([{ plugins: [a] }, { plugins: [b] }]);
-		assert.ok(
-			warnings.some((w) => w.includes("duplicate predicate")),
+	it("drops a colliding plugin from collision detection when disabledPlugins covers it", () => {
+		// Disabling 'git' in any layer should suppress the cross-layer
+		// duplicate-plugin diagnostic for 'git'. The user's natural
+		// workflow on seeing the warning is to add the plugin to
+		// disabledPlugins; that edit alone should resolve the warning.
+		// The plugin still appears in the merged output (downstream
+		// surfaces tag it as disabled); collision detection is the only
+		// thing that gets suppressed.
+		const gitInner: Plugin = { name: "git", rules: [] };
+		const gitOuter: Plugin = { name: "git", rules: [] };
+		const { config: merged, diagnostics } = buildConfig([
+			{ plugins: [gitInner], disabledPlugins: ["git"] },
+			{ plugins: [gitOuter] },
+		]);
+		assert.equal(
+			merged.plugins?.length,
+			1,
+			"first-seen plugin should still survive into the merged plugin list",
+		);
+		assert.equal(merged.plugins?.[0]?.name, "git");
+		assert.deepEqual(merged.disabledPlugins, ["git"]);
+		assert.equal(
+			diagnostics.filter((d) => d.kind === "plugin-name-collision").length,
+			0,
+			`expected no plugin-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+	});
+
+	it("still emits a plugin-name-collision diagnostic without the disable", () => {
+		// Inverse of the previous test — same colliding plugins, no
+		// disabledPlugins, the cross-layer diagnostic still fires.
+		const gitInner: Plugin = { name: "git", rules: [] };
+		const gitOuter: Plugin = { name: "git", rules: [] };
+		const { diagnostics } = buildConfig([
+			{ plugins: [gitInner] },
+			{ plugins: [gitOuter] },
+		]);
+		assert.equal(
+			diagnostics.filter((d) => d.kind === "plugin-name-collision").length,
+			1,
+		);
+	});
+
+	it("drops a within-layer duplicate rule from collision detection when disabledRules covers it", () => {
+		const { config: merged, diagnostics } = buildConfig([
+			{
+				disabledRules: ["dup"],
+				rules: [
+					{
+						name: "dup",
+						tool: "bash",
+						field: "command",
+						pattern: /^FIRST/,
+						reason: "first",
+					},
+					{
+						name: "dup",
+						tool: "bash",
+						field: "command",
+						pattern: /^SECOND/,
+						reason: "second",
+					},
+				],
+			},
+		]);
+		assert.equal(
+			merged.rules?.length,
+			1,
+			"first-seen rule should still survive into the merged rule list",
+		);
+		assert.equal(merged.rules?.[0]?.name, "dup");
+		assert.equal(
+			diagnostics.filter((d) => d.kind === "rule-name-collision").length,
+			0,
+			`expected no rule-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
 		);
 	});
 
 	it("applies `defaults` as the outermost layer", () => {
-		const merged = buildConfig(
+		const { config: merged } = buildConfig(
 			[{ rules: [{ name: "user", tool: "bash", field: "command", pattern: /u/, reason: "u" }] }],
 			{
 				rules: [
@@ -673,7 +819,7 @@ describe("loader: buildConfig", () => {
 	});
 
 	it("user rule shadows a defaults rule of the same name", () => {
-		const merged = buildConfig(
+		const { config: merged } = buildConfig(
 			[
 				{
 					rules: [
@@ -710,21 +856,17 @@ describe("loader: buildConfig", () => {
 
 describe("loader: loadSteeringConfig", () => {
 	let tmp: string;
-	let priorHome: string | undefined;
 	let origWarn: typeof console.warn;
+	useIsolatedHome("pi-steering-v2-end2end-", (t) => {
+		tmp = t;
+	});
 
 	beforeEach(() => {
-		tmp = mkdtempSync(join(tmpdir(), "pi-steering-v2-end2end-"));
-		priorHome = process.env["HOME"];
-		process.env["HOME"] = tmp;
 		origWarn = console.warn;
 		console.warn = () => {};
 	});
 	afterEach(() => {
 		console.warn = origWarn;
-		if (priorHome === undefined) delete process.env["HOME"];
-		else process.env["HOME"] = priorHome;
-		rmSync(tmp, { recursive: true, force: true });
 	});
 
 	it("loads + merges a single-layer project", async () => {
@@ -736,15 +878,16 @@ describe("loader: loadSteeringConfig", () => {
 				`{ rules: [{ name: "r", tool: "bash", field: "command", pattern: "^git", reason: "r" }] }`,
 			),
 		);
-		const merged = await loadSteeringConfig(cwd);
+		const { config: merged, diagnostics } = await loadSteeringConfig(cwd);
 		assert.equal(merged.rules?.length, 1);
 		assert.equal(merged.rules?.[0]?.name, "r");
+		assert.deepEqual(diagnostics, []);
 	});
 
 	it("applies caller-supplied defaults when no layer sets a field", async () => {
 		const cwd = join(tmp, "p");
 		mkdirSync(cwd, { recursive: true });
-		const merged = await loadSteeringConfig(cwd, {
+		const { config: merged, diagnostics } = await loadSteeringConfig(cwd, {
 			defaultNoOverride: true,
 			rules: [
 				{
@@ -758,5 +901,153 @@ describe("loader: loadSteeringConfig", () => {
 		});
 		assert.equal(merged.defaultNoOverride, true);
 		assert.equal(merged.rules?.[0]?.name, "built-in");
+		assert.deepEqual(diagnostics, []);
+	});
+
+	it("surfaces both loader-side and merge-side diagnostics in a single array", async () => {
+		// Stage a dual-form coexistence (loader-side warning) plus a
+		// within-layer rule-name collision (merge-side warning) so we
+		// can confirm both streams flow through the wrapper.
+		const cwd = join(tmp, "p");
+		mkdirSync(cwd, { recursive: true });
+		writeConfig(
+			join(cwd, ".pi", "steering.ts"),
+			configModule("{}"),
+		);
+		writeConfig(
+			join(cwd, ".pi", "steering", "index.ts"),
+			configModule(
+				`{ rules: [
+					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
+					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+				] }`,
+			),
+		);
+		const { diagnostics } = await loadSteeringConfig(cwd);
+		assert.ok(
+			diagnostics.some((d) => d.kind === "layer-form-coexistence"),
+			`expected a layer-form-coexistence diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.ok(
+			diagnostics.some((d) => d.kind === "rule-name-collision"),
+			`expected a rule-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+	});
+
+	it("surfaces plugin-merger-side warnings (predicate-collision)", async () => {
+		// External embedders calling `loadSteeringConfig` for their own
+		// pre-flight check or bridge wiring need to see merger-side
+		// diagnostics, not just loader-side ones — otherwise their lint
+		// pass false-greens on configs that production refuses to start.
+		const cwd = join(tmp, "p");
+		mkdirSync(cwd, { recursive: true });
+		writeConfig(
+			join(cwd, ".pi", "steering.ts"),
+			configModule(
+				`{ plugins: [
+					{ name: "p1", predicates: { branch: () => true } },
+					{ name: "p2", predicates: { branch: () => false } },
+				] }`,
+			),
+		);
+		const { diagnostics } = await loadSteeringConfig(cwd);
+		const hit = diagnostics.find((d) => d.kind === "predicate-collision");
+		assert.ok(
+			hit,
+			`expected a predicate-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "warning");
+	});
+
+	it("surfaces plugin-merger-side errors (reserved-tracker-name)", async () => {
+		// reserved-tracker-name is an error-class diagnostic produced
+		// inside `resolvePlugins`. Without the plugin merger wired in, an
+		// embedder using `loadSteeringConfig` as a pre-flight would never
+		// see it — production's `buildSessionRuntime` would refuse to
+		// start on the same config.
+		const cwd = join(tmp, "p");
+		mkdirSync(cwd, { recursive: true });
+		writeConfig(
+			join(cwd, ".pi", "steering.ts"),
+			configModule(
+				`{ plugins: [
+					{
+						name: "reserved-name-plugin",
+						trackers: { events: { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" } },
+					},
+				] }`,
+			),
+		);
+		const { diagnostics } = await loadSteeringConfig(cwd);
+		const hit = diagnostics.find(
+			(d) => d.kind === "reserved-tracker-name",
+		);
+		assert.ok(
+			hit,
+			`expected a reserved-tracker-name diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+	});
+
+	it("surfaces malformed user-config rule names as invalid-name diagnostics (does NOT throw)", async () => {
+		// User-config name validation runs inside the shared merge-pipeline
+		// helper between `buildConfig` and `resolvePlugins`, so external
+		// embedders calling `loadSteeringConfig` get the same `invalid-name`
+		// diagnostic stream as the runtime / harness / CLI surfaces.
+		const cwd = join(tmp, "p");
+		mkdirSync(cwd, { recursive: true });
+		writeConfig(
+			join(cwd, ".pi", "steering.ts"),
+			configModule(
+				`{ rules: [
+					{ name: "phony] BAD", tool: "bash", field: "command", pattern: /^never$/, reason: "r" },
+				] }`,
+			),
+		);
+		const { diagnostics } = await loadSteeringConfig(cwd);
+		const hit = diagnostics.find((d) => d.kind === "invalid-name");
+		assert.ok(
+			hit,
+			`expected an invalid-name diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /\(user config\)/);
+	});
+
+	it("surfaces BOTH a tracker-name-collision AND a malformed user-config rule name in one load", async () => {
+		// Combined error: tracker-name-collision (merge-side) plus a
+		// malformed user-config rule name. Pins that user-config name
+		// validation runs unconditionally so embedders see both in one
+		// `loadSteeringConfig` call.
+		const cwd = join(tmp, "p");
+		mkdirSync(cwd, { recursive: true });
+		writeConfig(
+			join(cwd, ".pi", "steering.ts"),
+			configModule(
+				`{
+					plugins: [
+						{ name: "pa", trackers: { branch: { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" } } },
+						{ name: "pb", trackers: { branch: { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" } } },
+					],
+					rules: [
+						{ name: "phony] BAD", tool: "bash", field: "command", pattern: /^never$/, reason: "r" },
+					],
+				}`,
+			),
+		);
+		const { diagnostics } = await loadSteeringConfig(cwd);
+		assert.ok(
+			diagnostics.some((d) => d.kind === "tracker-name-collision"),
+			`expected a tracker-name-collision diagnostic; got: ${JSON.stringify(diagnostics)}`,
+		);
+		assert.ok(
+			diagnostics.some(
+				(d) =>
+					d.kind === "invalid-name" &&
+					/phony\] BAD/.test(d.message) &&
+					/\(user config\)/.test(d.message),
+			),
+			`expected an invalid-name diagnostic for the malformed user-config rule; got: ${JSON.stringify(diagnostics)}`,
+		);
 	});
 });

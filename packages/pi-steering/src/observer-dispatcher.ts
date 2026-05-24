@@ -107,12 +107,31 @@ export function buildObserverDispatcher(
 	userObservers: readonly Observer[],
 	host: EvaluatorHost,
 ): ObserverDispatcher {
-	// S3: validate user-supplied observer names. Plugin observer names
-	// are validated inside `resolvePlugins` when the plugin is loaded;
-	// user-level observers flow in here directly and need their own
-	// gate.
+	// S3: validate user-supplied observer names. Production callers
+	// go through `runMergerPipeline`, which produces an
+	// `invalid-name` diagnostic for malformed user-config names and
+	// aggregates it into the strict-mode throw — so this throw is
+	// unreachable from the standard pipeline. It remains as defense-
+	// in-depth for direct callers (unit tests, future SDK embedders)
+	// that build an observer dispatcher without going through
+	// `buildSessionRuntime` / `loadHarness` / `loadSteeringConfig`.
+	// Plugin observer names are validated inside `resolvePlugins`
+	// and surface through the diagnostic stream.
+	//
+	// Latent mis-attribution risk: this loop iterates `userObservers`
+	// and labels every offender `(user config)`. If a direct caller
+	// ever forwards a plugin/default-shipped observer through
+	// `userObservers` (for testing, embedding, or a future
+	// orchestrator that consolidates observer streams) and that
+	// observer ever lands with a malformed name, this throw will
+	// mis-label it as `(user config)`. The `validateUserConfigNames`
+	// helper at the production pipeline correctly partitions user
+	// vs. plugin/default; this defensive path does not. Defaults are
+	// package-controlled and reviewed, so the case is currently
+	// unreachable.
 	for (const o of userObservers) {
-		validateName("observer", o.name, "user config");
+		const d = validateName("observer", o.name, "user config");
+		if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);
 	}
 
 	// Merge user and plugin observers; duplicates of observer.name are

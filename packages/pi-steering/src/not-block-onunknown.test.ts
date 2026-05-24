@@ -51,11 +51,11 @@ import type {
 } from "./schema.ts";
 
 // ---------------------------------------------------------------------------
-// Reserved-key registration check (plugin-merger throws)
+// Reserved-key registration check (plugin-merger records error-class diagnostic)
 // ---------------------------------------------------------------------------
 
 describe("plugin-merger: reserved predicate key registration check", () => {
-	it("throws when a plugin registers `not` as a predicate name", () => {
+	it("records an error-class diagnostic when a plugin registers `not` as a predicate name", () => {
 		const plugin: Plugin = {
 			name: "evil",
 			predicates: {
@@ -64,13 +64,16 @@ describe("plugin-merger: reserved predicate key registration check", () => {
 				not: () => true,
 			},
 		};
-		assert.throws(
-			() => resolvePlugins([plugin], {}),
-			/reserved predicate key "not"/,
+		const state = resolvePlugins([plugin], {});
+		const hit = state.diagnostics.find(
+			(d) => d.kind === "reserved-predicate-key",
 		);
+		assert.ok(hit, `expected a reserved-predicate-key diagnostic; got: ${JSON.stringify(state.diagnostics)}`);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /reserved predicate key "not"/);
 	});
 
-	it("throws when a plugin registers `onUnknown` as a predicate name", () => {
+	it("records an error-class diagnostic when a plugin registers `onUnknown` as a predicate name", () => {
 		const plugin: Plugin = {
 			name: "evil",
 			predicates: {
@@ -80,10 +83,13 @@ describe("plugin-merger: reserved predicate key registration check", () => {
 				onUnknown: () => true,
 			},
 		};
-		assert.throws(
-			() => resolvePlugins([plugin], {}),
-			/reserved predicate key "onUnknown"/,
+		const state = resolvePlugins([plugin], {});
+		const hit = state.diagnostics.find(
+			(d) => d.kind === "reserved-predicate-key",
 		);
+		assert.ok(hit);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /reserved predicate key "onUnknown"/);
 	});
 
 	it("`onUnknown` collision suggests `unknownPolicy` (modifier-collision suggestion convention)", () => {
@@ -99,26 +105,27 @@ describe("plugin-merger: reserved predicate key registration check", () => {
 			name: "evil",
 			predicates: { onUnknown: () => true },
 		};
-		assert.throws(
-			() => resolvePlugins([plugin], {}),
-			/unknownPolicy/,
+		const state = resolvePlugins([plugin], {});
+		const hit = state.diagnostics.find(
+			(d) => d.kind === "reserved-predicate-key",
 		);
+		assert.ok(hit);
+		assert.match(hit.message, /unknownPolicy/);
 	});
 
-	it("error message includes the offending plugin name and a suggested alternative", () => {
+	it("diagnostic message includes the offending plugin name and a suggested alternative", () => {
 		const plugin: Plugin = {
 			name: "my-plugin",
 			predicates: { not: () => true },
 		};
-		assert.throws(
-			() => resolvePlugins([plugin], {}),
-			(err: Error) => {
-				assert.match(err.message, /Plugin "my-plugin"/);
-				assert.match(err.message, /isNot/); // suggested alternative
-				assert.match(err.message, /not, onUnknown/); // full reserved set listed
-				return true;
-			},
+		const state = resolvePlugins([plugin], {});
+		const hit = state.diagnostics.find(
+			(d) => d.kind === "reserved-predicate-key",
 		);
+		assert.ok(hit);
+		assert.match(hit.message, /Plugin "my-plugin"/);
+		assert.match(hit.message, /isNot/); // suggested alternative
+		assert.match(hit.message, /not, onUnknown/); // full reserved set listed
 	});
 
 	it("accepts non-reserved names \u2014 sanity check that the throw is targeted", () => {

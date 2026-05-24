@@ -362,6 +362,287 @@ describe("loadHarness", () => {
 			"disabled plugin rule must not appear in resolved state",
 		);
 	});
+
+	it("surfaces an empty diagnostics array for a clean config", () => {
+		const rule = {
+			name: "clean",
+			tool: "bash" as const,
+			field: "command" as const,
+			pattern: /^never$/,
+			reason: "clean",
+		};
+		const harness = loadHarness({ config: { rules: [rule] } });
+		assert.deepEqual(harness.diagnostics, []);
+	});
+
+	it("does NOT throw on a malformed plugin name; surfaces it as an invalid-name error-class diagnostic", () => {
+		// `validateName` flows through the diagnostic stream rather than
+		// throwing so plugin-author tests can read the failure surface
+		// from `harness.diagnostics` instead of catching a thrown Error.
+		const plugin: Plugin = {
+			// Spaces in a plugin name forge the `[steering:<name>@<source>]`
+			// block-reason tag (S3 boundary).
+			name: "bad name",
+		};
+		const harness = loadHarness({ config: { plugins: [plugin] } });
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "invalid-name",
+		);
+		assert.ok(
+			hit,
+			`expected an invalid-name diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /^plugin name "bad name".*disallowed/);
+	});
+
+	it("returns a no-op harness on a plugin-merger-side error-class diagnostic (reserved-tracker-name)", () => {
+		// Symmetric short-circuit: any error-class diagnostic — from the
+		// loader, the cross-config merge, OR the plugin merger — produces
+		// a no-op harness so plugin-author tests see uniform behavior
+		// regardless of which surface flagged the problem. Before the
+		// short-circuit moved to AFTER `resolvePlugins`, plugin-merger
+		// errors flowed through to a partially-built harness.
+		const t = {
+			initial: "?" as const,
+			unknown: "unknown" as const,
+			modifiers: {},
+			subshellSemantics: "isolated" as const,
+		};
+		const plugin: Plugin = {
+			name: "reserved-name-plugin",
+			trackers: { events: t as never },
+			rules: [
+				{
+					name: "would-block",
+					tool: "bash" as const,
+					field: "command" as const,
+					pattern: /^.*$/,
+					reason: "never",
+				},
+			],
+		};
+		const harness = loadHarness({ config: { plugins: [plugin] } });
+		// Diagnostic surfaced.
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "reserved-tracker-name",
+		);
+		assert.ok(
+			hit,
+			`expected a reserved-tracker-name diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		// Harness is no-op: resolved is empty (no rules / no observers /
+		// no trackers), so the would-block rule that the plugin shipped
+		// alongside the bad tracker doesn't fire either.
+		assert.equal(harness.resolved.rules.length, 0);
+		assert.equal(harness.resolved.observers.length, 0);
+		assert.deepEqual(harness.resolved.trackers, {});
+		// Consistency: resolved.diagnostics mirrors the outer
+		// harness.diagnostics in the no-op short-circuit branch so
+		// consumers reading either surface get the same list.
+		assert.equal(
+			harness.resolved.diagnostics.length,
+			harness.diagnostics.length,
+		);
+		assert.ok(
+			harness.resolved.diagnostics.some(
+				(d) => d.kind === "reserved-tracker-name",
+			),
+		);
+	});
+
+	it("surfaces an error-class diagnostic when a plugin claims a reserved tracker name", () => {
+		// Plugin authors writing tests against `loadHarness` should see
+		// reserved-name violations in their diagnostics array, NOT a thrown
+		// error that hides which other diagnostics fired alongside.
+		const t = {
+			initial: "?" as const,
+			unknown: "unknown" as const,
+			modifiers: {},
+			subshellSemantics: "isolated" as const,
+		};
+		const plugin: Plugin = {
+			name: "reserved-name-plugin",
+			// `events` is reserved for the evaluator's speculative-entry
+			// synthesis; plugins must not register a tracker under that name.
+			trackers: { events: t as never },
+		};
+		const harness = loadHarness({ config: { plugins: [plugin] } });
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "reserved-tracker-name",
+		);
+		assert.ok(
+			hit,
+			`expected a reserved-tracker-name diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+	});
+
+	it("surfaces a warning-class diagnostic when two plugins register the same predicate key", () => {
+		const plugin1: Plugin = {
+			name: "p1",
+			predicates: { branch: () => true },
+		};
+		const plugin2: Plugin = {
+			name: "p2",
+			predicates: { branch: () => false },
+		};
+		const harness = loadHarness({
+			config: { plugins: [plugin1, plugin2] },
+		});
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "predicate-collision",
+		);
+		assert.ok(
+			hit,
+			`expected a predicate-collision diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "warning");
+	});
+
+	it("does NOT throw on a tracker-name collision; surfaces it as a single error-class diagnostic", () => {
+		// loadHarness aggregates loader + buildConfig + resolvePlugins
+		// diagnostics and short-circuits to a no-op evaluator/dispatcher
+		// when any error-class diagnostic fires, so plugin-author tests
+		// can read the diagnostic from `harness.diagnostics` instead of
+		// catching a thrown Error. The shared merge-pipeline helper
+		// short-circuits before resolvePlugins, so the same collision
+		// should appear exactly once even though both buildConfig's
+		// detectTrackerNameCollisions and resolvePlugins independently
+		// flag the same shape.
+		const t = {
+			initial: "?" as const,
+			unknown: "unknown" as const,
+			modifiers: {},
+			subshellSemantics: "isolated" as const,
+		};
+		const harness = loadHarness({
+			config: {
+				plugins: [
+					{ name: "pa", trackers: { branch: t as never } },
+					{ name: "pb", trackers: { branch: t as never } },
+				],
+			},
+		});
+		const hits = harness.diagnostics.filter(
+			(d) => d.kind === "tracker-name-collision",
+		);
+		assert.equal(
+			hits.length,
+			1,
+			`expected a single tracker-name-collision diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		const [hit] = hits;
+		assert.equal(hit?.type, "error");
+	});
+
+	it("does NOT throw on a malformed user-config rule name; surfaces it as an invalid-name error-class diagnostic", () => {
+		// User-config rule name validation runs inside the shared
+		// merge-pipeline helper before `resolvePlugins`, so a malformed
+		// rule name in the harness's input config produces the same
+		// `kind: "invalid-name"` diagnostic shape as a malformed
+		// plugin-shipped rule name. Without unification the harness
+		// would throw a plain `pi-steering: rule name "..."` Error from
+		// `buildEvaluator`, contradicting the documented "does NOT throw
+		// on error-class diagnostics" contract.
+		const harness = loadHarness({
+			config: {
+				rules: [
+					{
+						name: "phony] BAD",
+						tool: "bash" as const,
+						field: "command" as const,
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			},
+		});
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "invalid-name",
+		);
+		assert.ok(
+			hit,
+			`expected an invalid-name diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /^rule name "phony\] BAD".*disallowed/);
+		assert.match(hit.message, /\(user config\)/);
+		// Harness short-circuits to a no-op evaluator/dispatcher pair
+		// the same way it does for plugin-shipped errors.
+		assert.equal(harness.resolved.rules.length, 0);
+	});
+
+	it("does NOT throw on a malformed user-config observer name; surfaces it as an invalid-name error-class diagnostic", () => {
+		// Same shape as the rule-name case but for observers — confirms
+		// the validation covers both surfaces of `validateUserConfigNames`.
+		const harness = loadHarness({
+			config: {
+				observers: [
+					{
+						name: "bad observer name",
+						watch: { toolName: "bash" as const },
+						onResult: () => {},
+					},
+				],
+			},
+		});
+		const hit = harness.diagnostics.find(
+			(d) => d.kind === "invalid-name",
+		);
+		assert.ok(
+			hit,
+			`expected an invalid-name diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.equal(hit.type, "error");
+		assert.match(hit.message, /^observer name "bad observer name".*disallowed/);
+		assert.match(hit.message, /\(user config\)/);
+	});
+
+	it("surfaces BOTH a tracker-name-collision AND a malformed user-config rule name in one harness load", () => {
+		// Combined error: tracker-name-collision (merge-side) plus a
+		// malformed user-config rule name. Pins that user-config name
+		// validation runs unconditionally so both surface in one
+		// harness load, not on consecutive runs.
+		const t = {
+			initial: "?" as const,
+			unknown: "unknown" as const,
+			modifiers: {},
+			subshellSemantics: "isolated" as const,
+		};
+		const harness = loadHarness({
+			config: {
+				plugins: [
+					{ name: "pa", trackers: { branch: t as never } },
+					{ name: "pb", trackers: { branch: t as never } },
+				],
+				rules: [
+					{
+						name: "phony] BAD",
+						tool: "bash" as const,
+						field: "command" as const,
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			},
+		});
+		assert.ok(
+			harness.diagnostics.some(
+				(d) => d.kind === "tracker-name-collision",
+			),
+			`expected a tracker-name-collision diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+		assert.ok(
+			harness.diagnostics.some(
+				(d) =>
+					d.kind === "invalid-name" &&
+					/phony\] BAD/.test(d.message) &&
+					/\(user config\)/.test(d.message),
+			),
+			`expected an invalid-name diagnostic for the malformed user-config rule; got: ${JSON.stringify(harness.diagnostics)}`,
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------

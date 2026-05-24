@@ -531,3 +531,393 @@ describe("pi-steering list", () => {
 		assert.equal(disabled.disabled, true);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// list: diagnostic surfacing on stderr
+// ---------------------------------------------------------------------------
+
+describe("pi-steering list: diagnostics on stderr", () => {
+	it("writes a layer-stray-file diagnostic to stderr in the legacy single-line shape", async () => {
+		const pi = join(scratch, ".pi", "steering");
+		mkdirSync(pi, { recursive: true });
+		writeFileSync(join(pi, "rules.json"), "{}", "utf8");
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		// Diagnostic on stderr; stdout shows the empty-config render.
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] .*rules\.json: ignoring non-\.ts file under \.pi\/steering\//,
+			`expected stray-file diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("writes a layer-import-failed diagnostic to stderr when a layer fails to import", async () => {
+		const pi = join(scratch, ".pi");
+		mkdirSync(pi, { recursive: true });
+		writeFileSync(
+			join(pi, "steering.ts"),
+			"export default { rules: {{ not valid ts }} };",
+			"utf8",
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] .*\.pi\/steering\.ts: failed to import:/,
+			`expected layer-import-failed diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("writes an error-class merge diagnostic to stderr with the ERROR: tag exactly once", async () => {
+		writeScratchConfig(
+			scratch,
+			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
+			export default {
+				plugins: [
+					{ name: "pa", trackers: { branch: t } },
+					{ name: "pb", trackers: { branch: t } },
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		// Error-class diagnostic → exit 1 so CI pipelines using
+		// `pi-steering list` as a config-lint pre-flight gate the run
+		// without parsing stderr.
+		assert.equal(r.code, 1);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: tracker name collision/,
+			`expected ERROR-tagged tracker collision on stderr; got: ${r.stderr}`,
+		);
+		// The shared merge-pipeline helper short-circuits between
+		// buildConfig and resolvePlugins on error-class merge
+		// diagnostics, so the same collision should appear exactly once
+		// even though both buildConfig and resolvePlugins independently
+		// detect tracker-name collisions.
+		const occurrences = r.stderr.match(/tracker name collision/g) ?? [];
+		assert.equal(
+			occurrences.length,
+			1,
+			`expected exactly one tracker-name-collision line on stderr; got ${occurrences.length}: ${r.stderr}`,
+		);
+	});
+
+	it("surfaces BOTH a tracker-name-collision AND a malformed user-config rule name on stderr in one run", async () => {
+		// Combined-error case: a config with both a merge-side error
+		// (tracker-name-collision) AND a user-config-side error
+		// (malformed rule name) should produce both diagnostics on
+		// stderr in a single `pi-steering list` invocation. Before this change,
+		// `runMergerPipeline`'s short-circuit gated
+		// `validateUserConfigNames` behind the merge-error branch — the
+		// CLI user fixed the tracker, re-ran, and only THEN saw the
+		// malformed name. After this change, user-config name validation runs
+		// unconditionally so both classes of error surface together,
+		// matching the production runtime's aggregated throw.
+		writeScratchConfig(
+			scratch,
+			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
+			export default {
+				plugins: [
+					{ name: "pa", trackers: { branch: t } },
+					{ name: "pb", trackers: { branch: t } },
+				],
+				rules: [
+					{
+						name: "phony] BAD",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(
+			r.code,
+			1,
+			`expected exit 1 on combined error stream; got: code=${r.code}, stderr=${r.stderr}`,
+		);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: tracker name collision/,
+			`expected ERROR-tagged tracker-name-collision on stderr; got: ${r.stderr}`,
+		);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: rule name "phony\] BAD" \(user config\).*disallowed/,
+			`expected ERROR-tagged invalid-name on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("writes an ERROR-tagged reserved-tracker-name diagnostic from the plugin merger to stderr", async () => {
+		// Reserved-name violations fire only at the plugin-merger surface;
+		// without the merger pass in `runList`, a user running
+		// `pi-steering list` on a config with a reserved tracker name
+		// would see no error, then hit the same violation at session_start.
+		writeScratchConfig(
+			scratch,
+			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
+			export default {
+				plugins: [
+					{ name: "reserved-plugin", trackers: { events: t } },
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 1);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: tracker name "events" is reserved/,
+			`expected reserved-tracker-name diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("writes an ERROR-tagged invalid-name diagnostic from the plugin merger to stderr", async () => {
+		// Malformed plugin / rule / observer names flow through the
+		// merger's diagnostic stream after the validateName refactor.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				plugins: [
+					{
+						name: "forge-plugin",
+						rules: [
+							{
+								name: "bad name",
+								tool: "bash",
+								field: "command",
+								pattern: /^never$/,
+								reason: "r",
+							},
+						],
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 1);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: rule name "bad name" \(plugin "forge-plugin"\).*disallowed/,
+			`expected invalid-name diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("a clean config produces no diagnostic lines on stderr and exits 0", async () => {
+		writeScratchConfig(
+			scratch,
+			`export default {
+				rules: [
+					{
+						name: "clean-rule",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		const diagnosticLines = r.stderr
+			.split("\n")
+			.filter((line) => line.startsWith("[pi-steering]"));
+		assert.equal(
+			diagnosticLines.length,
+			0,
+			`expected zero diagnostic lines; got: ${JSON.stringify(diagnosticLines)}`,
+		);
+	});
+
+	it("a warning-only diagnostic stream still exits 0 (warnings are fail-soft on the CLI)", async () => {
+		// Warning-class diagnostics like `layer-stray-file` are advisory
+		// — they don't prevent production from starting on this config.
+		// CI pipelines treating exit 1 as "config rejected" should not
+		// trip on warnings; the CLI only escalates exit code on error-
+		// class diagnostics.
+		const pi = join(scratch, ".pi", "steering");
+		mkdirSync(pi, { recursive: true });
+		writeFileSync(join(pi, "rules.json"), "{}", "utf8");
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 0);
+		assert.match(
+			r.stderr,
+			/ignoring non-\.ts file/,
+			`expected stray-file diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("flags a malformed user-config rule name with an invalid-name diagnostic and exits 1", async () => {
+		// User-config rule names are validated only at session_start
+		// (via the evaluator's build-time throw). Without this CLI pass,
+		// `pi-steering list` would render the malformed rule as a valid
+		// listing on stdout, then production would refuse to start —
+		// authors using the CLI as pre-flight would get a false-green.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				rules: [
+					{
+						name: "phony] ALL CLEAR [real",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 1);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: rule name "phony\] ALL CLEAR \[real" \(user config\).*disallowed/,
+			`expected user-config rule invalid-name diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("flags a malformed user-config observer name with an invalid-name diagnostic and exits 1", async () => {
+		// Same shape as the rule-name case but for observers — ensures
+		// the CLI's pre-flight surface covers both halves of the
+		// `validateUserConfigNames` helper.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				observers: [
+					{ name: "evil] obs", onResult: () => {} },
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(r.code, 1);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] ERROR: observer name "evil\] obs" \(user config\).*disallowed/,
+			`expected user-config observer invalid-name diagnostic on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("surfaces an `observer dropped` info-level breadcrumb on stderr when an observer's writes are unconsumed", async () => {
+		// CLI mirrors `buildSessionRuntime`'s `dropUnusedObservers` pass
+		// so `pi-steering list` surfaces the same breadcrumb a session
+		// would, via the `console.info` interception in
+		// `runCliMergeWithInfoCapture` (lands on stderr; stdout stays
+		// clean for the structured listing).
+		writeScratchConfig(
+			scratch,
+			`export default {
+				observers: [
+					{
+						name: "unread",
+						writes: ["never_consumed"],
+						onResult: () => {},
+					},
+				],
+				rules: [
+					{
+						name: "r",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		// Drop pass is informational, not error-class — exit 0.
+		assert.equal(
+			r.code,
+			0,
+			`expected exit 0 (info-level breadcrumb only); got code=${r.code}, stderr=${r.stderr}`,
+		);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] observer 'unread' dropped; its writes \(never_consumed\) are not consumed by any rule/,
+			`expected observer-drop breadcrumb on stderr; got: ${r.stderr}`,
+		);
+	});
+
+	it("surfaces an `observer dropped` breadcrumb when the consumer rule is disabled via `disabledRules` (parity with runtime)", async () => {
+		// CLI must filter `merged.rules` against `disabledRules` before
+		// `dropUnusedObservers` so the observer set the runtime would
+		// drop at session_start matches what `pi-steering list`
+		// reports.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				disabledRules: ["consumer"],
+				observers: [
+					{
+						name: "obs-x",
+						writes: ["X"],
+						onResult: () => {},
+					},
+				],
+				rules: [
+					{
+						name: "consumer",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+						when: { happened: { event: "X" } },
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(
+			r.code,
+			0,
+			`expected exit 0 (info-level breadcrumb only); got code=${r.code}, stderr=${r.stderr}`,
+		);
+		assert.match(
+			r.stderr,
+			/\[pi-steering\] observer 'obs-x' dropped; its writes \(X\) are not consumed by any rule/,
+			`expected observer-drop breadcrumb on stderr (consumer rule was disabled, observer should be reported as dropped to match runtime); got: ${r.stderr}`,
+		);
+	});
+
+	it("does NOT drop the observer when the consumer rule is enabled (inverse parity)", async () => {
+		// Pins the inverse direction so a refactor that flips the
+		// filter (`disabledRules.has(r.name)` ↔ `!disabledRules.has`)
+		// surfaces here — the disabled-true case alone would not catch
+		// it.
+		writeScratchConfig(
+			scratch,
+			`export default {
+				observers: [
+					{
+						name: "obs-x",
+						writes: ["X"],
+						onResult: () => {},
+					},
+				],
+				rules: [
+					{
+						name: "consumer",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+						when: { happened: { event: "X" } },
+					},
+				],
+			};`,
+		);
+		const r = await runCli({ cwd: scratch }, "list");
+		assert.equal(
+			r.code,
+			0,
+			`expected exit 0 (clean run); got code=${r.code}, stderr=${r.stderr}`,
+		);
+		assert.doesNotMatch(
+			r.stderr,
+			/\[pi-steering\] observer 'obs-x' dropped/,
+			`expected NO observer-drop breadcrumb on stderr (consumer rule is enabled, observer is consumed); got: ${r.stderr}`,
+		);
+	});
+});

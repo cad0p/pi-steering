@@ -36,12 +36,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type {
 	ExtensionAPI,
-	ExtensionContext,
 	ToolCallEvent,
-	ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import register from "./index.ts";
-import { useIsolatedHome } from "./__test-helpers__.ts";
+import { makeCtx, useIsolatedHome } from "./__test-helpers__.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Mock ExtensionAPI                                                          */
@@ -72,15 +70,6 @@ function makeMockPi(): MockPi {
 		},
 	};
 	return { api, handlers };
-}
-
-function makeExtensionCtx(cwd: string): ExtensionContext {
-	return {
-		cwd,
-		sessionManager: {
-			getEntries: () => [],
-		} as unknown as ExtensionContext["sessionManager"],
-	} as ExtensionContext;
 }
 
 function writeConfig(dir: string, body: string): void {
@@ -512,7 +501,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 		const foreignCwd = "/tmp/some/other/project";
 		await mock.handlers.session_start(
 			{ type: "session_start", reason: "startup" },
-			makeExtensionCtx(foreignCwd),
+			makeCtx(foreignCwd),
 		);
 
 		const cwdMismatchWarn = capturedWarns.find((m) =>
@@ -537,7 +526,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 		};
 		const result = await mock.handlers.tool_call(
 			toolCallEvent,
-			makeExtensionCtx(foreignCwd),
+			makeCtx(foreignCwd),
 		);
 		// No rule fires for `echo hi`; result is undefined. The
 		// crucial assertion is that the call did not throw and the
@@ -552,7 +541,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 
 		await mock.handlers.session_start!(
 			{ type: "session_start", reason: "startup" },
-			makeExtensionCtx(tmpHome),
+			makeCtx(tmpHome),
 		);
 
 		const cwdMismatchWarn = capturedWarns.find((m) =>
@@ -646,8 +635,3 @@ describe("register(): aggregated render snapshot", () => {
 		assert.equal(lines[lines.length - 1]!.startsWith("  - "), true);
 	});
 });
-
-// Keep `ToolResultEvent` imported for parity with future cases that
-// drive `tool_result` through the dispatcher.
-const _toolResultKeepalive = null as unknown as ToolResultEvent | null;
-void _toolResultKeepalive;

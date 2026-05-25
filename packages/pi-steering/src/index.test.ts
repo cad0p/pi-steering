@@ -2,7 +2,7 @@
 // Part of pi-steering.
 
 /**
- * End-to-end exercise of the pi extension wiring in v2 `register()`.
+ * End-to-end exercise of the pi extension wiring in `register()`.
  *
  * Uses an in-memory mock of `ExtensionAPI` that captures `on(...)`
  * handlers and records `appendEntry(...)` + `exec(...)` calls. We then
@@ -17,10 +17,8 @@
  *   - the walk-up TS-config loader: {@link buildSessionRuntime} reads
  *     `.pi/steering.ts` from an isolated `$HOME`.
  *
- * Why not reuse the v2 evaluator / dispatcher tests directly? Because
- * `register()` wires lifecycle events + config loading + fail-open
- * error handling into a single surface. None of the unit suites cover
- * the glue. Phase 3c is exactly this glue — hence end-to-end here.
+ * The bridge factory's lifecycle wiring + config-loading glue isn't
+ * covered by the unit suites; this file is the only end-to-end check.
  */
 
 import assert from "node:assert/strict";
@@ -28,14 +26,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type {
-	ExtensionContext,
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import register from "./index.ts";
 import { buildSessionRuntime } from "./internal/session-runtime.ts";
-import { useIsolatedHome } from "./__test-helpers__.ts";
+import { makeCtx, useIsolatedHome } from "./__test-helpers__.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Mock ExtensionAPI                                                          */
@@ -99,27 +96,13 @@ function fireAgentStart(mock: MockPi): void {
 	h({ type: "agent_start" }, {});
 }
 
-/**
- * Build a minimal ExtensionContext stub. Only `cwd` + `sessionManager`
- * are populated — the evaluator + dispatcher read those; everything
- * else throws on access.
- */
-function makeExtensionCtx(cwd: string): ExtensionContext {
-	return {
-		cwd,
-		sessionManager: {
-			getEntries: () => [],
-		} as unknown as ExtensionContext["sessionManager"],
-	} as ExtensionContext;
-}
-
 async function fireSessionStart(mock: MockPi, cwd: string): Promise<void> {
 	const h = mock.handlers.session_start;
 	if (!h) throw new Error("session_start handler not registered");
 	// Extension's session_start returns a Promise; await it.
 	await h(
 		{ type: "session_start", reason: "startup" },
-		makeExtensionCtx(cwd),
+		makeCtx(cwd),
 	);
 }
 
@@ -136,7 +119,7 @@ async function fireBashToolCall(
 		toolCallId: "call-1",
 		input: { command },
 	};
-	const r = await h(event, makeExtensionCtx(cwd));
+	const r = await h(event, makeCtx(cwd));
 	return r as ToolCallEventResult | undefined;
 }
 
@@ -154,7 +137,7 @@ async function fireWriteToolCall(
 		toolCallId: "call-2",
 		input: { path, content },
 	};
-	const r = await h(event, makeExtensionCtx(cwd));
+	const r = await h(event, makeCtx(cwd));
 	return r as ToolCallEventResult | undefined;
 }
 
@@ -172,7 +155,7 @@ async function fireEditToolCall(
 		toolCallId: "call-3",
 		input: { path, edits: [...edits] },
 	};
-	const r = await h(event, makeExtensionCtx(cwd));
+	const r = await h(event, makeCtx(cwd));
 	return r as ToolCallEventResult | undefined;
 }
 
@@ -193,7 +176,7 @@ async function fireBashToolResult(
 		isError: exitCode !== 0,
 		details: { exitCode },
 	} as unknown as ToolResultEvent;
-	await h(event, makeExtensionCtx(cwd));
+	await h(event, makeCtx(cwd));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -211,7 +194,7 @@ let priorCwd: string;
  * Restored on teardown.
  */
 function useScratchHome(): void {
-	useIsolatedHome("pi-steering-register-v2-", (t) => {
+	useIsolatedHome("pi-steering-register-", (t) => {
 		tmpHome = t;
 	});
 	beforeEach(() => {
@@ -656,7 +639,7 @@ describe("register(): unrelated tool calls pass through", () => {
 			toolCallId: "call-read",
 			input: { path: "/etc/passwd" },
 		};
-		const result = await h(event, makeExtensionCtx(tmpHome));
+		const result = await h(event, makeCtx(tmpHome));
 		assert.equal(result, undefined);
 	});
 });
@@ -714,7 +697,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 		);
 	});
 
-	it("tool_call fired before any agent_start sees agentLoopIndex === 0 (G6)", async () => {
+	it("tool_call fired before any agent_start sees agentLoopIndex === 0", async () => {
 		// Pins the counter's initial value. The counter bumps from 0 to 1
 		// on the first agent_start; a tool_call that happens BEFORE any
 		// agent_start (background tool, prompt autocompletion, extension
@@ -756,7 +739,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 		);
 	});
 
-	it("tool_call + tool_result in the same loop share the same agentLoopIndex (G6)", async () => {
+	it("tool_call + tool_result in the same loop share the same agentLoopIndex", async () => {
 		// The predicate captures the agentLoopIndex it sees; the
 		// observer's auto-tagged write records the loop index the
 		// dispatcher saw. Both must agree, end-to-end via register().
@@ -816,7 +799,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 });
 
 /* -------------------------------------------------------------------------- */
-/* Fail-open on config load error                                             */
+/* Strict mode on broken config layer                                         */
 /* -------------------------------------------------------------------------- */
 
 describe("register(): broken config layer", () => {

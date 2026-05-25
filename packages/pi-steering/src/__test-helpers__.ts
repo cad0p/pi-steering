@@ -2,7 +2,7 @@
 // Part of pi-steering.
 
 /**
- * Shared test-double helpers for v2 suites.
+ * Shared test-double helpers.
  *
  * `evaluator.test.ts` and `observer-dispatcher.test.ts` both need:
  *

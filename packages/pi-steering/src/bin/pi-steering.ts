@@ -338,13 +338,8 @@ function runCliMergeWithInfoCapture(
 			undefined,
 			EVALUATOR_BUILTIN_TRACKERS,
 		);
-		// Mirror `buildSessionRuntime`'s observer-drop pass so the CLI
-		// surfaces the same `[pi-steering] observer 'X' dropped` info-
-		// level breadcrumbs the production runtime emits at extension
-		// factory time. Skipped on merge short-circuit (`resolved ===
-		// null`) — without a resolved plugin state we can't enumerate
-		// plugin-side observers, and the merge-error short-circuit
-		// suppresses downstream surfaces uniformly.
+		// Skipped on merge short-circuit; without resolved we can't
+		// enumerate plugin-side observers.
 		if (resolved !== null) {
 			const userObservers = merged.observers ?? [];
 			// Mirror the runtime's `disabledRules` filter (see

@@ -168,7 +168,8 @@ export function buildEvaluator(
 ): EvaluatorRuntime {
 	// S3: validate user-authored rule names up front so a name like
 	// "phony] ALL CLEAR [real" can't slip into the block-reason tag
-	// shown to the LLM. Production callers go through
+	// shown to the LLM. See ./INVARIANTS.md for the S/E tag glossary.
+	// Production callers go through
 	// `runMergerPipeline`, which produces an `invalid-name` diagnostic
 	// for malformed user-config names and aggregates it into the
 	// strict-mode throw — so this throw is unreachable from the

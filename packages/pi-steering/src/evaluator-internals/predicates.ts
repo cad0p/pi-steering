@@ -721,7 +721,8 @@ function projectVerdict(
  * `@<source>` tag + key are included so the source of the throw is
  * unambiguous and operators can grep the warning channel by source
  * tag (matching the S1 wrapper format `predicate threw for rule
- * "<name>"@<source>` in {@link runPredicateChain}).
+ * "<name>"@<source>` in {@link runPredicateChain}). See
+ * ../INVARIANTS.md for the S/E tag glossary.
  */
 async function evaluateLeafTrinary(
 	handler: PredicateHandler,

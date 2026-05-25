@@ -80,6 +80,8 @@ export function formatTrackerNameCollisionMessage(
 // ---------------------------------------------------------------------------
 // Name validation (S3)
 // ---------------------------------------------------------------------------
+//
+// See ./INVARIANTS.md for the S/E tag glossary.
 
 /**
  * Allowed shape for rule / plugin / observer names. Letters, digits,

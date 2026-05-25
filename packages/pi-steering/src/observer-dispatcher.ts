@@ -109,8 +109,9 @@ export function buildObserverDispatcher(
 ): ObserverDispatcher {
 	// S3: defensive throw — user-supplied observer names go through
 	// `validateName` so a malformed name surfaces with the same
-	// `(user config)` label as production diagnostics. Production
-	// callers reach this throw via `runMergerPipeline`, which produces
+	// `(user config)` label as production diagnostics. See
+	// ./INVARIANTS.md for the S/E tag glossary. Production callers
+	// reach this throw via `runMergerPipeline`, which produces
 	// an `invalid-name` diagnostic and aggregates it into the strict-
 	// mode throw — so this throw is unreachable from the standard
 	// pipeline. It remains as defense-in-depth for direct callers

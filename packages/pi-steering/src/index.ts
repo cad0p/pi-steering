@@ -32,10 +32,8 @@ import type { EvaluatorHost } from "./evaluator.ts";
  * `failOnWarnings !== false`. With `failOnWarnings: false`,
  * surviving warnings are emitted to `console.warn` instead of
  * throwing; the bridge continues with the merged config. The bridge
- * does not catch a thrown factory — the throw propagates through
- * pi's extension loader into pi's `[Extension issues]` block (pi's
- * startup yellow-highlighted diagnostic banner), which is the only
- * diagnostic surface that survives `/reload`.
+ * does not catch a thrown factory — the throw propagates to pi's
+ * `[Extension issues]` block.
  *
  * Lifecycle wiring:
  *
@@ -51,9 +49,7 @@ import type { EvaluatorHost } from "./evaluator.ts";
  *                         session's `ctx.cwd` differs from the launch
  *                         cwd captured at factory time (cross-project
  *                         resume). The engine continues evaluating
- *                         with launch-cwd rules — partial guardrails
- *                         beat silently disabling everything for the
- *                         resumed session.
+ *                         with launch-cwd rules.
  *   - `tool_call`       — gate via the evaluator. Returns a
  *                         ToolCallEventResult to block or `undefined`
  *                         to allow.
@@ -70,7 +66,6 @@ export default async function register(pi: ExtensionAPI): Promise<void> {
 		appendEntry: pi.appendEntry,
 	};
 
-	// Captured once for the cross-project-resume detection in session_start.
 	const launchCwd = process.cwd();
 
 	const { evaluator, dispatcher } = await buildSessionRuntime(

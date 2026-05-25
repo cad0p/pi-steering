@@ -47,9 +47,10 @@
  * and the `pi-steering` CLI; this module does not throw on
  * collisions.
  *
- * NOTE: this module loads + merges CONFIG SHAPES. It does NOT execute
- * predicates, observers, or resolve plugin wiring. Those are the
- * evaluator's concerns.
+ * NOTE: `loadConfigs` + `buildConfig` load and merge config shapes.
+ * `loadSteeringConfig` additionally runs the plugin merger via
+ * `runMergerPipeline`. Predicate / observer execution is the
+ * evaluator's concern, not this module's.
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";

@@ -249,13 +249,9 @@ async function runList(args: string[]): Promise<number> {
 	// CI lint pipelines a binary signal that the config would refuse to
 	// start in production.
 	//
-	// Severity policy at this surface: BOTH warnings and errors render
-	// through `formatSingleLineDiagnostic` inline as the loader / merger
-	// yields them; the bracketed `[error]` / `[warning]` severity tag in
-	// the helper distinguishes them. The CLI deliberately renders errors
-	// inline (not via the aggregated multi-line form
-	// `buildSessionRuntime` throws) — the `pi-steering list` audience
-	// is a CI grep target, not a human reading a single thrown Error.
+	// CLI deliberately renders errors inline rather than via the
+	// aggregated thrown-Error form: the audience is a CI grep target,
+	// not a human reading a single Error.message.
 	let sawError = false;
 	const recordDiagnostic = (d: SteeringDiagnostic) => {
 		if (d.type === "error") sawError = true;

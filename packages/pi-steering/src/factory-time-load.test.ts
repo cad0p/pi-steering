@@ -108,7 +108,7 @@ function captureWarns(): void {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Cases 1-9: factory throws on each diagnostic kind                          */
+/* Factory throws on each diagnostic kind                                     */
 /* -------------------------------------------------------------------------- */
 
 describe("register(): factory throws on diagnostics", () => {
@@ -374,7 +374,7 @@ describe("register(): factory throws on diagnostics", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* Cases 10-12: factory does NOT throw                                        */
+/* Factory does NOT throw                                                     */
 /* -------------------------------------------------------------------------- */
 
 describe("register(): factory does NOT throw", () => {

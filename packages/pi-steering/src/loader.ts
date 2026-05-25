@@ -15,13 +15,13 @@
  *     the v1 JSON loader's inner-over-outer semantics.
  *   - Node ≥ 22 required (native type-stripping via `await import()`).
  *     Loader throws a clear "upgrade Node" error on older runtimes.
- *   - File extensions: `.ts` only. Other files under `.pi/steering/`
- *     are surfaced as warning-class diagnostics. Under the default
- *     strict-mode contract this aborts loading; users who keep
- *     helpers under `.pi/steering/` (e.g. `rules.ts`) must either set
- *     `failOnWarnings: false` or rename them to end in `.ts` and have
- *     them export the `defineConfig({...})` shape. Files whose name
- *     ends in `.ts` are loaded; everything else is reported.
+ *   - File extensions: `.ts` files under `.pi/steering/` are treated
+ *     as importable helpers and not reported. The single entry form
+ *     is `index.ts`; everything that is not `.ts` (e.g. `rules.json`,
+ *     `notes.md`) surfaces as a warning-class `layer-stray-file`
+ *     diagnostic. Under the strict-mode default the session-runtime
+ *     policy then aborts loading; opt out via `failOnWarnings: false`
+ *     or remove the stray file.
  *
  * Merge semantics ({@link buildConfig}):
  *

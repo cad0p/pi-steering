@@ -209,7 +209,7 @@ function writeSteeringConfig(dir: string, body: string): void {
 }
 
 /* -------------------------------------------------------------------------- */
-/* session_start + tool_call with default rules                               */
+/* factory-time-load + tool_call with default rules                           */
 /* -------------------------------------------------------------------------- */
 
 describe("register(): default rules wiring", () => {

@@ -19,27 +19,13 @@ import type { EvaluatorHost } from "./evaluator.ts";
  * Pi extension factory. Wires the steering engine onto pi's
  * lifecycle events.
  *
- * Strict-mode contract: the factory eagerly walks up from
- * `process.cwd()` and builds the per-session evaluator + dispatcher
- * via {@link buildSessionRuntime} — loading every
- * `.pi/steering/index.ts` (or `.pi/steering.ts`) from the launch cwd
- * up to and including `$HOME`, merging with `DEFAULT_RULES` +
- * `DEFAULT_PLUGINS` (unless `disableDefaults: true` is set anywhere
- * in the walk-up chain), and aggregating every
- * {@link SteeringDiagnostic} from the loader and plugin merger. The
- * runtime owns the throw: any error-class diagnostic always
- * escalates, and any warning-class diagnostic escalates when
- * `failOnWarnings !== false`. With `failOnWarnings: false`,
- * surviving warnings are emitted to `console.warn` instead of
- * throwing; the bridge continues with the merged config. The bridge
- * does not catch a thrown factory — the throw propagates to pi's
- * `[Extension issues]` block.
+ * Strict-mode contract: see {@link SteeringConfig.failOnWarnings}.
  *
  * Lifecycle wiring:
  *
  *   - factory time      — eager load via {@link buildSessionRuntime};
  *                         throws on diagnostic per the strict-mode
- *                         contract described above.
+ *                         contract.
  *   - `agent_start`     — bump the internal `agentLoopIndex` counter
  *                         so tool_call / tool_result handlers can
  *                         forward it into the evaluator + dispatcher.

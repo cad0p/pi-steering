@@ -2,55 +2,11 @@
 // Part of pi-steering.
 
 /**
- * TS-only config loader — walk-up discovery + merge.
- *
- * Per the accepted ADR ("Design → File layout and loader behavior"):
- *
- *   - Walk up from the session cwd to `$HOME` (inclusive), checking each
- *     layer for `.pi/steering/index.ts` FIRST, then `.pi/steering.ts`.
- *     First hit wins per layer. A bare `<ancestor>/steering.ts` is
- *     intentionally NOT discovered.
- *   - Inner (closer to session cwd) layers take precedence on name
- *     collisions — matches pi's project-local → global convention and
- *     the v1 JSON loader's inner-over-outer semantics.
- *   - Node ≥ 22 required (native type-stripping via `await import()`).
- *     Loader throws a clear "upgrade Node" error on older runtimes.
- *   - File extensions: `.ts` files under `.pi/steering/` are treated
- *     as importable helpers and not reported. The single entry form
- *     is `index.ts`. When the directory has no `index.ts`, non-`.ts`
- *     files (e.g. `rules.json`, `notes.md`) surface as a warning-class
- *     `layer-stray-file` diagnostic; under the strict-mode default
- *     the session-runtime policy then aborts loading. Note: a
- *     directory that DOES have `index.ts` plus non-`.ts` files
- *     silently ignores the latter. Opt out of strict mode via
- *     `failOnWarnings: false` or remove the stray file.
- *
- * Merge semantics ({@link buildConfig}):
- *
- *   - `rules`:            concat; inner layer's rule name overrides outer's.
- *   - `plugins`:          concat in declaration order; inner layers first.
- *   - `observers`:        concat; inner name overrides outer.
- *   - `disabledRules`,
- *     `disabledPlugins`:  union across layers.
- *   - `defaultNoOverride`,
- *     `disableDefaults`,
- *     `failOnWarnings`:   inner wins if set.
- *
- * Diagnostics: every collision and every per-layer load issue
- * (dual-form coexistence, dynamic-import failure, stray non-`.ts`
- * file, cross-layer name collision, tracker name collision) is
- * pushed into a {@link SteeringDiagnostic} array returned by the
- * loader functions. Tracker-name collisions are error-class
- * (the engine cannot operate safely with two plugins claiming the
- * same state dimension); all other categories are warning-class.
- * The strict-mode throw policy lives in `internal/session-runtime`
- * and the `pi-steering` CLI; this module does not throw on
- * collisions.
- *
- * NOTE: `loadConfigs` + `buildConfig` load and merge config shapes.
- * `loadSteeringConfig` additionally runs the plugin merger via
- * `runMergerPipeline`. Predicate / observer execution is the
- * evaluator's concern, not this module's.
+ * TS config loader. Walk up cwd → `$HOME`, find `.pi/steering/index.ts`
+ * or `.pi/steering.ts` per layer, dynamic-import each, merge
+ * inner-first. Per-symbol JSDoc carries the contract; see also the
+ * {@link SteeringDiagnostic} / {@link SteeringDiagnosticKind} JSDoc
+ * for the diagnostic stream.
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";

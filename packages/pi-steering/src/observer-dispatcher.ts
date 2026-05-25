@@ -107,22 +107,12 @@ export function buildObserverDispatcher(
 	userObservers: readonly Observer[],
 	host: EvaluatorHost,
 ): ObserverDispatcher {
-	// S3: defensive throw — user-supplied observer names go through
-	// `validateName` so a malformed name surfaces with the same
-	// `(user config)` label as production diagnostics. See
-	// ./INVARIANTS.md for the S/E tag glossary. Production callers
-	// reach this throw via `runMergerPipeline`, which produces
-	// an `invalid-name` diagnostic and aggregates it into the strict-
-	// mode throw — so this throw is unreachable from the standard
-	// pipeline. It remains as defense-in-depth for direct callers
-	// (unit tests, future SDK embedders) that build an observer
-	// dispatcher without going through `buildSessionRuntime` /
-	// `loadHarness` / `loadSteeringConfig`, and is exercised directly
-	// by the unit test `buildObserverDispatcher: user observer-name
-	// validation (S3)` in `observer-dispatcher.test.ts`. Plugin
-	// observer names are validated inside `resolvePlugins`; the caller
-	// is trusted to forward only user-authored observers through
-	// `userObservers`.
+	// S3 defense-in-depth: validate user-authored observer names so a
+	// malformed name surfaces with the same `(user config)` label as
+	// production diagnostics. Production routes through
+	// `runMergerPipeline`'s `invalid-name` diagnostic; this throw
+	// covers direct-caller paths (unit tests, SDK embedders).
+	// See ./INVARIANTS.md for the S/E tag glossary.
 	for (const o of userObservers) {
 		const d = validateName("observer", o.name, "user config");
 		if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);

@@ -95,16 +95,10 @@ export function runMergerPipeline(
 
 /**
  * Render a diagnostics array into a single multi-line message
- * suitable for use as a thrown Error's `message`. The format:
- *
- *   - Header: `${count} config issue${plural}:` (singular when
- *     `count === 1`).
- *   - One bullet per diagnostic, severity tag in brackets, optional
- *     path prefix when {@link SteeringDiagnostic.path} is set.
- *   - Severity ordering: errors first, then warnings. Within each
- *     severity, declaration order is preserved.
- *
- * No footer.
+ * suitable for use as a thrown Error's `message`. See {@link
+ * SteeringDiagnostic} render-format matrix for the canonical shape;
+ * the `formatAggregatedDiagnostics: rule-based spec` describe block in
+ * `internal/session-runtime.test.ts` pins the rules.
  */
 export function formatAggregatedDiagnostics(
 	diagnostics: readonly SteeringDiagnostic[],

@@ -220,11 +220,8 @@ async function runList(args: string[]): Promise<number> {
 		}
 	}
 
-	// Walk up from cwd and merge. We intentionally DON'T inject
-	// DEFAULT_PLUGINS / DEFAULT_RULES here — the `list` output should
-	// reflect what the USER authored, not the engine's built-ins. Users
-	// wanting to see built-ins can check the package README or run with
-	// a verbose flag we can add later.
+	// Walk up from cwd and merge. CLI deliberately omits
+	// DEFAULT_PLUGINS / DEFAULT_RULES; runtime injects them.
 	let layers;
 	let loaderDiagnostics: readonly SteeringDiagnostic[] = [];
 	try {

@@ -568,7 +568,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		);
 	});
 
-	it("writes an error-class merge diagnostic to stderr with the ERROR: tag exactly once", async () => {
+	it("writes an error-class merge diagnostic to stderr with the [error] tag exactly once", async () => {
 		writeScratchConfig(
 			scratch,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
@@ -586,8 +586,8 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		assert.equal(r.code, 1);
 		assert.match(
 			r.stderr,
-			/\[pi-steering\] ERROR: tracker name collision/,
-			`expected ERROR-tagged tracker collision on stderr; got: ${r.stderr}`,
+			/\[pi-steering\] \[error\] tracker name collision/,
+			`expected [error]-tagged tracker collision on stderr; got: ${r.stderr}`,
 		);
 		// The shared merge-pipeline helper short-circuits between
 		// buildConfig and resolvePlugins on error-class merge
@@ -640,17 +640,17 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		);
 		assert.match(
 			r.stderr,
-			/\[pi-steering\] ERROR: tracker name collision/,
-			`expected ERROR-tagged tracker-name-collision on stderr; got: ${r.stderr}`,
+			/\[pi-steering\] \[error\] tracker name collision/,
+			`expected [error]-tagged tracker-name-collision on stderr; got: ${r.stderr}`,
 		);
 		assert.match(
 			r.stderr,
-			/\[pi-steering\] ERROR: rule name "phony\] BAD" \(user config\).*disallowed/,
-			`expected ERROR-tagged invalid-name on stderr; got: ${r.stderr}`,
+			/\[pi-steering\] \[error\] rule name "phony\] BAD" \(user config\).*disallowed/,
+			`expected [error]-tagged invalid-name on stderr; got: ${r.stderr}`,
 		);
 	});
 
-	it("writes an ERROR-tagged reserved-tracker-name diagnostic from the plugin merger to stderr", async () => {
+	it("writes an [error]-tagged reserved-tracker-name diagnostic from the plugin merger to stderr", async () => {
 		// Reserved-name violations fire only at the plugin-merger surface;
 		// without the merger pass in `runList`, a user running
 		// `pi-steering list` on a config with a reserved tracker name
@@ -668,12 +668,12 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		assert.equal(r.code, 1);
 		assert.match(
 			r.stderr,
-			/\[pi-steering\] ERROR: tracker name "events" is reserved/,
+			/\[pi-steering\] \[error\] tracker name "events" is reserved/,
 			`expected reserved-tracker-name diagnostic on stderr; got: ${r.stderr}`,
 		);
 	});
 
-	it("writes an ERROR-tagged invalid-name diagnostic from the plugin merger to stderr", async () => {
+	it("writes an [error]-tagged invalid-name diagnostic from the plugin merger to stderr", async () => {
 		// Malformed plugin / rule / observer names flow through the
 		// merger's diagnostic stream after the validateName refactor.
 		writeScratchConfig(
@@ -699,7 +699,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		assert.equal(r.code, 1);
 		assert.match(
 			r.stderr,
-			/\[pi-steering\] ERROR: rule name "bad name" \(plugin "forge-plugin"\).*disallowed/,
+			/\[pi-steering\] \[error\] rule name "bad name" \(plugin "forge-plugin"\).*disallowed/,
 			`expected invalid-name diagnostic on stderr; got: ${r.stderr}`,
 		);
 	});
@@ -773,7 +773,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		assert.equal(r.code, 1);
 		assert.match(
 			r.stderr,
-			/\[pi-steering\] ERROR: rule name "phony\] ALL CLEAR \[real" \(user config\).*disallowed/,
+			/\[pi-steering\] \[error\] rule name "phony\] ALL CLEAR \[real" \(user config\).*disallowed/,
 			`expected user-config rule invalid-name diagnostic on stderr; got: ${r.stderr}`,
 		);
 	});
@@ -794,7 +794,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		assert.equal(r.code, 1);
 		assert.match(
 			r.stderr,
-			/\[pi-steering\] ERROR: observer name "evil\] obs" \(user config\).*disallowed/,
+			/\[pi-steering\] \[error\] observer name "evil\] obs" \(user config\).*disallowed/,
 			`expected user-config observer invalid-name diagnostic on stderr; got: ${r.stderr}`,
 		);
 	});

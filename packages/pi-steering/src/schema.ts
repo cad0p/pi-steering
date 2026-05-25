@@ -1916,16 +1916,18 @@ export type SteeringDiagnosticKind =
  *     Used when at least one diagnostic must abort the session.
  *     Produced by `formatAggregatedDiagnostics`.
  *   - Single-line per-diagnostic (`formatSingleLineDiagnostic`):
- *     `[pi-steering] <ERROR: >?<path: >?<message>` per diagnostic.
- *     Routed to `console.warn` for legacy fail-soft mode
+ *     `[pi-steering] [<severity>] <path: >?<message>` per diagnostic.
+ *     Severity tag (`[error]` / `[warning]`) follows the same
+ *     bracketed convention as the multi-line aggregate's per-line
+ *     bullets. Routed to `console.warn` for legacy fail-soft mode
  *     (`failOnWarnings: false`). Only warnings reach this route in
  *     practice — error-class diagnostics escalate to a thrown error
  *     via the aggregated form before warnings are flushed. Also
  *     routed to stderr for the CLI `pi-steering list` pre-flight
- *     surface (both warnings and errors render here, with `ERROR: `
- *     distinguishing the latter). The function itself accepts both
- *     severities; the warnings-only narrowing is a property of the
- *     `console.warn` route's caller, not the formatter.
+ *     surface (both warnings and errors render here; the bracketed
+ *     severity tag distinguishes them). The function itself accepts
+ *     both severities; the warnings-only narrowing is a property of
+ *     the `console.warn` route's caller, not the formatter.
  *
  * The CLI prints diagnostics inline as the loader yields them, rather
  * than aggregating into a thrown error — the single-line shape

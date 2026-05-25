@@ -149,13 +149,14 @@ export function formatAggregatedDiagnostics(
 /**
  * Render a single {@link SteeringDiagnostic} as a one-line message:
  *
- *   `[pi-steering] <ERROR: >?<path: >?<message>`
+ *   `[pi-steering] [<severity>] <path: >?<message>`
  *
- * Errors get an `ERROR: ` severity prefix after the `[pi-steering]`
- * tag so a user grepping CI logs has a clear handle; warnings have
- * none. Path prefix is conditional on {@link SteeringDiagnostic.path}
- * being set — cross-layer collisions (no source path) render with
- * the message alone.
+ * Severity tag (`[error]` / `[warning]`) follows the same bracketed
+ * convention as the aggregated multi-line form, so a user grepping
+ * CI logs has a uniform handle across both surfaces. Path prefix is
+ * conditional on {@link SteeringDiagnostic.path} being set —
+ * cross-layer collisions (no source path) render with the message
+ * alone.
  *
  * The aggregated multi-line form (for thrown-Error message bodies
  * in strict mode) is produced by {@link formatAggregatedDiagnostics},
@@ -163,9 +164,8 @@ export function formatAggregatedDiagnostics(
  * which severity through this helper) lives at the call sites.
  */
 export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
-	const severity = d.type === "error" ? "ERROR: " : "";
 	const pathPrefix = d.path !== undefined ? `${d.path}: ` : "";
-	return `[pi-steering] ${severity}${pathPrefix}${d.message}`;
+	return `[pi-steering] [${d.type}] ${pathPrefix}${d.message}`;
 }
 
 /**

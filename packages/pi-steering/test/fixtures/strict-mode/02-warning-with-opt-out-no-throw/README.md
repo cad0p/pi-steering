@@ -20,18 +20,19 @@ cat stderr.log
 - `stderr.log` (or the terminal's stderr if not redirected) contains
   at least one line of the form:
   ```
-  [pi-steering] duplicate rule "dup" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
+  [pi-steering] [warning] duplicate rule "dup" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
   ```
-  (single-line legacy console.warn shape; no `[warning]` severity tag,
-  no `<count> config issue` header — that's the aggregated-throw
-  format only. Cross-plugin collisions carry no `path`, so there's no
-  path prefix between `[pi-steering]` and the message text.)
+  (single-line console.warn shape; bracketed `[warning]` severity tag
+  matches the multi-line aggregate's per-bullet convention, no
+  `<count> config issue` header — that's the aggregated-throw format
+  only. Cross-plugin collisions carry no `path`, so there's no path
+  prefix between `[warning]` and the message text.)
 
 ## What this fixture pins
 
 `failOnWarnings: false` opt-out: warnings fall through to
 `console.warn` instead of escalating to a thrown factory error,
-rendered in the single-line legacy shape. This is the only path
+rendered in the unified single-line shape. This is the only path
 back to legacy fail-soft semantics; it should work end-to-end
 without a thrown factory.
 

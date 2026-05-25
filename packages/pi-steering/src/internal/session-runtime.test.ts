@@ -586,7 +586,7 @@ describe("formatAggregatedDiagnostics: rule-based spec", () => {
 });
 
 describe("formatSingleLineDiagnostic: rule-based spec", () => {
-	it("renders a warning with a path prefix and no severity tag", () => {
+	it("renders a warning with a [warning] severity tag and a path prefix", () => {
 		const d: SteeringDiagnostic = {
 			type: "warning",
 			kind: "layer-import-failed",
@@ -595,11 +595,11 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
 		};
 		assert.equal(
 			formatSingleLineDiagnostic(d),
-			"[pi-steering] /u/.pi/steering.ts: failed to import: SyntaxError",
+			"[pi-steering] [warning] /u/.pi/steering.ts: failed to import: SyntaxError",
 		);
 	});
 
-	it("renders a warning without a path prefix when path is unset", () => {
+	it("renders a warning with a [warning] severity tag and no path prefix", () => {
 		const d: SteeringDiagnostic = {
 			type: "warning",
 			kind: "plugin-name-collision",
@@ -607,11 +607,11 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
 		};
 		assert.equal(
 			formatSingleLineDiagnostic(d),
-			'[pi-steering] duplicate plugin "git"; keeping first-registered entry.',
+			'[pi-steering] [warning] duplicate plugin "git"; keeping first-registered entry.',
 		);
 	});
 
-	it("renders an error with an ERROR: severity prefix and a path prefix", () => {
+	it("renders an error with an [error] severity tag and a path prefix", () => {
 		const d: SteeringDiagnostic = {
 			type: "error",
 			kind: "layer-import-failed",
@@ -620,11 +620,11 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
 		};
 		assert.equal(
 			formatSingleLineDiagnostic(d),
-			"[pi-steering] ERROR: /u/.pi/steering.ts: failed to import: SyntaxError",
+			"[pi-steering] [error] /u/.pi/steering.ts: failed to import: SyntaxError",
 		);
 	});
 
-	it("renders an error with an ERROR: severity prefix and no path prefix", () => {
+	it("renders an error with an [error] severity tag and no path prefix", () => {
 		const d: SteeringDiagnostic = {
 			type: "error",
 			kind: "tracker-name-collision",
@@ -632,7 +632,7 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
 		};
 		assert.equal(
 			formatSingleLineDiagnostic(d),
-			'[pi-steering] ERROR: tracker name collision: plugins "a" and "b"',
+			'[pi-steering] [error] tracker name collision: plugins "a" and "b"',
 		);
 	});
 });

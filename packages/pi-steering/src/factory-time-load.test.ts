@@ -412,9 +412,10 @@ describe("register(): factory does NOT throw", () => {
 		const mock = makeMockPi();
 		// Should resolve without throwing.
 		await register(mock.api as ExtensionAPI);
-		// At least one captured warn matches the legacy single-line
-		// shape (no `[warning]` severity tag, no `<count> config
-		// issue` header — that's the aggregated-throw format only).
+		// At least one captured warn matches the unified single-line
+		// shape: `[pi-steering] [warning] <message>`. The aggregated-throw
+		// format (with `<count> config issue` header) only renders for
+		// thrown errors; this opt-out path goes through console.warn.
 		const observerWarn = capturedWarns.find((m) =>
 			/\[pi-steering\].*observer.*obs-x/i.test(m),
 		);
@@ -422,7 +423,7 @@ describe("register(): factory does NOT throw", () => {
 			observerWarn !== undefined,
 			`expected observer-collision warn on console.warn; got: ${JSON.stringify(capturedWarns)}`,
 		);
-		assert.doesNotMatch(observerWarn, /\[warning\]/);
+		assert.match(observerWarn, /\[warning\]/);
 		assert.doesNotMatch(observerWarn, /config issue/);
 	});
 
@@ -544,8 +545,14 @@ describe("register(): cwd-mismatch session_start warn", () => {
 			`expected cwd-mismatch warn; got: ${JSON.stringify(capturedWarns)}`,
 		);
 		assert.match(cwdMismatchWarn, /differs from launch cwd/);
-		assert.match(cwdMismatchWarn, new RegExp(foreignCwd));
-		assert.match(cwdMismatchWarn, new RegExp(tmpHome));
+		assert.ok(
+			cwdMismatchWarn.includes(foreignCwd),
+			`expected warn to contain foreignCwd; got: ${cwdMismatchWarn}`,
+		);
+		assert.ok(
+			cwdMismatchWarn.includes(tmpHome),
+			`expected warn to contain tmpHome; got: ${cwdMismatchWarn}`,
+		);
 
 		// Engine continues evaluating: a tool_call handler returns
 		// without throwing — the evaluator was NOT reset by the

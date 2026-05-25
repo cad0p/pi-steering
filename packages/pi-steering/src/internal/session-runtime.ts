@@ -119,10 +119,21 @@ export function runMergerPipeline(
  *     severity, declaration order is preserved.
  *
  * No footer.
+ *
+ * @param diagnostics — non-empty; caller MUST guarantee at least
+ *   one diagnostic. The function emits the `Error.message` body
+ *   assuming bullets exist; an empty input would render a header
+ *   like `0 config issues:` with no bullets, which would mislead a
+ *   user grepping CI logs.
  */
 export function formatAggregatedDiagnostics(
 	diagnostics: readonly SteeringDiagnostic[],
 ): string {
+	if (diagnostics.length === 0) {
+		throw new Error(
+			"internal: formatAggregatedDiagnostics requires at least one diagnostic",
+		);
+	}
 	const errors = diagnostics.filter((d) => d.type === "error");
 	const warnings = diagnostics.filter((d) => d.type === "warning");
 	const ordered = [...errors, ...warnings];
@@ -258,10 +269,15 @@ export async function buildSessionRuntime(
 		}
 	}
 
-	// `resolved` is non-null at this point: `runMergerPipeline` returns
-	// `resolved: null` only when merge-side diagnostics include an
-	// error-class entry, and the strict-mode throw above fires on any
-	// error-class diagnostic.
+	if (resolved === null) {
+		// Unreachable by construction: runMergerPipeline returns
+		// resolved: null only when merge-side has an error-class
+		// diagnostic, and the strict-mode throw above fires on any
+		// error-class diagnostic. Encoded explicitly so a future change
+		// to runMergerPipeline's null-on-error contract surfaces here
+		// rather than silently breaking the resolved.rules access below.
+		throw new Error("internal: resolved null without error diagnostic");
+	}
 
 	// Apply `disabledRules` to the merged rule set. Plugin-shipped rules
 	// are filtered inside `resolvePlugins`; user / default rules go
@@ -281,12 +297,12 @@ export async function buildSessionRuntime(
 	// the breadcrumb format.
 	const { pluginKept, userKept } = finalizePluginState(
 		filteredConfig.rules ?? [],
-		resolved!.rules,
+		resolved.rules,
 		filteredConfig.observers ?? [],
-		resolved!.observers,
+		resolved.observers,
 	);
 	const filteredResolved = {
-		...resolved!,
+		...resolved,
 		observers: [...pluginKept],
 	};
 

@@ -1889,11 +1889,11 @@ export type SteeringDiagnosticKind =
 /**
  * Structured issue surfaced while loading a steering config.
  *
- * Diagnostics flow up from the loader (and, in later refactor steps,
- * the plugin merger) into the bridge runtime, which decides whether to
- * throw or log per the user's strict-mode preference. The shape is
- * stable so tests and future tooling can dispatch on {@link kind}
- * without scanning {@link message} substrings.
+ * Diagnostics flow up from the loader and the plugin merger into the
+ * bridge runtime, which decides whether to throw or log per the user's
+ * strict-mode preference. The shape is stable so tests and future
+ * tooling can dispatch on {@link kind} without scanning {@link message}
+ * substrings.
  *
  * Channel-ownership split (loader / merger vs. runtime). Diagnostics
  * captured in this stream are by-design surfaced to the strict-mode
@@ -1901,11 +1901,12 @@ export type SteeringDiagnosticKind =
  * `console.warn`. The loader (`loader.ts`) does not call
  * `console.*` directly — the runtime owns the policy decision.
  * However, by-design info breadcrumbs that are NOT configuration
- * issues (`plugin-disabled`, `rule-disabled` from `resolvePlugins`,
- * dropped-observer notices from `dropUnusedObservers`) go directly
- * to `console.info` from where they're produced. They're not in
- * this kind union because they describe normal behavior the user
- * opted into, not problems that need actioning.
+ * issues (`disabledPlugins` and `disabledRules` opt-outs from
+ * `resolvePlugins`, dropped-observer notices from
+ * `dropUnusedObservers`) go directly to `console.info` from where
+ * they're produced. They're not in this kind union because they
+ * describe normal behavior the user opted into, not problems that
+ * need actioning.
  *
  * Render-format matrix — the same diagnostic surfaces in two
  * shapes depending on which renderer the runtime picks:

@@ -274,9 +274,9 @@ export async function loadConfigs(cwd: string): Promise<{
 		if (diagnostic !== null) diagnostics.push(diagnostic);
 		if (file === null) {
 			// Surface stray files under `.pi/steering/` that the loader
-			// won't pick up (e.g. `.js`, `.mjs`, `.mts`). Only check when
-			// the directory exists but has no `index.ts` — otherwise a
-			// project without any steering directory would emit noise.
+			// won't pick up. Only check when the directory exists but has
+			// no `index.ts` — otherwise a project without any steering
+			// directory would emit noise.
 			const steeringDir = join(dir, ".pi", "steering");
 			if (existsSync(steeringDir)) {
 				for (const stray of unexpectedFilesUnderSteering(dir)) {
@@ -462,9 +462,8 @@ function mergeStringUnion(
 /**
  * Inner-wins boolean merge over walked-up layers. Walks left-to-right
  * (inner-first); returns the first explicit boolean or `undefined`.
- * Used by `buildConfig` for the three boolean fields and by
- * `buildSessionRuntime` to peek `disableDefaults` before defaults
- * injection. Internal — not in the package's `exports` surface.
+ * Used by `buildConfig` and the session runtime for the inner-wins
+ * boolean fields. Internal — not in the package's `exports` surface.
  */
 export function mergeBool(
 	layers: readonly SteeringConfig[],

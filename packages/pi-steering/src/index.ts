@@ -78,9 +78,8 @@ export default async function register(pi: ExtensionAPI): Promise<void> {
 
 	// Narrow host surface the evaluator + dispatcher need.
 	// pi-coding-agent's ExtensionAPI exposes `exec` and `appendEntry`
-	// as closure-bound methods (no `this` dependency), verified at
-	// `@earendil-works/pi-coding-agent`'s `loadExtension`
-	// (closure-bound, no `this`) — detaching is safe.
+	// as closure-bound methods (no `this` dependency), so detaching
+	// is safe.
 	const host: EvaluatorHost = {
 		exec: pi.exec,
 		appendEntry: pi.appendEntry,
@@ -95,12 +94,10 @@ export default async function register(pi: ExtensionAPI): Promise<void> {
 	// from SDK embedders that bypass pi's main.
 	const launchCwd = process.cwd();
 
-	// Eager factory-time load: any error-class diagnostic, or any
-	// warning-class diagnostic when `failOnWarnings !== false`,
-	// throws here. The throw propagates through pi's extension loader
-	// and surfaces in `[Extension issues]`, which survives `/reload`.
-	// No try/catch: catching would absorb the throw before pi's
-	// loader can capture it for the diagnostic block.
+	// See JSDoc above: any error-class diagnostic, or any warning-class
+	// diagnostic when `failOnWarnings !== false`, throws here. No
+	// try/catch — pi's loader needs the throw to populate
+	// [Extension issues].
 	const { evaluator, dispatcher } = await buildSessionRuntime(
 		launchCwd,
 		host,

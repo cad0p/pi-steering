@@ -1720,10 +1720,7 @@ export interface SteeringConfig {
 	 *
 	 * Note: a broken layer cannot communicate its OWN `failOnWarnings:
 	 * false` opt-out, since the loader can't read the failed file. The
-	 * remedy is to fix the broken file. (If you have a successfully-
-	 * loaded inner layer, you can set `failOnWarnings: false` there to
-	 * opt out of the warning escalation while you investigate the outer
-	 * broken layer; the inner-wins merge picks up the opt-out.)
+	 * remedy is to fix the broken file.
 	 *
 	 * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
 	 */

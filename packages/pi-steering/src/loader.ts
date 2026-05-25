@@ -583,14 +583,8 @@ export function buildConfig(
  * check sees the SAME diagnostic stream the production runtime sees
  * — no surface is silently skipped.
  *
- * The merge pipeline short-circuits on error-class merge diagnostics
- * (e.g. `tracker-name-collision`) before running `resolvePlugins`,
- * mirroring `buildSessionRuntime`. On short-circuit the returned
- * diagnostics array contains the merge-side stream PLUS the user-
- * config name validation stream (which runs unconditionally so a
- * config with both classes of error surfaces both in one read);
- * otherwise it carries every loader / merger / user-config-name
- * diagnostic in declaration order.
+ * Diagnostics return in declaration order; merge-side errors
+ * short-circuit `resolvePlugins` before its diagnostics are added.
  *
  * Production-strictness divergence: `loadSteeringConfig` does NOT
  * apply the strict-mode `failOnWarnings` throw policy that

@@ -17,11 +17,14 @@
  *     Loader throws a clear "upgrade Node" error on older runtimes.
  *   - File extensions: `.ts` files under `.pi/steering/` are treated
  *     as importable helpers and not reported. The single entry form
- *     is `index.ts`; everything that is not `.ts` (e.g. `rules.json`,
- *     `notes.md`) surfaces as a warning-class `layer-stray-file`
- *     diagnostic. Under the strict-mode default the session-runtime
- *     policy then aborts loading; opt out via `failOnWarnings: false`
- *     or remove the stray file.
+ *     is `index.ts`. When the directory has no `index.ts`, non-`.ts`
+ *     files (e.g. `rules.json`, `notes.md`) surface as a warning-class
+ *     `layer-stray-file` diagnostic; under the strict-mode default
+ *     the session-runtime policy then aborts loading. Note: a
+ *     directory that DOES have `index.ts` plus non-`.ts` files
+ *     silently ignores the latter (pre-existing gap, tracked for
+ *     v0.2). Opt out of strict mode via `failOnWarnings: false` or
+ *     remove the stray file.
  *
  * Merge semantics ({@link buildConfig}):
  *

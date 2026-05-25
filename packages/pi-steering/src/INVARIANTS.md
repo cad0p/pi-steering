@@ -83,15 +83,11 @@ pipeline keeping the invariant.
 `observer-dispatcher.ts`; cache mechanism in
 `evaluator-internals/context.ts`.
 
-Within a single tool_call (or tool_result) phase, every rule reads
-the same world. If rule A's `onFire` writes a session entry via
-`appendEntry`, rule B's `when.happened` predicate later in the same
-phase MUST see that entry; otherwise rules that coordinate via
-session state become order-dependent and surprising. `E1` is
-implemented by the shared cache invalidation described in `S2` —
-the two tags travel together because the implementation is one
-mechanism, but the concerns are distinct: `S2` is about cache
-freshness; `E1` is about evaluation semantics.
+Within a single tool_call (or tool_result) phase, rule B's
+`when.happened` predicate MUST see entries rule A's `onFire` wrote
+earlier in the same phase. Implementation: shared cache invalidation
+per `S2`. Concern split: `S2` ≡ cache freshness; `E1` ≡ evaluation
+semantics.
 
 ## Orchestration invariants (`O`)
 

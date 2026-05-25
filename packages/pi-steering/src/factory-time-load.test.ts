@@ -475,13 +475,9 @@ describe("register(): cwd-mismatch session_start warn", () => {
 	captureWarns();
 
 	it("emits console.warn when ctx.cwd !== launchCwd; engine continues evaluating", async () => {
-		// Author a USER-DEFINED rule into the launch-cwd config so the
-		// rule's firing after the cwd-mismatch warn confirms launch-cwd
-		// config remains in force (the rule is only present in the
-		// launch-cwd config and could not have been loaded from
-		// foreignCwd: `/tmp/some/other/project` has no `.pi/steering` and
-		// the walk-up terminates at root without reaching tmpHome's
-		// HOME).
+		// A user-defined rule lives in the launch-cwd config (tmpHome) but
+		// not in foreignCwd's walk-up; if it still fires after the
+		// cwd-mismatch warn, launch-cwd config remained in force.
 		writeConfig(
 			tmpHome,
 			`export default {
@@ -499,9 +495,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 		const mock = makeMockPi();
 		await register(mock.api as ExtensionAPI);
 
-		// Confirm handlers are registered (evaluator + dispatcher
-		// non-null in the closure means the tool_call handler can
-		// invoke them).
+		// Handlers must be wired (evaluator + dispatcher non-null).
 		assert.ok(mock.handlers.session_start);
 		assert.ok(mock.handlers.tool_call);
 		assert.ok(mock.handlers.tool_result);
@@ -530,53 +524,26 @@ describe("register(): cwd-mismatch session_start warn", () => {
 			`expected warn to contain tmpHome; got: ${cwdMismatchWarn}`,
 		);
 
-		// Engine continues evaluating: a tool_call handler returns
-		// without throwing — the evaluator was NOT reset by the
-		// cwd-mismatch warn.
-		const toolCallEvent: ToolCallEvent = {
-			type: "tool_call",
-			toolName: "bash",
-			toolCallId: "call-1",
-			input: { command: "echo hi" },
-		};
-		const result = await mock.handlers.tool_call(
-			toolCallEvent,
-			makeCtx(foreignCwd),
-		);
-		// No rule fires for `echo hi`; result is undefined. The
-		// crucial assertion is that the call did not throw and the
-		// evaluator was reachable.
-		assert.equal(result, undefined);
-
-		// Pin the cross-project-resume contract beyond "engine merely
-		// continues": the user-defined rule (only present in launch-cwd
-		// config) still fires after the cwd-mismatch warn — confirms
-		// launch-cwd config remains in force.
+		// Engine continues evaluating: the launch-cwd-only rule still
+		// fires under the foreign-cwd ctx. Match on the rule name
+		// (carried in `reason` as `[steering:<rule-name>@<source>]`) so a
+		// future default-rule shadow matching the same pattern wouldn't
+		// silently satisfy `block === true`.
 		const blockedEvent: ToolCallEvent = {
 			type: "tool_call",
 			toolName: "bash",
-			toolCallId: "call-2",
+			toolCallId: "call-1",
 			input: { command: "echo LAUNCH_CWD_PROBE" },
 		};
 		const blocked = (await mock.handlers.tool_call(
 			blockedEvent,
 			makeCtx(foreignCwd),
 		)) as ToolCallEventResult | undefined;
-		assert.equal(
-			blocked?.block,
-			true,
-			"user-defined launch-cwd rule must still fire after the cwd-mismatch warn — confirms launch-cwd config remains in force",
-		);
-		// Pin WHICH rule fired, not just SOME rule fired: a future
-		// regression where a default rule (e.g. a built-in `echo`
-		// guardrail) happened to match `echo LAUNCH_CWD_PROBE` would
-		// silently satisfy the `block === true` assertion above. The
-		// reason field carries `[steering:<rule-name>@<source>]`, so
-		// match on the rule name authored into tmpHome's config.
+		assert.equal(blocked?.block, true);
 		assert.match(
 			blocked?.reason ?? "",
 			/block-launch-cwd-only-rule/,
-			"expected the launch-cwd-only rule (block-launch-cwd-only-rule) to fire — not a default rule shadow",
+			"expected the launch-cwd-only rule to fire — not a default-rule shadow",
 		);
 	});
 

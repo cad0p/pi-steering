@@ -51,19 +51,10 @@ import { finalizePluginState } from "./finalize-plugin-state.ts";
 /**
  * Run `buildConfig` then `resolvePlugins` over the raw layer list,
  * short-circuiting before `resolvePlugins` if any merge-side
- * diagnostic is error-class. The short-circuit avoids double-emitting
- * `tracker-name-collision`, which both `buildConfig` and
- * `resolvePlugins` independently detect.
- *
- * `validateUserConfigNames` runs unconditionally — between
- * `buildConfig` and the short-circuit — so a config with both a
- * merge-side error AND a malformed user-config name surfaces both in
- * one pass. It reads names off the raw input `layers` so user-
- * authored names attribute to `(user config)`.
- *
- * Returns the merged config, the `ResolvedPluginState` (or `null` on
- * short-circuit), and the aggregated diagnostics in declaration order
- * (merge-side, user-config name validation, resolve-side).
+ * diagnostic is error-class. Avoids double-emitting
+ * `tracker-name-collision` (O2 in INVARIANTS.md).
+ * `validateUserConfigNames` runs unconditionally so user-config name
+ * issues surface alongside merge errors.
  */
 export function runMergerPipeline(
 	layers: readonly SteeringConfig[],
@@ -141,30 +132,12 @@ export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
 
 /**
  * Build the per-session evaluator + observer dispatcher from the walk-
- * up config rooted at `cwd`. `disableDefaults: true` in any layer is
- * honored before defaults are injected:
- *
- *   1. `loadConfigs(cwd)` — async IO, read every layer from cwd →
- *      $HOME.
- *   2. `mergeBool(layers, "disableDefaults")` — inner-wins peek
- *      across raw layers without paying for a full merge.
- *   3. `runMergerPipeline(layers, defaults?, builtinTrackers)` — runs
- *      `buildConfig` (including name validation and the merge-error
- *      short-circuit) and `resolvePlugins` together, with defaults
- *      conditional on the disableDefaults peek.
- *   4. Aggregate every diagnostic produced along the way and apply
- *      the strict-mode contract: throw when any error-class
- *      diagnostic is present, throw when any warning-class diagnostic
- *      is present and `failOnWarnings !== false`, otherwise emit
- *      surviving warnings via `console.warn`.
- *   5. Apply `config.disabledRules` to the merged user / default
- *      `rules` — the plugin merger handles this for plugin-shipped
- *      rules inside `resolvePlugins`, but `buildConfig` leaves
- *      user-authored rules in `config.rules` untouched. See
- *      INVARIANTS.md (O1) for the cross-site disabled-rules contract.
- *   6. Drop unused observers via `finalizePluginState` over the
- *      plugin-merged + user-authored streams before handing off to
- *      `buildEvaluator` and `buildObserverDispatcher`.
+ * up config rooted at `cwd`. Honors `disableDefaults` via inner-wins
+ * peek before injecting `DEFAULT_*`. Throws on any error-class
+ * diagnostic and on warning-class diagnostics when
+ * `failOnWarnings !== false`; otherwise emits surviving warnings via
+ * `console.warn`. See {@link runMergerPipeline} for the merge contract
+ * and `finalizePluginState` for observer-drop.
  */
 export async function buildSessionRuntime(
 	cwd: string,

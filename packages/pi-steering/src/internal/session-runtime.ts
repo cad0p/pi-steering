@@ -58,13 +58,8 @@ import { finalizePluginState } from "./finalize-plugin-state.ts";
  * `validateUserConfigNames` runs unconditionally — between
  * `buildConfig` and the short-circuit — so a config with both a
  * merge-side error AND a malformed user-config name surfaces both in
- * one pass. It reads names off the raw input `layers` (NOT the
- * post-merge `merged` config, which can carry `DEFAULT_RULES` and
- * would mis-attribute package-controlled names to `(user config)`).
- *
- * Loader-side diagnostics from `loadConfigs` are NOT included here;
- * callers that walked up from a cwd (`buildSessionRuntime`, the CLI)
- * thread those in separately.
+ * one pass. It reads names off the raw input `layers` so user-
+ * authored names attribute to `(user config)`.
  *
  * Returns the merged config, the `ResolvedPluginState` (or `null` on
  * short-circuit), and the aggregated diagnostics in declaration order
@@ -123,11 +118,6 @@ export function runMergerPipeline(
 export function formatAggregatedDiagnostics(
 	diagnostics: readonly SteeringDiagnostic[],
 ): string {
-	if (diagnostics.length === 0) {
-		throw new Error(
-			"internal: formatAggregatedDiagnostics requires at least one diagnostic",
-		);
-	}
 	const errors = diagnostics.filter((d) => d.type === "error");
 	const warnings = diagnostics.filter((d) => d.type === "warning");
 	const ordered = [...errors, ...warnings];
@@ -141,21 +131,8 @@ export function formatAggregatedDiagnostics(
 }
 
 /**
- * Render a single {@link SteeringDiagnostic} as a one-line message:
- *
- *   `[pi-steering] [<severity>] <path: >?<message>`
- *
- * Severity tag (`[error]` / `[warning]`) follows the same bracketed
- * convention as the aggregated multi-line form, so a user grepping
- * CI logs has a uniform handle across both surfaces. Path prefix is
- * conditional on {@link SteeringDiagnostic.path} being set —
- * cross-layer collisions (no source path) render with the message
- * alone.
- *
- * The aggregated multi-line form (for thrown-Error message bodies
- * in strict mode) is produced by {@link formatAggregatedDiagnostics},
- * not this helper. Per-route severity policy (which surface emits
- * which severity through this helper) lives at the call sites.
+ * Single-line render of one diagnostic; see {@link SteeringDiagnostic}
+ * render-format matrix for the canonical contract.
  */
 export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
 	const pathPrefix = d.path !== undefined ? `${d.path}: ` : "";
@@ -183,21 +160,11 @@ export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
  *   5. Apply `config.disabledRules` to the merged user / default
  *      `rules` — the plugin merger handles this for plugin-shipped
  *      rules inside `resolvePlugins`, but `buildConfig` leaves
- *      user-authored rules in `config.rules` untouched.
- *
- *      Note: opt-out logic is split across `buildConfig`
- *      (collision-suppression for `disabledPlugins`/`disabledRules`),
- *      `resolvePlugins` (filters plugin-shipped rules), and this step
- *      (filters user-authored `config.rules`) — touch all three together.
+ *      user-authored rules in `config.rules` untouched. See
+ *      INVARIANTS.md (O1) for the cross-site disabled-rules contract.
  *   6. Drop unused observers via `finalizePluginState` over the
  *      plugin-merged + user-authored streams before handing off to
  *      `buildEvaluator` and `buildObserverDispatcher`.
- *
- * Factored out of `register()` so the wiring is unit-testable without
- * a pi runtime stub. The `config` from earlier versions of this
- * function is absorbed into the runtime: the bridge no longer needs
- * to inspect it, and exposing it tempted callers to bypass the
- * strict-mode contract.
  */
 export async function buildSessionRuntime(
 	cwd: string,
@@ -235,10 +202,6 @@ export async function buildSessionRuntime(
 	const failOnWarnings = merged.failOnWarnings;
 	const treatWarningsAsErrors = failOnWarnings !== false;
 
-	// Strict-mode contract: error-class diagnostics ALWAYS throw;
-	// warning-class diagnostics throw only when `failOnWarnings !==
-	// false` (default true). Otherwise warnings fall through to
-	// console.warn for legacy fail-soft semantics.
 	const hasError = aggregated.some((d) => d.type === "error");
 	const hasWarning = aggregated.some((d) => d.type === "warning");
 	if (hasError || (treatWarningsAsErrors && hasWarning)) {

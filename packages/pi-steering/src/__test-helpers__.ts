@@ -74,7 +74,9 @@ export function useIsolatedHome(
 	});
 }
 
-/** Like {@link useIsolatedHome} but also chdirs into the scratch dir, so factory-time tests find the per-test config via the loader walk-up. */
+/**
+ * Like {@link useIsolatedHome} but also chdirs into the scratch dir, so factory-time tests find the per-test config via the loader walk-up. macOS tmpdir is a symlink; canonicalized via `realpathSync` so cwd-mismatch tests don't see false-divergence.
+ */
 export function useScratchHome(
 	prefix: string,
 	onReady?: (tmp: string) => void,
@@ -84,10 +86,6 @@ export function useScratchHome(
 	let priorCwd: string;
 	beforeEach(() => {
 		priorCwd = process.cwd();
-		// realpathSync: os.tmpdir() is a symlink on macOS; without
-		// canonicalization the value the test reads and what
-		// process.cwd() reports after chdir diverge byte-for-byte and
-		// produce false cwd-mismatch warns.
 		tmp = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
 		priorHome = process.env["HOME"];
 		process.env["HOME"] = tmp;

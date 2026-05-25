@@ -74,12 +74,7 @@ export function useIsolatedHome(
 	});
 }
 
-/**
- * Per-test scratch `$HOME` PLUS a `chdir` into it. The bridge factory
- * loads steering configs from `process.cwd()` at register time, so
- * factory-time tests must launch from the scratch home for the
- * loader walk-up to find the per-test config.
- */
+/** Like {@link useIsolatedHome} but also chdirs into the scratch dir, so factory-time tests find the per-test config via the loader walk-up. */
 export function useScratchHome(
 	prefix: string,
 	onReady?: (tmp: string) => void,

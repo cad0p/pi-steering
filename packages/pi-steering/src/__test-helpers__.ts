@@ -79,11 +79,6 @@ export function useIsolatedHome(
  * loads steering configs from `process.cwd()` at register time, so
  * factory-time tests must launch from the scratch home for the
  * loader walk-up to find the per-test config.
- *
- * The temp dir is canonicalized via `realpathSync` because
- * `os.tmpdir()` is a symlink on macOS; without canonicalization the
- * value the test reads and what `process.cwd()` reports after
- * `chdir` diverge byte-for-byte and produce false cwd-mismatch warns.
  */
 export function useScratchHome(
 	prefix: string,
@@ -94,6 +89,10 @@ export function useScratchHome(
 	let priorCwd: string;
 	beforeEach(() => {
 		priorCwd = process.cwd();
+		// realpathSync: os.tmpdir() is a symlink on macOS; without
+		// canonicalization the value the test reads and what
+		// process.cwd() reports after chdir diverge byte-for-byte and
+		// produce false cwd-mismatch warns.
 		tmp = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
 		priorHome = process.env["HOME"];
 		process.env["HOME"] = tmp;

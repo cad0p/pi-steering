@@ -66,14 +66,11 @@ containing whitespace, control characters, `]`, or newlines let a
 malicious or careless config author forge block reasons that
 deceive the agent.
 
-The standard pipeline routes user names through
-`validateUserConfigNames` and plugin-shipped names through
-`resolvePlugins`, both of which produce an `invalid-name`
-diagnostic that aggregates into the strict-mode throw. Validation
-is additionally enforced at the runtime entry points
-(`buildEvaluator`, `buildObserverDispatcher`) so the defense is
-local to the function and doesn't depend on any specific upstream
-pipeline keeping the invariant.
+Validated at the call sites that produce user-visible names:
+`validateUserConfigNames` (user config), `resolvePlugins`
+(plugin-shipped), and as defense-in-depth at `buildEvaluator` /
+`buildObserverDispatcher`. See per-site JSDocs for the pipeline
+contract.
 
 ## Evaluation invariants (`E`)
 

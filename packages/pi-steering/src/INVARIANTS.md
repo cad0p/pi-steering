@@ -69,11 +69,11 @@ deceive the agent.
 The standard pipeline routes user names through
 `validateUserConfigNames` and plugin-shipped names through
 `resolvePlugins`, both of which produce an `invalid-name`
-diagnostic that aggregates into the strict-mode throw. The
-defensive throws inside `buildEvaluator` and
-`buildObserverDispatcher` cover direct callers (unit tests, future
-SDK embedders) that build a runtime without going through
-`buildSessionRuntime` / `loadHarness` / `loadSteeringConfig`.
+diagnostic that aggregates into the strict-mode throw. Validation
+is additionally enforced at the runtime entry points
+(`buildEvaluator`, `buildObserverDispatcher`) so the defense is
+local to the function and doesn't depend on any specific upstream
+pipeline keeping the invariant.
 
 ## Evaluation invariants (`E`)
 
@@ -109,3 +109,20 @@ different observer-drop behavior than the runtime.
 
 **Pinned by:** `internal/session-runtime.test.ts` (runtime branch);
 `bin/pi-steering.test.ts` (CLI branch).
+
+### `O2` — single-emission lock for cross-detector tracker-name collisions
+
+**Where:** `internal/session-runtime.ts` (`runMergerPipeline`);
+`loader.ts` (`detectTrackerNameCollisions`); `plugin-merger.ts`
+(`resolvePlugins`).
+
+**What:** Both `buildConfig` (loader-side) and `resolvePlugins`
+(merger-side) independently detect tracker-name collisions.
+`runMergerPipeline` short-circuits before invoking `resolvePlugins`
+when any merge-side diagnostic is error-class, so the aggregated
+error message lists each tracker-name collision exactly once.
+
+**Pinned by:** `internal/session-runtime.test.ts` "throws on an
+error-class diagnostic regardless of failOnWarnings" (single-emission
+lock); `factory-time-load.test.ts` "throws on tracker-name-collision"
+(integration mirror).

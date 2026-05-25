@@ -13,42 +13,55 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { buildSessionRuntime } from "./internal/session-runtime.ts";
-import type { EvaluatorRuntime, EvaluatorHost } from "./evaluator.ts";
-import type { ObserverDispatcher } from "./observer-dispatcher.ts";
+import type { EvaluatorHost } from "./evaluator.ts";
 
 /**
  * Pi extension factory. Wires the steering engine onto pi's
  * lifecycle events:
  *
+ *   - factory time — eagerly walk up from `process.cwd()` and build
+ *                     the per-session evaluator + dispatcher via
+ *                     {@link buildSessionRuntime}: load every
+ *                     `.pi/steering/index.ts` (or `.pi/steering.ts`)
+ *                     between the launch directory and `$HOME`,
+ *                     merge with `DEFAULT_RULES` + `DEFAULT_PLUGINS`
+ *                     unless `disableDefaults: true` is set anywhere
+ *                     in the walk-up chain, then aggregate every
+ *                     {@link SteeringDiagnostic} from the loader and
+ *                     plugin merger and apply the strict-mode
+ *                     contract. The runtime owns the throw — any
+ *                     error-class diagnostic always escalates, and
+ *                     any warning-class diagnostic escalates when
+ *                     `failOnWarnings !== false`. The bridge does
+ *                     not catch: a thrown factory propagates through
+ *                     pi's extension loader into pi's
+ *                     `[Extension issues]` block, which is the only
+ *                     diagnostic surface that survives `/reload`.
  *   - `agent_start`  — bump the internal `agentLoopIndex` counter so
- *                       tool_call / tool_result handlers can forward it
- *                       into the evaluator + dispatcher. One agent loop
- *                       = one user prompt + all the tool calls it spawns.
- *   - `session_start` — build the per-session evaluator + dispatcher
- *                       via {@link buildSessionRuntime}: walk-up load,
- *                       merge with DEFAULT_RULES + DEFAULT_PLUGINS
- *                       unless `disableDefaults: true` is set anywhere
- *                       in the walk-up chain, then aggregate every
- *                       {@link SteeringDiagnostic} from the loader and
- *                       plugin merger and apply the strict-mode
- *                       contract. If the runtime throws (any error-
- *                       class diagnostic, or any warning-class
- *                       diagnostic when `failOnWarnings !== false`),
- *                       the bridge logs the aggregated message via
- *                       `console.error` and disables the extension
- *                       for the session (fail-open rather than
- *                       blocking every tool call).
+ *                       tool_call / tool_result handlers can forward
+ *                       it into the evaluator + dispatcher. One
+ *                       agent loop = one user prompt + all the tool
+ *                       calls it spawns.
+ *   - `session_start` — emit a `console.warn` if the resumed
+ *                       session's `ctx.cwd` differs from the launch
+ *                       cwd captured at factory time. Cross-project
+ *                       resume (`pi --resume` with picker Tab → "All"
+ *                       scope; `--session <foreign-id>` accepted into
+ *                       the current cwd; SDK embedders with a custom
+ *                       `cwd`) is the only path that produces this
+ *                       divergence. The engine continues evaluating
+ *                       with launch-cwd rules — partial guardrails
+ *                       beat silently disabling everything for the
+ *                       resumed session. The evaluator is NOT reset.
  *   - `tool_call`     — gate via the evaluator. Returns a
- *                       ToolCallEventResult to block or `undefined` to
- *                       allow.
+ *                       ToolCallEventResult to block or `undefined`
+ *                       to allow.
  *   - `tool_result`   — dispatch to all matching observers.
  *
  * Exported as the default export per pi's extension convention.
  */
-export default function register(pi: ExtensionAPI): void {
+export default async function register(pi: ExtensionAPI): Promise<void> {
 	let agentLoopIndex = 0;
-	let evaluator: EvaluatorRuntime | null = null;
-	let dispatcher: ObserverDispatcher | null = null;
 
 	// Narrow host surface the evaluator + dispatcher need. `bind(pi)`
 	// preserves the `this` context on the API methods (some pi
@@ -59,38 +72,48 @@ export default function register(pi: ExtensionAPI): void {
 		appendEntry: pi.appendEntry.bind(pi),
 	};
 
+	// Capture the launch cwd once for the cross-project-resume
+	// detection in `session_start`. `process.cwd()` may throw if the
+	// launch dir was deleted; the throw propagates to the factory
+	// throw → pi's [Extension issues] block. Pi's main entry calls
+	// `process.cwd()` first (well before extension factories run), so
+	// this case is unreachable in normal CLI flow — only reachable
+	// from SDK embedders that bypass pi's main.
+	const launchCwd = process.cwd();
+
+	// Eager factory-time load: any error-class diagnostic, or any
+	// warning-class diagnostic when `failOnWarnings !== false`,
+	// throws here. The throw propagates through pi's extension loader
+	// and surfaces in `[Extension issues]`, which survives `/reload`.
+	// No try/catch: catching would absorb the throw before pi's
+	// loader can capture it for the diagnostic block.
+	const { evaluator, dispatcher } = await buildSessionRuntime(
+		launchCwd,
+		host,
+	);
+
 	pi.on("agent_start", () => {
 		agentLoopIndex += 1;
 	});
 
-	pi.on("session_start", async (_event, ctx: ExtensionContext) => {
-		try {
-			const { evaluator: ev, dispatcher: dp } = await buildSessionRuntime(
-				ctx.cwd,
-				host,
+	pi.on("session_start", (_event, ctx: ExtensionContext) => {
+		if (ctx.cwd !== launchCwd) {
+			console.warn(
+				`[pi-steering] session cwd (${ctx.cwd}) differs from launch cwd ` +
+					`(${launchCwd}). Steering rules loaded from launch cwd; ` +
+					`session-cwd rules NOT applied. To use session-cwd rules, ` +
+					`exit pi and re-launch from ${ctx.cwd}.`,
 			);
-			evaluator = ev;
-			dispatcher = dp;
-		} catch (err) {
-			console.error(
-				`[pi-steering] Failed to load steering config: ` +
-					`${err instanceof Error ? err.message : String(err)}\n` +
-					`Extension will not block any tool calls for this session.`,
-			);
-			evaluator = null;
-			dispatcher = null;
 		}
 	});
 
-	pi.on("tool_call", async (event, ctx) => {
-		if (!evaluator) return;
-		return evaluator.evaluate(event, ctx, agentLoopIndex);
-	});
+	pi.on("tool_call", (event, ctx) =>
+		evaluator.evaluate(event, ctx, agentLoopIndex),
+	);
 
-	pi.on("tool_result", async (event, ctx) => {
-		if (!dispatcher) return;
-		await dispatcher.dispatch(event, ctx, agentLoopIndex);
-	});
+	pi.on("tool_result", (event, ctx) =>
+		dispatcher.dispatch(event, ctx, agentLoopIndex),
+	);
 }
 
 // ---------------------------------------------------------------------------

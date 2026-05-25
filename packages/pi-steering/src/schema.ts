@@ -1768,12 +1768,6 @@ export interface SteeringConfig {
  *     containing characters that are disallowed in source-tagged
  *     block reasons.
  *
- * Naming asymmetry: loader-side kinds suffix `-name-collision`;
- * plugin-merger-side kinds suffix bare `-collision`. The split is
- * intentional but doesn't strictly track within-layer vs across-layer
- * (e.g. `plugin-name-collision` is loader-side and fires across
- * layers). Consumers should branch on `kind`, not on the suffix shape.
- *
  * Disabling a plugin via `config.disabledPlugins` or a plugin-shipped
  * rule via `config.disabledRules` is by-design behavior, not a
  * configuration issue, so neither contributes to the diagnostic

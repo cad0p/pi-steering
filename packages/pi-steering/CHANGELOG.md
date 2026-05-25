@@ -20,4 +20,4 @@ once `v0.1.0` publishes to npm.
 
 Some plugin-merger warnings (predicate / observer / rule / extension-orphan collisions) were previously collected into an internal array and never logged. Under `failOnWarnings: false` they are now emitted to `console.warn` for parity with loader-side warnings; under `failOnWarnings: true` (default) they're aggregated into the factory throw.
 
-Note: `plugin-disabled` and `rule-disabled` (the legacy fail-soft warnings `resolvePlugins` previously emitted for `disabledPlugins` / `disabledRules` opt-outs) are NOT in the diagnostic stream — they describe successful by-design behavior (the user explicitly opted out). They surface via `console.info` debugging breadcrumbs, mirroring `dropUnusedObservers`.
+Note: successful `disabledPlugins` / `disabledRules` opt-outs do NOT appear in the diagnostic stream — they describe by-design behavior (the user explicitly opted out). The merger emits a `console.info` breadcrumb instead, mirroring `dropUnusedObservers`.

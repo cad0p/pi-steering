@@ -19,8 +19,8 @@ matches the multi-line shape:
 ```
 Failed to load extension: <bridge path>: 3 config issues:
   - [error] tracker name "events" is reserved: ...
-  - [warning] observer "obs-x" already declared by plugin "plugin-a"; keeping first
-  - [warning] rule "dup" already declared by plugin "plugin-a"; keeping first
+  - [warning] duplicate observer "obs-x" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
+  - [warning] duplicate rule "dup" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
 ```
 
 Concretely:

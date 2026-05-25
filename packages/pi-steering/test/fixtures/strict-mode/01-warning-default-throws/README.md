@@ -22,7 +22,7 @@ matches:
 
 ```
 Failed to load extension: <bridge path>: <count> config issue(s):
-  - [warning] <plugin-b's source path or "(plugin)">: rule "dup" already declared by plugin "plugin-a"; keeping first
+  - [warning] duplicate rule "dup" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
 ```
 
 Concretely:
@@ -32,6 +32,8 @@ Concretely:
   if there's one, plural otherwise).
 - At least one bullet line begins with `  - [warning]`.
 - The bullet text references the colliding rule name `dup`.
+- The bullet has NO path prefix between `[warning]` and the message —
+  cross-plugin collisions are not attributable to a single config file.
 
 The session continues running but the steering engine is NOT loaded
 for this session (the throw aborted bridge setup). Tool calls pass
@@ -40,9 +42,8 @@ through unsteered.
 ## Pre-flight
 
 See `packages/pi-steering/test/fixtures/strict-mode/README.md` and the
-design's "End-to-end gate strategy" → "Orchestration: how to make pi
-load the new branch's bridge" for the steps to point pi at this
-branch's bridge before running the fixture.
+design's "End-to-end gate strategy" section for the steps to point pi
+at this branch's bridge before running the fixture.
 
 ## What this fixture pins
 

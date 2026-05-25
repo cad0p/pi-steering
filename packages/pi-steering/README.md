@@ -825,7 +825,7 @@ Plugins register predicates (`when.<key>` handlers), observers, and `onFire` hoo
 
 - Shell out via `ctx.exec` (with the same privileges as pi).
 - Forge session entries via `ctx.appendEntry`, which later rules consult via `when.happened`.
-- Throw in unexpected places — S1 catches most throws, but the cost of a predicate that always throws is that the rule it belongs to never fires.
+- Throw in unexpected places — predicate-runtime throws fail open per S1 (the rule never fires). Factory-time load failures throw with strict mode; see "Strict mode + load failures" below for the opt-out.
 
 A malicious plugin can trivially defeat any guardrail ship with your config. Review plugin source before adding it to `plugins: [...]` the same way you'd review any third-party dependency.
 

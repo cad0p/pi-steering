@@ -18,7 +18,7 @@ matches the multi-line shape:
 
 ```
 Failed to load extension: <bridge path>: 3 config issues:
-  - [error] tracker name "events" is reserved: ...
+  - [error] tracker name "events" is reserved: plugin "plugin-a" registers a tracker under that name but the evaluator uses it on `walkerState` for speculative-entry synthesis consumed by the built-in `when.happened` predicate. Rename the tracker.
   - [warning] duplicate observer "obs-x" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
   - [warning] duplicate rule "dup" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
 ```
@@ -33,6 +33,10 @@ Concretely:
 - No path prefix (the diagnostics are cross-plugin collisions; their
   `path` is unset).
 - No footer hint after the bullets.
+
+Note: the literal message text is set by `plugin-merger.ts`'s
+diagnostic emission. If the wording changes there, update both the
+integration tests' regex assertions and this README in lock-step.
 
 ## What this fixture pins
 

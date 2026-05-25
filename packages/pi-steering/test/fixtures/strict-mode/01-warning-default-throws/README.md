@@ -36,6 +36,10 @@ Concretely:
 - The bullet has NO path prefix between `[warning]` and the message —
   cross-plugin collisions are not attributable to a single config file.
 
+Note: the literal message text is set by `plugin-merger.ts`'s
+diagnostic emission. If the wording changes there, update both the
+integration tests' regex assertions and this README in lock-step.
+
 The session continues running but the steering engine is NOT loaded
 for this session (the throw aborted bridge setup). Tool calls pass
 through unsteered.

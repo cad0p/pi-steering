@@ -14,12 +14,12 @@ off the launch cwd, so the rule must live where pi is *resumed*,
 not where the session was created.
 
 ```bash
-# 1. Create a session from a directory with no steering config
-#    (so the session's stored cwd is foreign to the rule):
-cd /tmp
+# 1. Create a session in a guaranteed-clean tmp dir
+#    (no .pi/steering reachable from there):
+TMP=$(mktemp -d)
+cd "$TMP"
 pi -p "echo creating session"
-# Note the session ID printed at the end (e.g. `session-id: abc123`)
-# or check the latest session in `pi --resume`.
+# Note the session ID via `pi --resume` (latest entry).
 
 # 2. cd into the fixture's directory and resume that session:
 cd packages/pi-steering/test/fixtures/strict-mode/04-cwd-mismatch-warn/
@@ -33,15 +33,15 @@ pi --resume                 # interactive picker; press Tab to switch to
 At session resume, pi's terminal stderr contains a line of the form:
 
 ```
-[pi-steering] session cwd (/tmp) differs from launch cwd (/path/to/fixture). Steering rules loaded from launch cwd; session-cwd rules NOT applied. To use session-cwd rules, exit pi and re-launch from /tmp.
+[pi-steering] session cwd (/tmp/tmp.XXXXXX) differs from launch cwd (/path/to/fixture). Steering rules loaded from launch cwd; session-cwd rules NOT applied. To use session-cwd rules, exit pi and re-launch from /tmp/tmp.XXXXXX.
 ```
 
 Concretely:
 
 - The line starts with `[pi-steering] session cwd (`.
-- It references both the session's cwd (`/tmp`, where the session
-  was created in step 1) and the launch cwd (the fixture dir, where
-  pi was resumed in step 2).
+- It references both the session's cwd (the `mktemp -d` directory
+  from step 1, where the session was created) and the launch cwd
+  (the fixture dir, where pi was resumed in step 2).
 - Pi continues running normally; the session's chat resumes; tool
   calls are evaluated with the launch-cwd rules.
 - After observing the cwd-mismatch warn, ask the model to run
@@ -50,7 +50,7 @@ Concretely:
   `.pi/steering/` (now the launch cwd), so `echo CWD_PROBE` is
   blocked with a `[steering:block-launch-cwd-probe@user]` reason —
   proving launch-cwd config is in force, NOT a re-loaded ctx.cwd
-  config (there is no `.pi/steering` under `/tmp`).
+  config (there is no `.pi/steering` under the tmp dir).
 
 The warn lands on stderr at session resume; on `/reload`, pi's
 chatContainer clobbers stderr, so the warn is only visible at the

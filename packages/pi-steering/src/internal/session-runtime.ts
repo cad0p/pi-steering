@@ -179,18 +179,12 @@ export async function buildSessionRuntime(
 		await loadConfigs(cwd);
 	aggregated.push(...loaderDiagnostics);
 
-	// Peek at `disableDefaults` across raw layers without paying for
-	// a full merge. `mergeBool` walks layers inner-first and returns the
-	// first explicit value, matching `buildConfig`'s precedence.
 	const disableDefaults =
 		mergeBool(rawLayers, "disableDefaults") === true;
 	const defaults: SteeringConfig | undefined = disableDefaults
 		? undefined
 		: { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS };
 
-	// Run buildConfig + resolvePlugins through the shared helper so the
-	// short-circuit between the two passes is uniform across
-	// `buildSessionRuntime`, `loadHarness`, and the CLI's `runList`.
 	const { merged, resolved, diagnostics: mergeAndResolveDiagnostics } =
 		runMergerPipeline(
 			rawLayers,
@@ -214,15 +208,9 @@ export async function buildSessionRuntime(
 	}
 
 	if (resolved === null) {
-		// Invariant guard: runMergerPipeline only returns null on error,
-		// which the strict-mode throw above absorbed.
 		throw new Error("internal: resolved null without error diagnostic");
 	}
 
-	// Apply `disabledRules` to the merged rule set. Plugin-shipped rules
-	// are filtered inside `resolvePlugins`; user / default rules go
-	// through `config.rules` on the evaluator side, so we filter them
-	// here to keep the semantic consistent across both sources.
 	const disabled = new Set(merged.disabledRules ?? []);
 	const filteredConfig: SteeringConfig = { ...merged };
 	if (merged.rules !== undefined) {

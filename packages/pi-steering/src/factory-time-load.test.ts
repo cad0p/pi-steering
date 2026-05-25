@@ -488,9 +488,28 @@ describe("register(): cwd-mismatch session_start warn", () => {
 	captureWarns();
 
 	it("emits console.warn when ctx.cwd !== launchCwd; engine continues evaluating", async () => {
-		// Clean config so register resolves; then fire session_start
-		// with a cwd different from the captured launchCwd.
-		writeConfig(tmpHome, "export default {};");
+		// Author a USER-DEFINED rule into the launch-cwd config that
+		// the foreign cwd could not possibly load: foreignCwd has no
+		// `.pi/steering` and the walk-up from `/tmp/some/other/project`
+		// terminates at root without reaching tmpHome's HOME. If a
+		// future regression transparently re-loaded config from
+		// ctx.cwd on session_start, this rule would silently disappear
+		// (and DEFAULT_RULES alone could not distinguish the two
+		// rule-sets — the foreign cwd would also inject defaults).
+		writeConfig(
+			tmpHome,
+			`export default {
+				rules: [
+					{
+						name: "block-launch-cwd-only-rule",
+						tool: "bash",
+						field: "command",
+						pattern: /^echo LAUNCH_CWD_PROBE$/,
+						reason: "launch-cwd-only rule used by the cwd-mismatch test",
+					},
+				],
+			};`,
+		);
 		const mock = makeMockPi();
 		await register(mock.api as ExtensionAPI);
 
@@ -538,17 +557,20 @@ describe("register(): cwd-mismatch session_start warn", () => {
 		assert.equal(result, undefined);
 
 		// Pin the cross-project-resume contract beyond "engine merely
-		// continues":
-		// the LAUNCH-CWD rule set must still be in force, so a command
-		// that DEFAULT_RULES blocks (`git push --force`) should still
-		// be blocked even though the cwd mismatch was detected. A
-		// future regression that swapped rule sets on cwd mismatch
-		// would silently unblock here.
+		// continues": the LAUNCH-CWD rule set must still be in force.
+		// The user-defined rule above is authored ONLY in tmpHome's
+		// `.pi/steering.ts` and could not have been loaded from
+		// foreignCwd (no `.pi/steering` at /tmp/some/other, and the
+		// walk-up from foreignCwd terminates at root without reaching
+		// tmpHome's HOME). If a future regression swapped to
+		// ctx.cwd-config on cwd-mismatch, this user rule would silently
+		// disappear — DEFAULT_RULES alone cannot distinguish that case
+		// because the foreign cwd would also inject defaults.
 		const blockedEvent: ToolCallEvent = {
 			type: "tool_call",
 			toolName: "bash",
 			toolCallId: "call-2",
-			input: { command: "git push --force" },
+			input: { command: "echo LAUNCH_CWD_PROBE" },
 		};
 		const blocked = (await mock.handlers.tool_call(
 			blockedEvent,
@@ -557,7 +579,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 		assert.equal(
 			blocked?.block,
 			true,
-			"launch-cwd default rule must still block after the cwd-mismatch warn",
+			"user-defined launch-cwd rule must still fire after the cwd-mismatch warn (proves launch-cwd config — not a re-loaded ctx.cwd config — is in force)",
 		);
 	});
 

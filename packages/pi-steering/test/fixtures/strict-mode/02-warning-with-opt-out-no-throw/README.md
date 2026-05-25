@@ -28,6 +28,10 @@ cat stderr.log
   only. Cross-plugin collisions carry no `path`, so there's no path
   prefix between `[warning]` and the message text.)
 
+Note: the literal message text is set by `plugin-merger.ts`'s
+diagnostic emission. If the wording changes there, update both the
+integration tests' regex assertions and this README in lock-step.
+
 ## What this fixture pins
 
 `failOnWarnings: false` opt-out: warnings fall through to

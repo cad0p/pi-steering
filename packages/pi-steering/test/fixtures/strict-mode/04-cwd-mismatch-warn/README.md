@@ -4,9 +4,14 @@
 > resume requires the interactive picker because pi's `--session
 > <id>` global resolve forks into the current cwd by default (per
 > the design's cross-project-resume enumeration). The launch
-> invocation below assumes a human at a terminal; the fixture's
-> contract is verified end-to-end by `factory-time-load.test.ts`'s
-> case 13 (`emits console.warn when ctx.cwd !== launchCwd`).
+> invocation below assumes a human at a terminal; the bridge-side
+> contract (the `session_start` handler emits the warn when
+> `ctx.cwd !== launchCwd`) is verified by
+> `factory-time-load.test.ts`'s case 13 (`emits console.warn when
+> ctx.cwd !== launchCwd`), which drives the bridge with a mock
+> `ExtensionAPI`. This fixture is the manual sink-side check that
+> the warn actually surfaces through pi's real cross-process
+> stderr render path.
 
 Exercises the cross-project-resume detection: when pi resumes a
 session whose stored cwd differs from where pi was launched, the
@@ -66,10 +71,12 @@ startup boundary.
 
 The integration test `factory-time-load.test.ts` case
 `cwd-mismatch session_start warn → emits console.warn when
-ctx.cwd !== launchCwd` is the empirical verification of the
-cwd-mismatch contract end-to-end. This
-fixture is for manual sink-side verification that pi's
-`[Extension issues]` rendering path stays connected.
+ctx.cwd !== launchCwd` is the bridge-side verification: it drives
+`register()` with a mock `ExtensionAPI` and asserts the
+`session_start` handler calls `console.warn` when
+`ctx.cwd !== launchCwd`. This fixture is the complementary
+sink-side check that the same warn surfaces through pi's real
+cross-process stderr render path.
 
 ## What this fixture pins
 

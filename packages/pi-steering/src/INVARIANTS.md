@@ -64,11 +64,9 @@ containing whitespace, control characters, `]`, or newlines let a
 malicious or careless config author forge block reasons that
 deceive the agent.
 
-Validated at the call sites that produce user-visible names:
-`validateUserConfigNames` (user config), `resolvePlugins`
-(plugin-shipped), and as defense-in-depth at `buildEvaluator` /
-`buildObserverDispatcher`. See per-site JSDocs for the pipeline
-contract.
+Validated at production call sites (`validateUserConfigNames`,
+`resolvePlugins`) and as defense-in-depth at `buildEvaluator` /
+`buildObserverDispatcher` — see per-site JSDocs.
 
 ## Evaluation invariants (`E`)
 

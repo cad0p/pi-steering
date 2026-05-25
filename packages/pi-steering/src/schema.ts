@@ -1718,10 +1718,6 @@ export interface SteeringConfig {
 	 * Walk-up merge: inner layer wins when specified, identical to
 	 * {@link disableDefaults}.
 	 *
-	 * Note: a broken layer cannot communicate its OWN `failOnWarnings:
-	 * false` opt-out, since the loader can't read the failed file. The
-	 * remedy is to fix the broken file.
-	 *
 	 * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
 	 */
 	failOnWarnings?: boolean;

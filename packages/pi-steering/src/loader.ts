@@ -210,11 +210,6 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
  * — the bridge runtime owns the policy decision (throw vs. log) once
  * it has collected diagnostics from every source.
  *
- * Errors within a single layer (bad default export, import failure)
- * are recorded as `kind: "layer-import-failed"` diagnostics and the
- * layer is skipped — a broken ancestor config shouldn't prevent the
- * session from starting with a sensible subset.
- *
  * @throws when Node is older than {@link MIN_NODE_MAJOR}.
  */
 export async function loadConfigs(cwd: string): Promise<{

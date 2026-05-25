@@ -5,10 +5,12 @@ escalate to a thrown factory error, even when the user has set
 `failOnWarnings: false`. The opt-out applies to warnings only.
 
 Specifically: two plugins both register a tracker called `branch`.
-That's a tracker-name-collision — error-class because the engine
-cannot safely operate when two plugins claim the same state
-dimension (whichever first-wins is non-deterministic per layer
-order). Even with `failOnWarnings: false`, the runtime throws.
+That's a tracker-name-collision — error-class because two plugins
+claiming the same state dimension is always a bug: the loser's
+tracker is silently unreachable, the rules that consult it become
+predicate-key references to a now-shadowed tracker, and
+config-merge order is the only thing that decides which side wins.
+Even with `failOnWarnings: false`, the runtime throws.
 
 ## Launch invocation
 

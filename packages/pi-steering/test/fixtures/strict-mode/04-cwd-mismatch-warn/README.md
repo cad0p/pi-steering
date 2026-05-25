@@ -26,15 +26,11 @@ cd packages/pi-steering/test/fixtures/strict-mode/04-cwd-mismatch-warn/
 pi --resume                 # interactive picker; press Tab to switch to
                             # "All" scope, then select the session you
                             # just created
-# OR (non-interactive, single-shot that exercises both halves):
-pi --session <session-id-from-step-1> -p "please run the bash command: echo CWD_PROBE" 2>stderr.log
-cat stderr.log
 ```
 
 ## Expected outcome
 
-`stderr.log` (or terminal stderr if not redirected) contains a line of
-the form:
+At session resume, pi's terminal stderr contains a line of the form:
 
 ```
 [pi-steering] session cwd (/tmp) differs from launch cwd (/path/to/fixture). Steering rules loaded from launch cwd; session-cwd rules NOT applied. To use session-cwd rules, exit pi and re-launch from /tmp.
@@ -48,22 +44,22 @@ Concretely:
   pi was resumed in step 2).
 - Pi continues running normally; the session's chat resumes; tool
   calls are evaluated with the launch-cwd rules.
-- After observing the cwd-mismatch warn, the model emits
-  `bash {command: "echo CWD_PROBE"}` (per the prompt) and the bridge
-  intercepts it: the `block-launch-cwd-probe` rule is loaded from
-  the fixture dir's `.pi/steering/` (now the launch cwd), so
-  `echo CWD_PROBE` triggers it and a steering block tag appears in
-  stderr — proving launch-cwd config is in force, NOT a re-loaded
-  ctx.cwd config (there is no `.pi/steering` under `/tmp`).
+- After observing the cwd-mismatch warn, ask the model to run
+  `echo CWD_PROBE` and the bridge intercepts it: the
+  `block-launch-cwd-probe` rule is loaded from the fixture dir's
+  `.pi/steering/` (now the launch cwd), so `echo CWD_PROBE` is
+  blocked with a `[steering:block-launch-cwd-probe@user]` reason —
+  proving launch-cwd config is in force, NOT a re-loaded ctx.cwd
+  config (there is no `.pi/steering` under `/tmp`).
 
-The single-shot non-interactive form above exercises both halves of
-the contract in one invocation: `stderr.log` contains BOTH the
-cwd-mismatch warn line AND the steering block tag emitted when the
-rule fires.
+The warn lands on stderr at session resume; on `/reload`, pi's
+chatContainer clobbers stderr, so the warn is only visible at the
+startup boundary.
 
-The warn lands on stderr only (chatContainer-clobbered on
-`/reload`); for non-interactive `pi -p` invocations, redirect stderr
-to capture it.
+The integration test `factory-time-load.test.ts` case 13 is the
+empirical verification of the cwd-mismatch contract end-to-end. This
+fixture is for manual sink-side verification that pi's
+`[Extension issues]` rendering path stays connected.
 
 ## What this fixture pins
 

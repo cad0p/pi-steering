@@ -1,7 +1,7 @@
 // Fixture: warning-class diagnostic throws on default `failOnWarnings`.
 //
-// Two plugins both register a rule called `dup`. The cross-layer
-// rule-name collision is a `warning`-class diagnostic. With
+// Two plugins both register a rule called `dup`. The cross-plugin
+// rule collision is a `warning`-class diagnostic. With
 // `failOnWarnings` left at its default (true), the runtime
 // aggregates and throws at factory time.
 import { defineConfig } from "pi-steering";

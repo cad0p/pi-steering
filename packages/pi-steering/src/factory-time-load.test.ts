@@ -108,6 +108,37 @@ function captureWarns(): void {
 }
 
 /* -------------------------------------------------------------------------- */
+/* register()-throws assertion helper                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Asserts that `register()` rejects with an Error whose `message`
+ * matches every regex in `matchers`. Optional `extraChecks` runs
+ * additional assertions against the rejected error (e.g. count
+ * matches, structured fields).
+ *
+ * Folds the per-site `const mock = makeMockPi(); await
+ * assert.rejects(...)` boilerplate; the mock is not exposed because
+ * none of the throw cases inspect it after the rejection.
+ */
+async function expectRegisterThrow(
+	matchers: RegExp[],
+	extraChecks?: (err: Error) => void,
+): Promise<void> {
+	const mock = makeMockPi();
+	await assert.rejects(
+		() => register(mock.api as ExtensionAPI),
+		(err: Error) => {
+			for (const m of matchers) {
+				assert.match(err.message, m);
+			}
+			extraChecks?.(err);
+			return true;
+		},
+	);
+}
+
+/* -------------------------------------------------------------------------- */
 /* Factory throws on each diagnostic kind                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -127,13 +158,13 @@ describe("register(): factory throws on diagnostics", () => {
 				],
 			};`,
 		);
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /\[error\]/);
-				assert.match(err.message, /tracker name collision/);
-				assert.match(err.message, /"branch"/);
+		await expectRegisterThrow(
+			[
+				/\[error\]/,
+				/tracker name collision/,
+				/"branch"/,
+			],
+			(err) => {
 				// Single-emission lock: integration mirror of the runtime-level
 				// short-circuit between `buildConfig` and `resolvePlugins` (see
 				// `internal/session-runtime.test.ts`). A regression that
@@ -146,7 +177,6 @@ describe("register(): factory throws on diagnostics", () => {
 					1,
 					"tracker-name-collision must appear exactly once",
 				);
-				return true;
 			},
 		);
 	});
@@ -162,15 +192,10 @@ describe("register(): factory throws on diagnostics", () => {
 				],
 			};`,
 		);
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /\[error\]/);
-				assert.match(err.message, /tracker name "events" is reserved/);
-				return true;
-			},
-		);
+		await expectRegisterThrow([
+			/\[error\]/,
+			/tracker name "events" is reserved/,
+		]);
 	});
 
 	it("throws on reserved-predicate-key (error-class)", async () => {
@@ -188,18 +213,10 @@ describe("register(): factory throws on diagnostics", () => {
 				],
 			};`,
 		);
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /\[error\]/);
-				assert.match(
-					err.message,
-					/reserved predicate key "onUnknown"/,
-				);
-				return true;
-			},
-		);
+		await expectRegisterThrow([
+			/\[error\]/,
+			/reserved predicate key "onUnknown"/,
+		]);
 	});
 
 	it("throws on tracker-name-collision EVEN WITH failOnWarnings: false", async () => {
@@ -217,15 +234,10 @@ describe("register(): factory throws on diagnostics", () => {
 				],
 			};`,
 		);
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /\[error\]/);
-				assert.match(err.message, /tracker name collision/);
-				return true;
-			},
-		);
+		await expectRegisterThrow([
+			/\[error\]/,
+			/tracker name collision/,
+		]);
 	});
 
 	it("throws on plugin-name-collision (warning-class, failOnWarnings default)", async () => {
@@ -247,15 +259,10 @@ describe("register(): factory throws on diagnostics", () => {
 			};`,
 		);
 		process.chdir(join(tmpHome, "inner"));
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /\[warning\]/);
-				assert.match(err.message, /plugin "shared"/);
-				return true;
-			},
-		);
+		await expectRegisterThrow([
+			/\[warning\]/,
+			/plugin "shared"/,
+		]);
 	});
 
 	it("throws on per-layer import failure", async () => {
@@ -265,25 +272,16 @@ describe("register(): factory throws on diagnostics", () => {
 			"export default this is not valid typescript;\n",
 			"utf8",
 		);
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /\[warning\]/);
-				assert.match(err.message, /failed to import/i);
-				// Narrow on the actual parse-failure detail so a future
-				// loader change that swallows the underlying error message
-				// (and leaves only "failed to import") trips this
-				// assertion. The bridge surfaces the import-side cause to
-				// users grepping pi's [Extension issues] block; that detail
-				// is the actionable signal. Node's TS stripper emits
-				// `Expected '...', got '...'` for syntax errors; older
-				// jiti-style strippers emit `SyntaxError` or `Unexpected`
-				// in the message body.
-				assert.match(err.message, /Expected|SyntaxError|Unexpected/i);
-				return true;
-			},
-		);
+		// Narrow on the actual parse-failure detail so a future loader
+		// change that swallows the underlying error message (and leaves
+		// only "failed to import") trips this assertion. Node's TS
+		// stripper emits `Expected '...', got '...'` for syntax errors;
+		// older jiti-style strippers emit `SyntaxError` or `Unexpected`.
+		await expectRegisterThrow([
+			/\[warning\]/,
+			/failed to import/i,
+			/Expected|SyntaxError|Unexpected/i,
+		]);
 	});
 
 	it("throws on predicate-collision (proves resolvePlugins warnings are plumbed)", async () => {
@@ -303,15 +301,10 @@ describe("register(): factory throws on diagnostics", () => {
 				],
 			};`,
 		);
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /\[warning\]/);
-				assert.match(err.message, /duplicate predicate "when\.sharedKey"/);
-				return true;
-			},
-		);
+		await expectRegisterThrow([
+			/\[warning\]/,
+			/duplicate predicate "when\.sharedKey"/,
+		]);
 	});
 
 	it("throws on observer-collision", async () => {
@@ -331,15 +324,10 @@ describe("register(): factory throws on diagnostics", () => {
 				],
 			};`,
 		);
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /\[warning\]/);
-				assert.match(err.message, /duplicate observer "obs-x"/);
-				return true;
-			},
-		);
+		await expectRegisterThrow([
+			/\[warning\]/,
+			/duplicate observer "obs-x"/,
+		]);
 	});
 
 	it("throws on rule-collision", async () => {
@@ -371,15 +359,10 @@ describe("register(): factory throws on diagnostics", () => {
 				],
 			};`,
 		);
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /\[warning\]/);
-				assert.match(err.message, /duplicate rule "dup"/);
-				return true;
-			},
-		);
+		await expectRegisterThrow([
+			/\[warning\]/,
+			/duplicate rule "dup"/,
+		]);
 	});
 });
 
@@ -479,14 +462,7 @@ describe("register(): factory does NOT throw", () => {
 				],
 			};`,
 		);
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /\[warning\]/);
-				return true;
-			},
-		);
+		await expectRegisterThrow([/\[warning\]/]);
 	});
 });
 

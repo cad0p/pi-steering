@@ -26,7 +26,7 @@ import {
 	formatAggregatedDiagnostics,
 	formatSingleLineDiagnostic,
 } from "./session-runtime.ts";
-import type { SteeringConfig, SteeringDiagnostic } from "../schema.ts";
+import type { SteeringDiagnostic } from "../schema.ts";
 import { useIsolatedHome } from "../__test-helpers__.ts";
 
 /** Minimal evaluator host; the strict-mode tests don't drive evaluation. */
@@ -470,11 +470,10 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 	});
 
 	it("does NOT drop the observer when the consumer rule is enabled (inverse parity)", async () => {
-		// Pins the inverse direction so a refactor that flips the
-		// filter (`disabledRules.has(r.name)` ↔ `!disabledRules.has`)
-		// surfaces here — the disabled-true case alone would not
-		// catch it. Mirrors the inverse-parity test in
-		// `bin/pi-steering.test.ts`.
+		// Cross-surface symmetry with the inverse-parity test in
+		// `bin/pi-steering.test.ts` (O1 in INVARIANTS.md): both surfaces
+		// must agree that an enabled consumer keeps its observer alive.
+
 		writeSteeringConfig(
 			tmpHome,
 			`export default {

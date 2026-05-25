@@ -152,14 +152,13 @@ async function dispatchEvent(
 	observers: readonly Observer[],
 	host: EvaluatorHost,
 ): Promise<void> {
-	// Top-level fail-open wrap (S1 follow-up, promised in d728ef0).
-	// Per-observer throws are already isolated in the inner loop; this
-	// outer wrap exists so a throw in the dispatch SCAFFOLDING (e.g. a
-	// session-JSONL read blowing up inside `createFindEntries`, or an
-	// unexpected shape on the incoming event) is logged rather than
-	// propagating back into pi's `tool_result` hook. Observers are
-	// best-effort state recorders — a broken engine should not take
-	// down the tool_result pipeline.
+	// Top-level fail-open wrap. Per-observer throws are already
+	// isolated in the inner loop; this outer wrap exists so a throw in
+	// the dispatch SCAFFOLDING (e.g. a session-JSONL read blowing up
+	// inside `createFindEntries`, or an unexpected shape on the
+	// incoming event) is logged rather than propagating back into pi's
+	// `tool_result` hook. Observers are best-effort state recorders —
+	// a broken engine should not take down the tool_result pipeline.
 	try {
 		await dispatchEventInner(event, ctx, agentLoopIndex, observers, host);
 	} catch (err) {

@@ -488,14 +488,13 @@ describe("register(): cwd-mismatch session_start warn", () => {
 	captureWarns();
 
 	it("emits console.warn when ctx.cwd !== launchCwd; engine continues evaluating", async () => {
-		// Author a USER-DEFINED rule into the launch-cwd config that
-		// the foreign cwd could not possibly load: foreignCwd has no
-		// `.pi/steering` and the walk-up from `/tmp/some/other/project`
-		// terminates at root without reaching tmpHome's HOME. If a
-		// future regression transparently re-loaded config from
-		// ctx.cwd on session_start, this rule would silently disappear
-		// (and DEFAULT_RULES alone could not distinguish the two
-		// rule-sets — the foreign cwd would also inject defaults).
+		// Author a USER-DEFINED rule into the launch-cwd config so the
+		// rule's firing after the cwd-mismatch warn confirms launch-cwd
+		// config remains in force (the rule is only present in the
+		// launch-cwd config and could not have been loaded from
+		// foreignCwd: `/tmp/some/other/project` has no `.pi/steering` and
+		// the walk-up terminates at root without reaching tmpHome's
+		// HOME).
 		writeConfig(
 			tmpHome,
 			`export default {
@@ -557,15 +556,9 @@ describe("register(): cwd-mismatch session_start warn", () => {
 		assert.equal(result, undefined);
 
 		// Pin the cross-project-resume contract beyond "engine merely
-		// continues": the LAUNCH-CWD rule set must still be in force.
-		// The user-defined rule above is authored ONLY in tmpHome's
-		// `.pi/steering.ts` and could not have been loaded from
-		// foreignCwd (no `.pi/steering` at /tmp/some/other, and the
-		// walk-up from foreignCwd terminates at root without reaching
-		// tmpHome's HOME). If a future regression swapped to
-		// ctx.cwd-config on cwd-mismatch, this user rule would silently
-		// disappear — DEFAULT_RULES alone cannot distinguish that case
-		// because the foreign cwd would also inject defaults.
+		// continues": the user-defined rule (only present in launch-cwd
+		// config) still fires after the cwd-mismatch warn — confirms
+		// launch-cwd config remains in force.
 		const blockedEvent: ToolCallEvent = {
 			type: "tool_call",
 			toolName: "bash",
@@ -579,7 +572,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 		assert.equal(
 			blocked?.block,
 			true,
-			"user-defined launch-cwd rule must still fire after the cwd-mismatch warn (proves launch-cwd config — not a re-loaded ctx.cwd config — is in force)",
+			"user-defined launch-cwd rule must still fire after the cwd-mismatch warn — confirms launch-cwd config remains in force",
 		);
 	});
 

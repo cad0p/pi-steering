@@ -26,6 +26,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type {
+	ExtensionAPI,
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolResultEvent,
@@ -216,7 +217,7 @@ describe("register(): default rules wiring", () => {
 
 	it("blocks `git push --force` via default rule", async () => {
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(mock, "git push --force", tmpHome);
@@ -227,7 +228,7 @@ describe("register(): default rules wiring", () => {
 
 	it("allows `git push --force-with-lease`", async () => {
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -240,7 +241,7 @@ describe("register(): default rules wiring", () => {
 
 	it("blocks `git push --force` behind `sh -c` wrapper", async () => {
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -254,7 +255,7 @@ describe("register(): default rules wiring", () => {
 
 	it("blocks `git -C /other/dir push --force` (pre-subcommand flag bypass)", async () => {
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -268,7 +269,7 @@ describe("register(): default rules wiring", () => {
 
 	it("does NOT block `echo 'git push --force'` (echo args are not AST-extracted)", async () => {
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -281,7 +282,7 @@ describe("register(): default rules wiring", () => {
 
 	it("blocks `rm -rf /` and ignores override (noOverride: true)", async () => {
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -311,7 +312,7 @@ describe("register(): inline override escape hatch", () => {
 		writeSteeringConfig(tmpHome, "{ defaultNoOverride: false }");
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -340,7 +341,7 @@ describe("register(): inline override escape hatch", () => {
 		writeSteeringConfig(tmpHome, "{ defaultNoOverride: false }");
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -356,7 +357,7 @@ describe("register(): inline override escape hatch", () => {
 		// NO config layer → defaultNoOverride defaults to `true`. The
 		// override comment is ignored and the block fires.
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -396,7 +397,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 		);
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireWriteToolCall(
@@ -426,7 +427,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 		);
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireEditToolCall(
@@ -457,7 +458,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 		);
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		// cwd does not match → should NOT block.
@@ -480,7 +481,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 		writeSteeringConfig(tmpHome, '{ disabledRules: ["no-force-push"] }');
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		// Rule disabled → push --force no longer blocked.
@@ -497,7 +498,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 		writeSteeringConfig(tmpHome, "{ disableDefaults: true }");
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		assert.equal(
@@ -540,7 +541,7 @@ describe("register(): observer dispatcher wiring", () => {
 		);
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		await fireBashToolResult(
@@ -580,7 +581,7 @@ describe("register(): observer dispatcher wiring", () => {
 		);
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		await fireBashToolResult(
@@ -606,7 +607,7 @@ describe("register(): unrelated tool calls pass through", () => {
 
 	it("returns undefined for a tool call that matches no rule", async () => {
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(mock, "ls -la", tmpHome);
@@ -615,7 +616,7 @@ describe("register(): unrelated tool calls pass through", () => {
 
 	it("returns undefined for a `read` tool call (not in any rule's tool set)", async () => {
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const h = mock.handlers.tool_call;
@@ -664,7 +665,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 		);
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		// Each agent_start bumps the engine's internal counter by 1.
@@ -713,7 +714,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 		);
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 		// Intentionally skip fireAgentStart.
 		await fireBashToolCall(mock, "echo hi", tmpHome);
@@ -761,7 +762,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 		);
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 		fireAgentStart(mock); // loop 1
 		fireAgentStart(mock); // loop 2
@@ -808,7 +809,7 @@ describe("register(): broken config layer", () => {
 
 		const mock = makeMockPi();
 		await assert.rejects(
-			() => register(mock.api as never),
+			() => register(mock.api as ExtensionAPI),
 			(err: Error) => {
 				assert.match(err.message, /config issue/);
 				assert.match(err.message, /\[warning\]/);
@@ -829,7 +830,7 @@ describe("buildSessionRuntime: two-pass disableDefaults merge", () => {
 		writeSteeringConfig(tmpHome, "{ disableDefaults: true }");
 
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		// `disableDefaults: true` in the user layer suppresses
@@ -842,7 +843,7 @@ describe("buildSessionRuntime: two-pass disableDefaults merge", () => {
 	it("no `disableDefaults` — DEFAULT_RULES are injected", async () => {
 		// No config file at all.
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const pushResult = await fireBashToolCall(
@@ -861,7 +862,7 @@ describe("buildSessionRuntime: two-pass disableDefaults merge", () => {
 	it("`disabledRules` filters default rules out of the merged config", async () => {
 		writeSteeringConfig(tmpHome, '{ disabledRules: ["no-force-push"] }');
 		const mock = makeMockPi();
-		await register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		// `no-force-push` is disabled — the rule that would have blocked

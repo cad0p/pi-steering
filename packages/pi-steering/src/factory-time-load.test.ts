@@ -118,8 +118,7 @@ function captureWarns(): void {
  * matches, structured fields).
  *
  * Folds the per-site `const mock = makeMockPi(); await
- * assert.rejects(...)` boilerplate; the mock is not exposed because
- * none of the throw cases inspect it after the rejection.
+ * assert.rejects(...)` boilerplate.
  */
 async function expectRegisterThrow(
 	matchers: RegExp[],

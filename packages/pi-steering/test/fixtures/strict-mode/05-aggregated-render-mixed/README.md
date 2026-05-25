@@ -26,9 +26,6 @@ and what the integration tests pin — is the multi-line shape:
 
 Concretely:
 
-- The thrown error's body opens with `3 config issues:` (plural).
-- The first non-header line is an `[error]` bullet.
-- The remaining lines are `[warning]` bullets — errors come first.
 - Each bullet is `  - [<severity>] <message>` (two-space indent, dash,
   space, severity in brackets, no padding for column alignment).
 - No path prefix (the diagnostics are cross-plugin collisions; their

@@ -164,10 +164,8 @@ describe("register(): factory throws on diagnostics", () => {
 				/"branch"/,
 			],
 			(err) => {
-				// Single-emission lock: integration mirror of the runtime-level
-				// short-circuit between `buildConfig` and `resolvePlugins` (see
-				// `internal/session-runtime.test.ts`). A regression that
-				// reintroduced double-emission would surface here as well.
+				// Integration mirror of O2 single-emission lock; see
+				// internal/session-runtime.test.ts.
 				const collisionMatches = err.message.match(
 					/tracker name collision/g,
 				);

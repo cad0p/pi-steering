@@ -638,14 +638,9 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
 });
 
 describe("buildSessionRuntime: disableDefaults peek vs post-merge re-derivation", () => {
-	// `buildSessionRuntime` peeks at `disableDefaults` via
-	// `mergeBool` BEFORE the full merge runs, so it can decide
-	// whether to inject `DEFAULT_RULES` + `DEFAULT_PLUGINS` into
-	// `buildConfig`'s `defaults` slot. `buildConfig` later
-	// re-derives the same flag via the same `mergeBool` export, so
-	// the values agree by construction today. The parameterized
-	// table pins the invariant against future refactors that might
-	// introduce a competing precedence rule on either side.
+	// Both `mergeBool` peeks and `buildConfig` re-derivations use the
+	// same precedence rule; this table pins agreement against future
+	// drift.
 
 	const cases: ReadonlyArray<{
 		name: string;

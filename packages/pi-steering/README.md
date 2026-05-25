@@ -857,7 +857,7 @@ export default defineConfig({
 
 With `failOnWarnings: false`, warning-class diagnostics fall through to `console.warn` (single-line bracketed `[pi-steering] [warning] <message>` shape on stderr, matching the per-bullet shape used inside the aggregated factory-throw render) and the bridge keeps running with the merged config. Error-class diagnostics still throw — the engine cannot operate safely with two plugins claiming the same state dimension.
 
-Note: with `failOnWarnings: false` the surviving warnings emit to `console.warn`, which pi's interactive TUI clobbers on `/reload` — for visibility, prefer fixing the warnings or running `pi-steering list` to surface them at the CLI.
+Note: pi's interactive TUI clobbers `console.warn` on `/reload` — for visibility prefer fixing the warnings or running `pi-steering list`.
 
 ### Cross-project resume
 

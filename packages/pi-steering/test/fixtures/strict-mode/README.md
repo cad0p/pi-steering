@@ -33,11 +33,9 @@ expected outcome.
   evolve across pi versions. What these fixtures pin is the body
   shape and bullet text the bridge produces; the integration tests
   assert against that body, not pi's wrapping.
-- **Diagnostic message text is owned by `plugin-merger.ts`.** The
-  literal `duplicate <kind> "<name>" — plugins ...` wording lives in
-  `plugin-merger.ts`'s diagnostic emission. If it changes there,
-  update both the integration tests' regex assertions and the
-  affected fixture READMEs in lock-step.
+- **Diagnostic message text mirrors production wording.** If a
+  fixture README's expected outcome diverges from what the
+  integration tests assert, treat it as drift and update both.
 - **Cross-plugin collisions carry no `path`.** No path prefix appears
   between the `[<severity>]` tag and the message text for
   plugin-merger collision diagnostics; their `path` is unset.

@@ -44,5 +44,4 @@ collisions.
 
 ## Pre-flight
 
-See `packages/pi-steering/test/fixtures/strict-mode/README.md` and the
-design's "End-to-end gate strategy" for the pi-pinning steps.
+See `packages/pi-steering/test/fixtures/strict-mode/README.md` for the pi-pinning steps.

@@ -41,9 +41,9 @@ through unsteered.
 
 ## Pre-flight
 
-See `packages/pi-steering/test/fixtures/strict-mode/README.md` and the
-design's "End-to-end gate strategy" section for the steps to point pi
-at this branch's bridge before running the fixture.
+See `packages/pi-steering/test/fixtures/strict-mode/README.md` for
+the steps to point pi at this branch's bridge before running the
+fixture.
 
 ## What this fixture pins
 

@@ -855,7 +855,7 @@ export default defineConfig({
 
 With `failOnWarnings: false`, warning-class diagnostics fall through to `console.warn` (single-line legacy shape on stderr) and the bridge keeps running with the merged config. Error-class diagnostics still throw — the engine cannot operate safely with two plugins claiming the same state dimension.
 
-Note that `failOnWarnings: false` is not the recommended state in v0.1.x: warnings on `console.warn` are invisible in pi's interactive TUI (the chat view clobbers stderr-bound text on `/reload`). The opt-out exists to match the legacy v0.0.x semantics for users who pre-pinned to that shape.
+Note that `failOnWarnings: false` is not the recommended state in v0.1.x: warnings on `console.warn` are invisible in pi's interactive TUI (the chat view clobbers stderr-bound text on `/reload`). The opt-out exists for pre-publish consumers (no npm package was published prior to v0.1.0) who pinned this repo via a Git ref before the strict-mode default landed and want the legacy fail-soft semantics until they update their configs.
 
 ### Cross-project resume
 

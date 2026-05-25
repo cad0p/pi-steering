@@ -107,24 +107,20 @@ export function buildObserverDispatcher(
 	userObservers: readonly Observer[],
 	host: EvaluatorHost,
 ): ObserverDispatcher {
-	// S3: validate user-supplied observer names. Production callers
-	// go through `runMergerPipeline`, which produces an
-	// `invalid-name` diagnostic for malformed user-config names and
-	// aggregates it into the strict-mode throw — so this throw is
+	// User-supplied observer names go through `validateName` so a
+	// malformed name surfaces with the same `(user config)` label as
+	// production diagnostics. Production callers reach this throw via
+	// `runMergerPipeline`, which produces an `invalid-name` diagnostic
+	// and aggregates it into the strict-mode throw — so this throw is
 	// unreachable from the standard pipeline. It remains as defense-
 	// in-depth for direct callers (unit tests, future SDK embedders)
 	// that build an observer dispatcher without going through
-	// `buildSessionRuntime` / `loadHarness` / `loadSteeringConfig`.
-	// Plugin observer names are validated inside `resolvePlugins`
-	// and surface through the diagnostic stream.
-	//
-	// Defensive throw: exercised directly by the unit test
-	// `buildObserverDispatcher: user observer-name validation (S3)`
-	// in `observer-dispatcher.test.ts`. The throw labels every
-	// offender `(user config)` and trusts the caller to forward only
-	// user-authored observers through `userObservers`; plugin and
-	// default-shipped observers are package-controlled and reviewed,
-	// so they don't land here.
+	// `buildSessionRuntime` / `loadHarness` / `loadSteeringConfig`,
+	// and is exercised directly by the unit test
+	// `buildObserverDispatcher: user observer-name validation (S3)` in
+	// `observer-dispatcher.test.ts`. Plugin observer names are
+	// validated inside `resolvePlugins`; the caller is trusted to
+	// forward only user-authored observers through `userObservers`.
 	for (const o of userObservers) {
 		const d = validateName("observer", o.name, "user config");
 		if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);

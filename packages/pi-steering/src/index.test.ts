@@ -65,16 +65,12 @@ interface MockPi {
 	>;
 	entries: Entry[];
 	execCalls: Array<{ cmd: string; args: string[] }>;
-	warnings: string[];
-	errors: string[];
 }
 
 function makeMockPi(): MockPi {
 	const handlers: MockPi["handlers"] = {};
 	const entries: Entry[] = [];
 	const execCalls: MockPi["execCalls"] = [];
-	const warnings: string[] = [];
-	const errors: string[] = [];
 	const api = {
 		on(event: EventName, handler: (e: unknown, ctx: unknown) => unknown) {
 			handlers[event] = handler;
@@ -87,7 +83,7 @@ function makeMockPi(): MockPi {
 			return { stdout: "", stderr: "", code: 0, killed: false };
 		},
 	};
-	return { api, handlers, entries, execCalls, warnings, errors };
+	return { api, handlers, entries, execCalls };
 }
 
 function fireAgentStart(mock: MockPi): void {

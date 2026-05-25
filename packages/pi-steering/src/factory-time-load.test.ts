@@ -480,7 +480,7 @@ describe("register(): factory does NOT throw", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* Case 13: cwd-mismatch session_start console.warn                           */
+/* Cwd-mismatch session_start console.warn                                   */
 /* -------------------------------------------------------------------------- */
 
 describe("register(): cwd-mismatch session_start warn", () => {
@@ -537,7 +537,8 @@ describe("register(): cwd-mismatch session_start warn", () => {
 		// evaluator was reachable.
 		assert.equal(result, undefined);
 
-		// Pin the LD-5 contract beyond "engine merely continues":
+		// Pin the cross-project-resume contract beyond "engine merely
+		// continues":
 		// the LAUNCH-CWD rule set must still be in force, so a command
 		// that DEFAULT_RULES blocks (`git push --force`) should still
 		// be blocked even though the cwd mismatch was detected. A
@@ -582,7 +583,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* Case 14: aggregated render snapshot — 1 error + 2 warnings                 */
+/* Aggregated render snapshot — 1 error + 2 warnings                          */
 /* -------------------------------------------------------------------------- */
 
 describe("register(): aggregated render snapshot", () => {

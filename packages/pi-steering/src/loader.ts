@@ -16,8 +16,12 @@
  *   - Node ≥ 22 required (native type-stripping via `await import()`).
  *     Loader throws a clear "upgrade Node" error on older runtimes.
  *   - File extensions: `.ts` only. Other files under `.pi/steering/`
- *     are surfaced as warning-class diagnostics and skipped — a user
- *     might keep helpers there.
+ *     are surfaced as warning-class diagnostics. Under the default
+ *     strict-mode contract this aborts loading; users who keep
+ *     helpers under `.pi/steering/` (e.g. `rules.ts`) must either set
+ *     `failOnWarnings: false` or rename them to end in `.ts` and have
+ *     them export the `defineConfig({...})` shape. Files whose name
+ *     ends in `.ts` are loaded; everything else is reported.
  *
  * Merge semantics ({@link buildConfig}):
  *

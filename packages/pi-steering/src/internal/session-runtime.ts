@@ -84,8 +84,6 @@ export function runMergerPipeline(
 		defaults,
 	);
 	const userConfigNameDiagnostics = validateUserConfigNames(layers);
-	// Reads raw layers — don't switch to merged.rules; mis-attributes
-	// DEFAULT_RULES to (user config). Full rationale in JSDoc above.
 	if (mergeDiagnostics.some((d) => d.type === "error")) {
 		return {
 			merged,

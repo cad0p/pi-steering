@@ -208,21 +208,14 @@ export async function buildSessionRuntime(
 		throw new Error(formatAggregatedDiagnostics(aggregated));
 	}
 	if (hasWarning) {
-		// Strict-mode throw above absorbed any error-class diagnostic;
-		// anything reaching this branch is warning-class. Iterate directly
-		// and let the formatter handle severity rendering.
 		for (const d of aggregated) {
 			console.warn(formatSingleLineDiagnostic(d));
 		}
 	}
 
 	if (resolved === null) {
-		// Unreachable by construction: runMergerPipeline returns
-		// resolved: null only when merge-side has an error-class
-		// diagnostic, and the strict-mode throw above fires on any
-		// error-class diagnostic. Encoded explicitly so a future change
-		// to runMergerPipeline's null-on-error contract surfaces here
-		// rather than silently breaking the resolved.rules access below.
+		// Invariant guard: runMergerPipeline only returns null on error,
+		// which the strict-mode throw above absorbed.
 		throw new Error("internal: resolved null without error diagnostic");
 	}
 

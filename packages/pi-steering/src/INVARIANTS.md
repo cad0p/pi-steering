@@ -1,4 +1,4 @@
-# Internal invariants — `S` and `E` tags
+# Internal invariants — `S`, `E`, and `O` tags
 
 Short reference for the load-bearing invariants flagged across the
 engine source. These are NOT a public API contract — they are
@@ -6,8 +6,10 @@ maintainer shorthand to keep related call sites traceable across
 files. Source comments cite the tag and rely on this file for the
 definition.
 
-This file is internal to `pi-steering`. It is not exported, not
-bundled, and not part of any compatibility surface.
+This file ships with the package as a maintainer-facing glossary;
+it is not part of the public API surface (no exports), but is
+included in the npm tarball for source-readers consulting tagged
+call sites on disk.
 
 ## Safety invariants (`S`)
 
@@ -90,3 +92,20 @@ implemented by the shared cache invalidation described in `S2` —
 the two tags travel together because the implementation is one
 mechanism, but the concerns are distinct: `S2` is about cache
 freshness; `E1` is about evaluation semantics.
+
+## Orchestration invariants (`O`)
+
+### `O1` — observer-drop parity between runtime and CLI
+
+**Where:** `internal/session-runtime.ts` (`buildSessionRuntime` →
+`finalizePluginState`); `bin/pi-steering.ts`
+(`runCliMergeWithInfoCapture`).
+
+**What:** Both surfaces apply `disabledRules` filtering BEFORE
+running `dropUnusedObservers`, so an observer whose only consumers
+are disabled rules surfaces the same `console.info` breadcrumb in
+both paths. A future surface that bypasses this ordering would see
+different observer-drop behavior than the runtime.
+
+**Pinned by:** `internal/session-runtime.test.ts` (runtime branch);
+`bin/pi-steering.test.ts` (CLI branch).

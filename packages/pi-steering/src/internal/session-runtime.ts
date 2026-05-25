@@ -147,16 +147,9 @@ export function formatAggregatedDiagnostics(
 }
 
 /**
- * Render a single {@link SteeringDiagnostic} as a one-line message
- * suitable for the two single-diagnostic surfaces:
+ * Render a single {@link SteeringDiagnostic} as a one-line message:
  *
- *   - `console.warn` (legacy fail-soft channel under
- *     `failOnWarnings: false`) — `buildSessionRuntime` only routes
- *     warnings through here; errors always throw via the aggregated
- *     form.
- *   - CLI stderr (`pi-steering list` pre-flight surface) — both
- *     warnings and errors render through this helper inline as the
- *     loader / merger yields them.
+ *   `[pi-steering] <ERROR: >?<path: >?<message>`
  *
  * Errors get an `ERROR: ` severity prefix after the `[pi-steering]`
  * tag so a user grepping CI logs has a clear handle; warnings have
@@ -166,7 +159,8 @@ export function formatAggregatedDiagnostics(
  *
  * The aggregated multi-line form (for thrown-Error message bodies
  * in strict mode) is produced by {@link formatAggregatedDiagnostics},
- * not this helper.
+ * not this helper. Per-route severity policy (which surface emits
+ * which severity through this helper) lives at the call sites.
  */
 export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
 	const severity = d.type === "error" ? "ERROR: " : "";

@@ -33,8 +33,9 @@ import type { EvaluatorHost } from "./evaluator.ts";
  * surviving warnings are emitted to `console.warn` instead of
  * throwing; the bridge continues with the merged config. The bridge
  * does not catch a thrown factory — the throw propagates through
- * pi's extension loader into pi's `[Extension issues]` block, which
- * is the only diagnostic surface that survives `/reload`.
+ * pi's extension loader into pi's `[Extension issues]` block (pi's
+ * startup yellow-highlighted diagnostic banner), which is the only
+ * diagnostic surface that survives `/reload`.
  *
  * Lifecycle wiring:
  *
@@ -70,8 +71,9 @@ export default async function register(pi: ExtensionAPI): Promise<void> {
 
 	// Narrow host surface the evaluator + dispatcher need.
 	// pi-coding-agent's ExtensionAPI exposes `exec` and `appendEntry`
-	// as closure-bound methods (no `this` dependency), verified in
-	// pi-coding-agent's `loader.js` — detaching is safe.
+	// as closure-bound methods (no `this` dependency), verified at
+	// `@earendil-works/pi-coding-agent@0.75.5`'s `loadExtension` in
+	// `loader.js` — detaching is safe.
 	const host: EvaluatorHost = {
 		exec: pi.exec,
 		appendEntry: pi.appendEntry,

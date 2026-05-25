@@ -1719,12 +1719,11 @@ export interface SteeringConfig {
 	 * {@link disableDefaults}.
 	 *
 	 * Note: a broken layer cannot communicate its OWN `failOnWarnings:
-	 * false` opt-out, since the loader can't read the failed file. To
-	 * recover from a `layer-import-failed` diagnostic on an outer
-	 * (ancestor) layer, set `failOnWarnings: false` on a successfully-
-	 * loaded inner layer; the inner-wins merge picks up the opt-out
-	 * before the broken layer's warning-class diagnostic escalates to
-	 * a thrown error. Alternatively, fix the broken file.
+	 * false` opt-out, since the loader can't read the failed file. The
+	 * remedy is to fix the broken file. (If you have a successfully-
+	 * loaded inner layer, you can set `failOnWarnings: false` there to
+	 * opt out of the warning escalation while you investigate the outer
+	 * broken layer; the inner-wins merge picks up the opt-out.)
 	 *
 	 * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
 	 */

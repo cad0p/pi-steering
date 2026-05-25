@@ -839,6 +839,8 @@ This is the out-of-band trust boundary. Within the steering engine, the invarian
 
 ### Strict mode + load failures
 
+Strict mode = `failOnWarnings: true`, the default. Opt out per-config-layer with `failOnWarnings: false`.
+
 If your steering config fails to load at extension factory time (a plugin throws during import, a syntax error in `index.ts`, `pnpm` fails to resolve a dependency), pi-steering's bridge factory **throws and surfaces the diagnostic in pi's `[Extension issues]` block at startup** (yellow). Pi disables the extension for the session and continues running unsteered.
 
 Default behavior: any warning-class loader/merger diagnostic (cross-layer plugin name collision, within-layer rule/observer collision, predicate-key collision, etc.) escalates to the same thrown factory. Error-class diagnostics (tracker-name collision, reserved-name violations) ALWAYS throw. The aggregated message lists every diagnostic with errors first, one bullet per issue.
@@ -859,7 +861,7 @@ Note that `failOnWarnings: false` is not the recommended state in v0.1.x: warnin
 
 ### Cross-project resume
 
-When you `pi --resume` a session originally created in another project (Tab → "All" scope in the picker), pi-steering's rules are loaded from your launch cwd, NOT the session's cwd. Pi's footer (the bottom bar in interactive TUI mode) shows the session cwd; if it differs from where you launched, the bridge emits a single `[pi-steering] session cwd ... differs from launch cwd ...` line on stderr from `session_start` and continues evaluating with launch-cwd rules. To use the resumed session's project rules, exit pi and re-launch from that project's directory.
+When you `pi --resume` a session originally created in another project (Tab → "All" scope in the picker), pi-steering's rules are loaded from your launch cwd, NOT the session's cwd. Pi's footer (the bottom bar in interactive TUI mode) shows the session cwd; if it differs from where you launched, the bridge emits a single `[pi-steering] session cwd ... differs from launch cwd ...` line on stderr and continues evaluating with launch-cwd rules. To use the resumed session's project rules, exit pi and re-launch from that project's directory.
 
 ### Block-reason tag trust
 

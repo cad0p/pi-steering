@@ -137,6 +137,14 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// diagnostic; the strict-mode opt-out applies only to warnings,
 		// not errors. Setting `failOnWarnings: false` does NOT change
 		// the throw — errors always escalate.
+		//
+		// Single-emission lock: both `buildConfig` and `resolvePlugins`
+		// independently detect tracker-name collisions. The runtime's
+		// short-circuit between the two passes (when merge-side has any
+		// error-class diagnostic) drops the second detection so the
+		// aggregated message lists the collision exactly once — the
+		// header reads `1 config issue:` (singular), and a regex count
+		// of the bullet line confirms there's no duplicate.
 		writeSteeringConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
@@ -152,8 +160,17 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		await assert.rejects(
 			() => buildSessionRuntime(tmpHome, noopHost),
 			(err: Error) => {
+				assert.match(err.message, /^1 config issue:/);
 				assert.match(err.message, /\[error\]/);
 				assert.match(err.message, /tracker name collision/);
+				const collisionLines = err.message.match(
+					/tracker name collision/g,
+				);
+				assert.equal(
+					collisionLines?.length,
+					1,
+					`expected exactly one tracker-name-collision bullet (short-circuit drops the second emission); got ${collisionLines?.length}: ${err.message}`,
+				);
 				return true;
 			},
 		);
@@ -449,6 +466,48 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 		assert.ok(
 			breadcrumb !== undefined,
 			`expected observer-drop breadcrumb on console.info (consumer rule was disabled, observer should be reported as dropped); got: ${JSON.stringify(infos)}`,
+		);
+	});
+
+	it("does NOT drop the observer when the consumer rule is enabled (inverse parity)", async () => {
+		// Pins the inverse direction so a refactor that flips the
+		// filter (`disabledRules.has(r.name)` ↔ `!disabledRules.has`)
+		// surfaces here — the disabled-true case alone would not
+		// catch it. Mirrors the inverse-parity test in
+		// `bin/pi-steering.test.ts`.
+		writeSteeringConfig(
+			tmpHome,
+			`export default {
+				disableDefaults: true,
+				observers: [
+					{
+						name: "obs-x",
+						writes: ["X"],
+						onResult: () => {},
+					},
+				],
+				rules: [
+					{
+						name: "consumer",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+						when: { happened: { event: "X" } },
+					},
+				],
+			};`,
+		);
+		const result = await buildSessionRuntime(tmpHome, noopHost);
+		assert.ok(result.evaluator);
+		assert.ok(result.dispatcher);
+		const breadcrumb = infos.find((m) =>
+			/\[pi-steering\] observer 'obs-x' dropped/.test(m),
+		);
+		assert.equal(
+			breadcrumb,
+			undefined,
+			`expected NO observer-drop breadcrumb (consumer rule is enabled, observer is consumed); got: ${JSON.stringify(infos)}`,
 		);
 	});
 });

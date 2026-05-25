@@ -77,22 +77,13 @@ export function useIsolatedHome(
 /**
  * Per-test scratch `$HOME` PLUS a `chdir` into it. The bridge factory
  * loads steering configs from `process.cwd()` at register time, so
- * tests exercising factory-time loading must launch from the scratch
- * home for the loader walk-up to find the per-test config.
+ * factory-time tests must launch from the scratch home for the
+ * loader walk-up to find the per-test config.
  *
- * Single `beforeEach` + `afterEach` pair so teardown order is
- * explicit: `chdir` back FIRST, then `rmSync`. Reverse ordering risks
- * `rmSync`-ing the dir while `process.cwd()` still points at it.
- *
- * The temp dir path is canonicalized via `realpathSync` so the value
- * exposed to tests matches what `process.cwd()` will return after
- * `process.chdir(tmp)`. On macOS, `os.tmpdir()` is
- * `/var/folders/.../T` which is a symlink to `/private/var/...`;
- * without `realpathSync` the value the test reads (the symlink path)
- * and the value `process.cwd()` reports (the resolved path) diverge
- * byte-for-byte, producing false cwd-mismatch warns in the
- * `ctx.cwd === launchCwd` test path. Linux is unaffected since
- * `os.tmpdir()` is already canonical there.
+ * The temp dir is canonicalized via `realpathSync` because
+ * `os.tmpdir()` is a symlink on macOS; without canonicalization the
+ * value the test reads and what `process.cwd()` reports after
+ * `chdir` diverge byte-for-byte and produce false cwd-mismatch warns.
  */
 export function useScratchHome(
 	prefix: string,

@@ -21,15 +21,16 @@ Pi prints an `[Extension issues]` block (yellow) at startup whose body
 matches:
 
 ```
-Failed to load extension: <bridge path>: <count> config issue(s):
+Failed to load extension: <bridge path>: 1 config issue:
   - [warning] duplicate rule "dup" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
 ```
 
 Concretely:
 
 - The block header is pi's `[Extension issues]`.
-- The thrown error message starts with `<count> config issue` (singular
-  if there's one, plural otherwise).
+- The thrown error message starts with `1 config issue:` (the
+  singular form; aggregated factories with N>1 issues use the
+  `N config issues:` plural).
 - At least one bullet line begins with `  - [warning]`.
 - The bullet text references the colliding rule name `dup`.
 - The bullet has NO path prefix between `[warning]` and the message —
@@ -47,6 +48,6 @@ fixture.
 
 ## What this fixture pins
 
-Default-on behavior: a non-fatal collision
-becomes fatal at factory time, surfacing in the only diagnostic
-channel that survives `/reload` (`[Extension issues]`).
+Default-on behavior: a non-fatal collision becomes fatal at factory
+time, surfacing in the only diagnostic channel that survives
+`/reload` (`[Extension issues]`).

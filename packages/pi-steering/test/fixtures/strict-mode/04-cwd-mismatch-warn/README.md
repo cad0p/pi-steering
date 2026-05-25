@@ -44,6 +44,9 @@ Concretely:
   from in step 2).
 - Pi continues running normally; the session's chat resumes; tool
   calls are evaluated with the launch-cwd rules.
+- After observing the cwd-mismatch warn, run `echo CWD_PROBE` in the
+  resumed session; the rule should still fire (proving launch-cwd
+  config is in force, NOT a re-loaded ctx.cwd config).
 
 The warn lands on stderr only (chatContainer-clobbered on
 `/reload`); for non-interactive `pi -p` invocations, redirect stderr
@@ -52,9 +55,10 @@ to capture it.
 ## What this fixture pins
 
 Cwd-mismatch behavior: cross-project resume produces a single
-console.warn signal; the engine does NOT disable itself. Partial
-launch-cwd guardrails beat silently disabling everything for the
-resumed session.
+console.warn signal; the engine does NOT disable itself, and the
+launch-cwd rule set (here, the `block-launch-cwd-probe` user rule)
+remains in force. Partial launch-cwd guardrails beat silently
+disabling everything for the resumed session.
 
 ## Pre-flight
 

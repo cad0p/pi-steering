@@ -23,15 +23,15 @@ Pi prints an `[Extension issues]` block (yellow) at startup whose body
 matches:
 
 ```
-Failed to load extension: <bridge path>: <count> config issue(s):
+Failed to load extension: <bridge path>: 1 config issue:
   - [error] tracker name collision: both plugins "plugin-a" and "plugin-b" register a tracker called "branch". ...
 ```
 
 Concretely:
 
 - The block header is pi's `[Extension issues]`.
-- The thrown error message contains `<count> config issue` and a
-  `[error]` severity tag.
+- The thrown error message starts with `1 config issue:` and the
+  bullet carries an `[error]` severity tag.
 - The bullet text references the colliding tracker name `branch`.
 - The session continues running but the steering engine is NOT loaded.
 

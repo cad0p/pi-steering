@@ -485,10 +485,7 @@ export function mergeBool(
  * preference.
  *
  * Plugins whose name appears in `disabledPlugins` are skipped before
- * collision detection so a user resolving the error by following the
- * diagnostic's own remedy ("disable one plugin") sees the diagnostic
- * go away in the same edit. Mirrors the disable-then-detect ordering
- * in {@link mergePlugins} and {@link mergeRules}.
+ * collision detection (mirrors {@link mergePlugins}).
  */
 function detectTrackerNameCollisions(
 	plugins: readonly Plugin[],
@@ -542,12 +539,6 @@ export function buildConfig(
 
 	const diagnostics: SteeringDiagnostic[] = [];
 
-	// Compute the disable-sets up-front so the merge passes can drop
-	// disabled entities BEFORE running collision detection. A user
-	// resolving a duplicate-plugin warning by adding the plugin to
-	// `disabledPlugins` should see the warning go away in the same
-	// config edit — detect-then-disable would still surface the
-	// warning even though the disable already settled the conflict.
 	const disabledPluginsList = mergeStringUnion(effective, "disabledPlugins");
 	const disabledRulesList = mergeStringUnion(effective, "disabledRules");
 	const disabledPluginsSet = new Set(disabledPluginsList ?? []);

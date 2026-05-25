@@ -478,21 +478,11 @@ function mergeStringUnion(
 }
 
 /**
- * Inner-wins boolean merge over walked-up layers — walks `layers`
- * left-to-right (inner-first), returns the first explicit
- * boolean, or `undefined` if no layer sets the field.
- *
- * Used by `buildConfig` to merge `defaultNoOverride`,
- * `disableDefaults`, and `failOnWarnings`, and by
- * `buildSessionRuntime` to peek at `disableDefaults` before
- * deciding whether to inject `DEFAULT_PLUGINS` / `DEFAULT_RULES`.
- *
- * Exported across the loader/internal boundary for that runtime
- * peek; not part of the public package surface (not re-exported
- * from `index.ts`). External callers reading the merged result
- * of these flags should go through {@link loadSteeringConfig}
- * — it walks up from a cwd, runs the merger pipeline, and
- * returns the merged config alongside its diagnostics.
+ * Inner-wins boolean merge over walked-up layers. Walks left-to-right
+ * (inner-first); returns the first explicit boolean or `undefined`.
+ * Used by `buildConfig` for the three boolean fields and by
+ * `buildSessionRuntime` to peek `disableDefaults` before defaults
+ * injection. Internal — not in the package's `exports` surface.
  */
 export function mergeBool(
 	layers: readonly SteeringConfig[],

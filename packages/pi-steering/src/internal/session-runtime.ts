@@ -119,10 +119,6 @@ export function runMergerPipeline(
  *     severity, declaration order is preserved.
  *
  * No footer.
- *
- * @param diagnostics — non-empty; throws on empty (the function
- *   emits an `Error.message` body and would render a misleading
- *   header for an empty array).
  */
 export function formatAggregatedDiagnostics(
 	diagnostics: readonly SteeringDiagnostic[],
@@ -189,14 +185,10 @@ export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
  *      rules inside `resolvePlugins`, but `buildConfig` leaves
  *      user-authored rules in `config.rules` untouched.
  *
- *      Note: disabled-rule handling is scattered across three sites:
- *      (1) `buildConfig` suppresses collision diagnostics for entries
- *      already in `disabledPlugins`/`disabledRules`
- *      (collision-suppression); (2) `resolvePlugins` filters
- *      plugin-shipped rules whose name is in `disabledRules`
- *      (filtering); (3) this step filters user-authored
- *      `config.rules`. A maintainer touching opt-out logic should
- *      review all three.
+ *      Note: opt-out logic is split across `buildConfig`
+ *      (collision-suppression for `disabledPlugins`/`disabledRules`),
+ *      `resolvePlugins` (filters plugin-shipped rules), and this step
+ *      (filters user-authored `config.rules`) — touch all three together.
  *   6. Drop unused observers via `finalizePluginState` over the
  *      plugin-merged + user-authored streams before handing off to
  *      `buildEvaluator` and `buildObserverDispatcher`.

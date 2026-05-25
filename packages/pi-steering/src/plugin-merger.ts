@@ -59,10 +59,6 @@ import {
  * lands in one place; `runMergerPipeline`'s short-circuit means a
  * given session sees only one of the two emissions, but the strings
  * stay in lock-step.
- *
- * Parameters refer to plugin registration order: the first plugin to
- * claim the tracker name owns it; a later plugin attempting the same
- * name produces the diagnostic.
  */
 export function formatTrackerNameCollisionMessage(
 	firstRegisteredPlugin: string,

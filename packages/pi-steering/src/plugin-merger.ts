@@ -54,11 +54,9 @@ import {
 
 /**
  * Single source of truth for the `tracker-name-collision` diagnostic
- * message text. Both `loader.ts:detectTrackerNameCollisions` and
- * `plugin-merger.ts:resolvePlugins` call this so a wording update
- * lands in one place; `runMergerPipeline`'s short-circuit means a
- * given session sees only one of the two emissions, but the strings
- * stay in lock-step.
+ * message. Both `loader.ts:detectTrackerNameCollisions` and
+ * `plugin-merger.ts:resolvePlugins` call this so the wording stays in
+ * lock-step.
  */
 export function formatTrackerNameCollisionMessage(
 	firstRegisteredPlugin: string,

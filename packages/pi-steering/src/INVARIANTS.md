@@ -44,12 +44,10 @@ escalates.
 
 When `createAppendEntry` and `createFindEntries` share the same
 cache map (the evaluator wires them this way per tool_call; the
-observer-dispatcher wires them per tool_result), an `appendEntry`
-write during rule A's `onFire` invalidates the cached read for that
-`customType`, so rule B's `when.happened` predicate within the same
-phase sees the fresh entry. Callers that omit the shared cache get
-per-closure snapshot behavior (pre-`S2`), which is sound only when
-the closure never interleaves reads with writes.
+observer-dispatcher wires them per tool_result),
+`createAppendEntry` invalidates the cache entry for the written
+`customType` so the next paired `createFindEntries` call re-reads.
+Callers omitting the shared cache get per-closure snapshot behavior.
 
 ### `S3` — name validation
 

@@ -172,22 +172,22 @@ export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
  *      $HOME.
  *   2. `mergeBool(layers, "disableDefaults")` — inner-wins peek
  *      across raw layers without paying for a full merge.
- *   3. `buildConfig(layers, defaults?)` with defaults conditional on
- *      the disableDefaults peek, producing the effective config.
- *   3a. Short-circuit on error-class loader / merge diagnostics
- *      before running plugin merger — avoids double-reporting
- *      tracker-name-collision when both surfaces detect it.
- *   4. Apply `config.disabledRules` to the merged `rules` — the plugin
- *      merger handles this for plugin-shipped rules, but
- *      `buildConfig` leaves user/default rules in `config.rules`
- *      untouched on the assumption that the caller (this function)
- *      filters them before handing off to `buildEvaluator`.
- *   5. Run `resolvePlugins` to get the plugin-merger-side diagnostics.
- *   6. Aggregate every diagnostic produced along the way and apply
+ *   3. `runMergerPipeline(layers, defaults?, builtinTrackers)` — runs
+ *      `buildConfig` (including name validation and the merge-error
+ *      short-circuit) and `resolvePlugins` together, with defaults
+ *      conditional on the disableDefaults peek.
+ *   4. Aggregate every diagnostic produced along the way and apply
  *      the strict-mode contract: throw when any error-class
  *      diagnostic is present, throw when any warning-class diagnostic
  *      is present and `failOnWarnings !== false`, otherwise emit
  *      surviving warnings via `console.warn`.
+ *   5. Apply `config.disabledRules` to the merged user / default
+ *      `rules` — the plugin merger handles this for plugin-shipped
+ *      rules inside `resolvePlugins`, but `buildConfig` leaves
+ *      user-authored rules in `config.rules` untouched.
+ *   6. Drop unused observers via `finalizePluginState` over the
+ *      plugin-merged + user-authored streams before handing off to
+ *      `buildEvaluator` and `buildObserverDispatcher`.
  *
  * Factored out of `register()` so the wiring is unit-testable without
  * a pi runtime stub. The `config` from earlier versions of this

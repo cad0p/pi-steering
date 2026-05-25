@@ -316,7 +316,7 @@ async function runList(args: string[]): Promise<number> {
  * stdout stays clean for `--format=json` consumers, but a plugin
  * author running `pi-steering list` to debug "why isn't my observer
  * firing?" sees the same breadcrumb the production runtime would
- * have emitted at session_start.
+ * have emitted at extension factory time.
  */
 function runCliMergeWithInfoCapture(
 	layers: readonly SteeringConfig[],
@@ -336,8 +336,8 @@ function runCliMergeWithInfoCapture(
 		);
 		// Mirror `buildSessionRuntime`'s observer-drop pass so the CLI
 		// surfaces the same `[pi-steering] observer 'X' dropped` info-
-		// level breadcrumbs the production runtime emits at
-		// session_start. Skipped on merge short-circuit (`resolved ===
+		// level breadcrumbs the production runtime emits at extension
+		// factory time. Skipped on merge short-circuit (`resolved ===
 		// null`) — without a resolved plugin state we can't enumerate
 		// plugin-side observers, and the merge-error short-circuit
 		// suppresses downstream surfaces uniformly.

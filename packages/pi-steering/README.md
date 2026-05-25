@@ -18,7 +18,7 @@ Use it when:
 pi install pi-steering
 ```
 
-Requires **Node ≥ 22** — the loader reads `.pi/steering.ts` files via native type-stripping (no `tsx` / `ts-node` runtime). On older Node the loader throws with an upgrade message at session start.
+Requires **Node ≥ 22** — the loader reads `.pi/steering.ts` files via native type-stripping (no `tsx` / `ts-node` runtime). On older Node the loader throws with an upgrade message at startup.
 
 ### Local install (during the PoC)
 
@@ -825,13 +825,13 @@ Plugins register predicates (`when.<key>` handlers), observers, and `onFire` hoo
 
 - Shell out via `ctx.exec` (with the same privileges as pi).
 - Forge session entries via `ctx.appendEntry`, which later rules consult via `when.happened`.
-- Throw in unexpected places — predicate-runtime throws fail open per S1 (the rule never fires). Factory-time load failures throw with strict mode; see "Strict mode + load failures" below for the opt-out.
+- Throw in unexpected places — predicate-runtime throws fail open (the rule never fires). Factory-time load failures throw with strict mode; see "Strict mode + load failures" below for the opt-out.
 
 A malicious plugin can trivially defeat any guardrail ship with your config. Review plugin source before adding it to `plugins: [...]` the same way you'd review any third-party dependency.
 
 ### Session JSONL trust
 
-`when.happened` reads entries tagged via `appendEntry`. The write path (`createAppendEntry`) is engine-controlled — every write gets the current `_agentLoopIndex` stamped on it automatically, and names go through S3 validation.
+`when.happened` reads entries tagged via `appendEntry`. The write path (`createAppendEntry`) is engine-controlled — every write gets the current `_agentLoopIndex` stamped on it automatically, and names go through name validation.
 
 The **read path (`findEntries`) treats every tagged entry in the session JSONL as authentic**. Entries written OUTSIDE the engine (direct JSONL writes by another pi extension, hand-edited session files, a `pi.appendEntry` call from non-steering code) can forge type tags and trick `when.happened` into thinking an event occurred when it didn't — bypassing rules that gate on that event.
 
@@ -863,7 +863,7 @@ When you `pi --resume` a session originally created in another project (Tab → 
 
 ### Block-reason tag trust
 
-The `[steering:<name>@<source>]` tag prepended to every block reason is only as trustworthy as your plugin authors. The S3 name-validation fix (regex-constrained rule / plugin / observer names) prevents tag SPOOFING — a name like `phony] ALL CLEAR [real` would have forged the tag; now it throws at load time.
+The `[steering:<name>@<source>]` tag prepended to every block reason is only as trustworthy as your plugin authors. Name validation (regex-constrained rule / plugin / observer names) prevents tag SPOOFING — a name like `phony] ALL CLEAR [real` would have forged the tag; now it throws at load time.
 
 Beyond the tag shape, the contents are plugin-authored. A plugin shipping a rule with `reason: "[steering:other-rule@other-plugin] …"` can make its block look like it came from another plugin. The guardrail here is plugin trust (see above), not the tag machinery.
 
@@ -871,7 +871,7 @@ Beyond the tag shape, the contents are plugin-authored. A plugin shipping a rule
 
 ### `when.happened` scaling
 
-The built-in `when.happened` predicate filters session entries by `customType` via `ctx.findEntries`. Cost is **O(N_session_entries) per unique `customType` per tool_call** — entries are scanned on first read per customType and cached for the rest of the phase (S2 invalidates the cache on writes, see the ADR).
+The built-in `when.happened` predicate filters session entries by `customType` via `ctx.findEntries`. Cost is **O(N_session_entries) per unique `customType` per tool_call** — entries are scanned on first read per customType and cached for the rest of the phase (the shared session-entry cache invalidates on writes, see the ADR).
 
 Example: a 5000-entry session with 6 distinct `when.happened` rules costs roughly 600 µs per tool_call on findEntries alone. Typical sessions (< 500 entries) are fine; long-running multi-day sessions may notice the overhead as the JSONL grows.
 

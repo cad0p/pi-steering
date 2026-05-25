@@ -95,7 +95,6 @@ function fireAgentStart(mock: MockPi): void {
 async function fireSessionStart(mock: MockPi, cwd: string): Promise<void> {
 	const h = mock.handlers.session_start;
 	if (!h) throw new Error("session_start handler not registered");
-	// Extension's session_start returns a Promise; await it.
 	await h(
 		{ type: "session_start", reason: "startup" },
 		makeCtx(cwd),

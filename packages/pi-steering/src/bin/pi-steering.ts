@@ -289,25 +289,12 @@ async function runList(args: string[]): Promise<number> {
 }
 
 /**
- * Run the merge+resolve pipeline through the shared
- * {@link runMergerPipeline} helper, intercepting
- * `console.info` for the duration so the plugin-merger's disabled-
- * plugin / disabled-rule breadcrumbs go to stderr instead of
- * contaminating stdout (which carries the structured `--format=json`
- * output). The save/restore is wrapped in `try`/`finally` so a throw
- * inside the helper still restores the original `console.info`.
- *
- * After the pipeline completes successfully (no merge short-circuit),
- * also run `dropUnusedObservers` over the plugin-merger and
- * user-authored observer streams. The runtime emits an info-level
- * breadcrumb for each dropped observer ("observer 'X' dropped; its
- * writes (...) are not consumed by any rule"). The CLI's
- * `console.info` interception captures those breadcrumbs onto stderr
- * for the same reason as the disabled-plugin breadcrumbs above:
- * stdout stays clean for `--format=json` consumers, but a plugin
- * author running `pi-steering list` to debug "why isn't my observer
- * firing?" sees the same breadcrumb the production runtime would
- * have emitted at extension factory time.
+ * CLI variant of the merge pipeline. Redirects `console.info`
+ * breadcrumbs (disabled-plugin / disabled-rule / dropped-observer)
+ * onto stderr so stdout stays clean for `--format=json`. After
+ * {@link runMergerPipeline}, mirrors {@link buildSessionRuntime}'s
+ * `disabledRules` filter + `finalizePluginState` so `pi-steering
+ * list` reports the same observer-drop set production sees.
  */
 function runCliMergeWithInfoCapture(
 	layers: readonly SteeringConfig[],

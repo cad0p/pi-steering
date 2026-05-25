@@ -17,17 +17,17 @@ pi -p "echo test"
 
 ## Expected outcome
 
-Pi prints an `[Extension issues]` block (yellow) at startup whose body
-matches:
+Pi renders the factory throw in its `[Extension issues]` startup
+block (yellow). The body of the error — what the bridge controls
+and what the integration tests pin — is:
 
 ```
-Failed to load extension: <bridge path>: 1 config issue:
+1 config issue:
   - [warning] duplicate rule "dup" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
 ```
 
 Concretely:
 
-- The block header is pi's `[Extension issues]`.
 - The thrown error message starts with `1 config issue:` (the
   singular form; aggregated factories with N>1 issues use the
   `N config issues:` plural).
@@ -35,6 +35,13 @@ Concretely:
 - The bullet text references the colliding rule name `dup`.
 - The bullet has NO path prefix between `[warning]` and the message —
   cross-plugin collisions are not attributable to a single config file.
+
+Pi's wrapping around this body — the path line, the
+`Failed to load extension:` prefix, and the surrounding
+`[Extension issues]` rendering — is pi-coding-agent's contract
+and may evolve across pi versions. What this fixture pins is the
+body shape and the bullet text the bridge produces; the integration
+tests assert against that body, not pi's wrapping.
 
 Note: the literal message text is set by `plugin-merger.ts`'s
 diagnostic emission. If the wording changes there, update both the

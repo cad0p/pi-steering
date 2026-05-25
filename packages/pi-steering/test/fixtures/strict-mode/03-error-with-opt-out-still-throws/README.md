@@ -21,21 +21,28 @@ pi -p "echo test"
 
 ## Expected outcome
 
-Pi prints an `[Extension issues]` block (yellow) at startup whose body
-matches:
+Pi renders the factory throw in its `[Extension issues]` startup
+block (yellow). The body of the error — what the bridge controls
+and what the integration tests pin — is:
 
 ```
-Failed to load extension: <bridge path>: 1 config issue:
+1 config issue:
   - [error] tracker name collision: both plugins "plugin-a" and "plugin-b" register a tracker called "branch". ...
 ```
 
 Concretely:
 
-- The block header is pi's `[Extension issues]`.
 - The thrown error message starts with `1 config issue:` and the
   bullet carries an `[error]` severity tag.
 - The bullet text references the colliding tracker name `branch`.
 - The session continues running but the steering engine is NOT loaded.
+
+Pi's wrapping around this body — the path line, the
+`Failed to load extension:` prefix, and the surrounding
+`[Extension issues]` rendering — is pi-coding-agent's contract
+and may evolve across pi versions. What this fixture pins is the
+body shape and the bullet text the bridge produces; the integration
+tests assert against that body, not pi's wrapping.
 
 ## What this fixture pins
 

@@ -13,11 +13,12 @@ pi -p "echo test"
 
 ## Expected outcome
 
-Pi prints an `[Extension issues]` block (yellow) at startup whose body
-matches the multi-line shape:
+Pi renders the factory throw in its `[Extension issues]` startup
+block (yellow). The body of the error — what the bridge controls
+and what the integration tests pin — is the multi-line shape:
 
 ```
-Failed to load extension: <bridge path>: 3 config issues:
+3 config issues:
   - [error] tracker name "events" is reserved: plugin "plugin-a" registers a tracker under that name but the evaluator uses it on `walkerState` for speculative-entry synthesis consumed by the built-in `when.happened` predicate. Rename the tracker.
   - [warning] duplicate observer "obs-x" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
   - [warning] duplicate rule "dup" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
@@ -33,6 +34,14 @@ Concretely:
 - No path prefix (the diagnostics are cross-plugin collisions; their
   `path` is unset).
 - No footer hint after the bullets.
+
+Pi's wrapping around this body — the path line, the
+`Failed to load extension:` prefix, and the surrounding
+`[Extension issues]` rendering — is pi-coding-agent's contract
+and may evolve across pi versions. What this fixture pins is the
+body shape, the errors-first ordering, and the bullet text the
+bridge produces; the integration tests assert against that body,
+not pi's wrapping.
 
 Note: the literal message text is set by `plugin-merger.ts`'s
 diagnostic emission. If the wording changes there, update both the

@@ -271,6 +271,16 @@ describe("register(): factory throws on diagnostics", () => {
 			(err: Error) => {
 				assert.match(err.message, /\[warning\]/);
 				assert.match(err.message, /failed to import/i);
+				// Narrow on the actual parse-failure detail so a future
+				// loader change that swallows the underlying error message
+				// (and leaves only "failed to import") trips this
+				// assertion. The bridge surfaces the import-side cause to
+				// users grepping pi's [Extension issues] block; that detail
+				// is the actionable signal. Node's TS stripper emits
+				// `Expected '...', got '...'` for syntax errors; older
+				// jiti-style strippers emit `SyntaxError` or `Unexpected`
+				// in the message body.
+				assert.match(err.message, /Expected|SyntaxError|Unexpected/i);
 				return true;
 			},
 		);

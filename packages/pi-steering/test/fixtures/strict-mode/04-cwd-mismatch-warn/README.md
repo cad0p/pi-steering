@@ -56,8 +56,10 @@ The warn lands on stderr at session resume; on `/reload`, pi's
 chatContainer clobbers stderr, so the warn is only visible at the
 startup boundary.
 
-The integration test `factory-time-load.test.ts` case 13 is the
-empirical verification of the cwd-mismatch contract end-to-end. This
+The integration test `factory-time-load.test.ts` case
+`cwd-mismatch session_start warn → emits console.warn when
+ctx.cwd !== launchCwd` is the empirical verification of the
+cwd-mismatch contract end-to-end. This
 fixture is for manual sink-side verification that pi's
 `[Extension issues]` rendering path stays connected.
 

@@ -32,7 +32,6 @@ import type {
 	ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import register from "./index.ts";
-import { buildSessionRuntime } from "./internal/session-runtime.ts";
 import { makeCtx, useScratchHome } from "./__test-helpers__.ts";
 
 /* -------------------------------------------------------------------------- */
@@ -820,10 +819,11 @@ describe("register(): broken config layer", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* buildSessionRuntime direct coverage (two-pass disableDefaults merge)       */
+/* register() coverage — two-pass disableDefaults merge through               */
+/* buildSessionRuntime                                                        */
 /* -------------------------------------------------------------------------- */
 
-describe("buildSessionRuntime: two-pass disableDefaults merge", () => {
+describe("register(): two-pass disableDefaults merge", () => {
 	useRegisterScratchHome();
 
 	it("inner `disableDefaults: true` wins — defaults are NOT injected", async () => {

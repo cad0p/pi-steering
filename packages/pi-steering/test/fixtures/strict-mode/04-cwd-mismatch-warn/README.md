@@ -1,5 +1,13 @@
 # Fixture 04 — cwd-mismatch session_start `console.warn`
 
+> **Manual reproduction only — not gated in CI.** Cross-project
+> resume requires the interactive picker because pi's `--session
+> <id>` global resolve forks into the current cwd by default (per
+> the design's cross-project-resume enumeration). The launch
+> invocation below assumes a human at a terminal; the fixture's
+> contract is verified end-to-end by `factory-time-load.test.ts`'s
+> case 13 (`emits console.warn when ctx.cwd !== launchCwd`).
+
 Exercises the cross-project-resume detection: when pi resumes a
 session whose stored cwd differs from where pi was launched, the
 bridge emits a `console.warn` from `session_start` and continues

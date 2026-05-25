@@ -18,6 +18,4 @@ once `v0.1.0` publishes to npm.
 
 ### Visibility improvement (not a regression)
 
-Some plugin-merger warnings (predicate / observer / rule / extension-orphan collisions) were previously collected into an internal array and never logged. Under `failOnWarnings: false` they are now emitted to `console.warn` for parity with loader-side warnings; under `failOnWarnings: true` (default) they're aggregated into the factory throw.
-
-Note: successful `disabledPlugins` / `disabledRules` opt-outs do NOT appear in the diagnostic stream — they describe by-design behavior (the user explicitly opted out). The merger emits a `console.info` breadcrumb instead, mirroring `dropUnusedObservers`.
+Some plugin-merger warnings (predicate / observer / rule / extension-orphan collisions) were previously collected internally and never logged. They now flow through the same `failOnWarnings` policy as loader-side warnings: aggregated into the factory throw under the default, or emitted to `console.warn` with the opt-out.

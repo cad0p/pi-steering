@@ -23,7 +23,7 @@ import type { EvaluatorHost } from "./evaluator.ts";
  *                     the per-session evaluator + dispatcher via
  *                     {@link buildSessionRuntime}: load every
  *                     `.pi/steering/index.ts` (or `.pi/steering.ts`)
- *                     between the launch directory and `$HOME`,
+ *                     from the launch cwd up to and including `$HOME`,
  *                     merge with `DEFAULT_RULES` + `DEFAULT_PLUGINS`
  *                     unless `disableDefaults: true` is set anywhere
  *                     in the walk-up chain, then aggregate every
@@ -63,13 +63,10 @@ import type { EvaluatorHost } from "./evaluator.ts";
 export default async function register(pi: ExtensionAPI): Promise<void> {
 	let agentLoopIndex = 0;
 
-	// Narrow host surface the evaluator + dispatcher need. `bind(pi)`
-	// preserves the `this` context on the API methods (some pi
-	// implementations rely on it; binding is cheap insurance and
-	// identical to pi's own call sites).
+	// Narrow host surface the evaluator + dispatcher need.
 	const host: EvaluatorHost = {
-		exec: pi.exec.bind(pi),
-		appendEntry: pi.appendEntry.bind(pi),
+		exec: pi.exec,
+		appendEntry: pi.appendEntry,
 	};
 
 	// Capture the launch cwd once for the cross-project-resume

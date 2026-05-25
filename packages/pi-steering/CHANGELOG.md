@@ -16,6 +16,6 @@ once `v0.1.0` publishes to npm.
 - `loadConfigs(cwd)`, `buildConfig(layers, defaults?)`, `loadSteeringConfig(cwd, defaults?)` return shape changed (now include `diagnostics` field). Internal `buildSessionRuntime` return shape changed. Bridge default factory is now async.
 - `PluginResolveWarning` interface renamed to `SteeringDiagnostic` with extended `kind` union (covers loader-side categories) and required `type: "warning" | "error"` field.
 
-### Visibility improvement
+### Changed
 
-Some plugin-merger warnings (predicate / observer / rule / extension-orphan collisions) were previously collected internally and never logged. They now flow through the same `failOnWarnings` policy as loader-side warnings: aggregated into the factory throw under the default, or emitted to `console.warn` with the opt-out.
+Visibility improvement: some plugin-merger warnings (predicate / observer / rule / extension-orphan collisions) were previously collected internally and never logged. They now flow through the same `failOnWarnings` policy as loader-side warnings: aggregated into the factory throw under the default, or emitted to `console.warn` with the opt-out.

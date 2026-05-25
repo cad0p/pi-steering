@@ -366,13 +366,8 @@ function mergePlugins(
  * collisions stay silent: overriding a rule by name is the documented
  * customization path.
  *
- * The caller is responsible for unioning `config.disabledRules` across
- * layers and passing the result as `disabledRules` (see `buildConfig`).
- * Rules whose name appears in the supplied set are still merged into
- * the output (so downstream surfaces like `pi-steering list` can render
- * them tagged as disabled), but they're EXEMPT from collision
- * detection. Mirrors the `disabledPlugins` handling in
- * {@link mergePlugins}.
+ * Disabled rules are merged but exempt from collision detection (see
+ * {@link mergePlugins} for rationale).
  */
 function mergeRules(
 	layers: readonly SteeringConfig[],
@@ -400,9 +395,6 @@ function mergeRules(
 			if (!byName.has(rule.name)) {
 				byName.set(rule.name, rule);
 			}
-			// Else: an inner layer already placed this rule. We intentionally
-			// do NOT record a diagnostic here — overriding a rule by name is
-			// the documented way to customize behavior from an outer layer.
 		}
 	}
 	return [...byName.values()];

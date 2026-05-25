@@ -22,9 +22,8 @@
  *     `layer-stray-file` diagnostic; under the strict-mode default
  *     the session-runtime policy then aborts loading. Note: a
  *     directory that DOES have `index.ts` plus non-`.ts` files
- *     silently ignores the latter (pre-existing gap, tracked for
- *     v0.2). Opt out of strict mode via `failOnWarnings: false` or
- *     remove the stray file.
+ *     silently ignores the latter. Opt out of strict mode via
+ *     `failOnWarnings: false` or remove the stray file.
  *
  * Merge semantics ({@link buildConfig}):
  *
@@ -76,16 +75,9 @@ import type {
 const MIN_NODE_MAJOR = 22;
 
 /**
- * Runtime check: throws with an actionable message when Node is older
- * than the minimum supported version.
- *
- * Note: native TS type-stripping shipped stable in Node 22.6+. On Node
- * 22.0–22.5, dynamic import of `.ts` files requires the
- * `--experimental-strip-types` runtime flag; without it, imports fail
- * with `ERR_UNKNOWN_FILE_EXTENSION`. The error is caught at the per-layer
- * boundary and logged, but users seeing repeated import failures on Node
- * 22.0–22.5 should either upgrade Node or add the flag to their pi
- * invocation.
+ * Runtime check: throws when Node is older than the minimum required
+ * for native `.ts` import. See README §Install for the supported
+ * Node range.
  */
 function assertNodeVersion(): void {
 	const raw = process.versions.node;
@@ -171,16 +163,9 @@ export function ancestorChain(cwd: string): string[] {
 
 /**
  * Find the config file (if any) for a single layer. Returns the
- * resolved file path plus an optional diagnostic when both candidate
- * forms coexist at the same directory.
- *
- * When BOTH `.pi/steering/index.ts` AND `.pi/steering.ts` exist in
- * the same directory the directory form wins, but ambiguous
- * coexistence is almost always an authoring mistake (forgotten
- * cleanup, stale file). The returned diagnostic gives callers a
- * structured handle on that case so they can plumb it into the
- * aggregate diagnostics array instead of reporting via
- * `console.warn`.
+ * resolved file path and a `layer-form-coexistence` diagnostic when
+ * both `.pi/steering/index.ts` and `.pi/steering.ts` coexist in the
+ * same directory (the directory form wins).
  *
  * Exported for tests.
  */
@@ -308,12 +293,9 @@ export async function loadConfigs(cwd: string): Promise<{
 		try {
 			layers.push(await importConfigFile(file));
 		} catch (err) {
-			// Use err.message (not String(err)) to drop the `Error: ` class
-			// prefix. Native runtime errors (jiti syntax errors,
-			// ERR_UNKNOWN_FILE_EXTENSION) may still embed the path inside
-			// their own message; we accept that duplication rather than
-			// regex-strip a moving-target prefix. The diagnostic's own
-			// `path` field carries the authoritative location.
+			// Use err.message to drop the `Error: ` class prefix; native
+			// runtime errors (jiti syntax errors) may embed their path inside
+			// the message and we accept that duplication.
 			const body = err instanceof Error ? err.message : String(err);
 			diagnostics.push({
 				type: "warning",

@@ -34,7 +34,7 @@ See conventions in `../README.md`.
 
 ## Pre-flight
 
-_See [`../README.md`](../README.md) § Pre-flight._
+_See [`../RUNNING.md`](../RUNNING.md) § Pre-flight._
 
 ## What this fixture pins
 

@@ -43,13 +43,10 @@ At session resume, pi's terminal stderr contains a line of the form:
 
 Concretely:
 
-- After observing the cwd-mismatch warn, ask the model to run
-  `echo CWD_PROBE` and the bridge intercepts it: the
-  `block-launch-cwd-probe` rule is loaded from the fixture dir's
-  `.pi/steering/` (now the launch cwd), so `echo CWD_PROBE` is
-  blocked with a `[steering:block-launch-cwd-probe@user]` reason —
-  proving launch-cwd config is in force, NOT a re-loaded ctx.cwd
-  config (there is no `.pi/steering` under the tmp dir).
+- After observing the warn, ask the model to run `echo CWD_PROBE`.
+  Expected: blocked with `[steering:block-launch-cwd-probe@user]`
+  (the rule lives in the fixture dir's `.pi/steering/`, which is now
+  the launch cwd; the foreign session cwd has no steering config).
 
 The warn lands on stderr at session resume; on `/reload`, pi's
 chatContainer clobbers stderr, so the warn is only visible at the
@@ -65,4 +62,4 @@ disabling everything for the resumed session.
 
 ## Pre-flight
 
-_See [`../README.md`](../README.md) § Pre-flight._
+_See [`../RUNNING.md`](../RUNNING.md) § Pre-flight._

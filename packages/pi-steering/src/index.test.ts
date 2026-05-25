@@ -24,7 +24,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import type {
 	ToolCallEvent,
 	ToolCallEventResult,
@@ -32,7 +32,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import register from "./index.ts";
 import { buildSessionRuntime } from "./internal/session-runtime.ts";
-import { makeCtx, useIsolatedHome } from "./__test-helpers__.ts";
+import { makeCtx, useScratchHome } from "./__test-helpers__.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Mock ExtensionAPI                                                          */
@@ -184,25 +184,17 @@ async function fireBashToolResult(
 /* -------------------------------------------------------------------------- */
 
 let tmpHome: string;
-let priorCwd: string;
 
 /**
- * Bind a fresh `$HOME` for each test in the enclosing `describe`,
- * AND chdir into it. The bridge factory eagerly loads from
- * `process.cwd()` at register time, so tests must launch from the
- * scratch home for the loader walk-up to find the per-test config.
- * Restored on teardown.
+ * Bind a fresh `$HOME` per test AND chdir into it via the shared
+ * {@link useScratchHome} helper. The bridge factory eagerly loads
+ * from `process.cwd()` at register time, so tests must launch from
+ * the scratch home for the loader walk-up to find the per-test
+ * config.
  */
-function useScratchHome(): void {
-	useIsolatedHome("pi-steering-register-", (t) => {
+function useRegisterScratchHome(): void {
+	useScratchHome("pi-steering-register-", (t) => {
 		tmpHome = t;
-	});
-	beforeEach(() => {
-		priorCwd = process.cwd();
-		process.chdir(tmpHome);
-	});
-	afterEach(() => {
-		process.chdir(priorCwd);
 	});
 }
 
@@ -225,7 +217,7 @@ function writeSteeringConfig(dir: string, body: string): void {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): default rules wiring", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("blocks `git push --force` via default rule", async () => {
 		const mock = makeMockPi();
@@ -314,7 +306,7 @@ describe("register(): default rules wiring", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): inline override escape hatch", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("accepts override comment, does not block, appends audit entry", async () => {
 		// The v2 default is `defaultNoOverride: true` (fail-closed per
@@ -390,7 +382,7 @@ describe("register(): inline override escape hatch", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): user-defined rules via .pi/steering.ts", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("blocks a write to a .env file via a user-defined write rule", async () => {
 		writeSteeringConfig(
@@ -530,7 +522,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): observer dispatcher wiring", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("runs observers on matching tool_result events", async () => {
 		// Use a module-scoped sentinel so the dynamically-imported config
@@ -615,7 +607,7 @@ describe("register(): observer dispatcher wiring", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): unrelated tool calls pass through", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("returns undefined for a tool call that matches no rule", async () => {
 		const mock = makeMockPi();
@@ -649,7 +641,7 @@ describe("register(): unrelated tool calls pass through", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): agent_start bumps agentLoopIndex threaded into evaluator", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("passes the current agentLoopIndex into predicate context", async () => {
 		// Rule uses when.condition to assert agentLoopIndex threading.
@@ -803,7 +795,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 /* -------------------------------------------------------------------------- */
 
 describe("register(): broken config layer", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("strict mode (default) throws at factory time on a broken config layer", async () => {
 		// Under the strict-mode contract, the loader's per-layer import
@@ -836,7 +828,7 @@ describe("register(): broken config layer", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("buildSessionRuntime: two-pass disableDefaults merge", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("inner `disableDefaults: true` wins — defaults are NOT injected", async () => {
 		writeSteeringConfig(tmpHome, "{ disableDefaults: true }");

@@ -7,10 +7,9 @@
  * Direct unit-level tests for `buildSessionRuntime` live in
  * `internal/session-runtime.test.ts`; the bridge-glue tests
  * (lifecycle wiring, default-rules, agent_loop threading) live in
- * `index.test.ts`. This file covers the integration scenarios
- * where the bridge factory's eager-load path through
- * `buildSessionRuntime` exercises the strict-mode throw rule
- * end-to-end:
+ * `index.test.ts`. This file covers 15 integration scenarios where
+ * the bridge factory's eager-load path through `buildSessionRuntime`
+ * exercises the strict-mode throw rule end-to-end:
  *
  *   - tracker-name-collision error throws even with
  *     `failOnWarnings: false`,
@@ -37,9 +36,10 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import type {
 	ExtensionAPI,
 	ToolCallEvent,
+	ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
 import register from "./index.ts";
-import { makeCtx, useIsolatedHome } from "./__test-helpers__.ts";
+import { makeCtx, useScratchHome } from "./__test-helpers__.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Mock ExtensionAPI                                                          */
@@ -82,17 +82,9 @@ function writeConfig(dir: string, body: string): void {
 /* -------------------------------------------------------------------------- */
 
 let tmpHome: string;
-let priorCwd: string;
-function useScratchHome(): void {
-	useIsolatedHome("pi-steering-factory-time-", (t) => {
+function useFactoryTimeScratchHome(): void {
+	useScratchHome("pi-steering-factory-time-", (t) => {
 		tmpHome = t;
-	});
-	beforeEach(() => {
-		priorCwd = process.cwd();
-		process.chdir(tmpHome);
-	});
-	afterEach(() => {
-		process.chdir(priorCwd);
 	});
 }
 
@@ -120,7 +112,7 @@ function captureWarns(): void {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): factory throws on diagnostics", () => {
-	useScratchHome();
+	useFactoryTimeScratchHome();
 	captureWarns();
 
 	it("throws on tracker-name-collision (error-class, failOnWarnings default)", async () => {
@@ -142,6 +134,18 @@ describe("register(): factory throws on diagnostics", () => {
 				assert.match(err.message, /\[error\]/);
 				assert.match(err.message, /tracker name collision/);
 				assert.match(err.message, /"branch"/);
+				// Single-emission lock: integration mirror of the runtime-level
+				// short-circuit between `buildConfig` and `resolvePlugins` (see
+				// `internal/session-runtime.test.ts`). A regression that
+				// reintroduced double-emission would surface here as well.
+				const collisionMatches = err.message.match(
+					/tracker name collision/g,
+				);
+				assert.equal(
+					collisionMatches?.length,
+					1,
+					"tracker-name-collision must appear exactly once",
+				);
 				return true;
 			},
 		);
@@ -266,7 +270,7 @@ describe("register(): factory throws on diagnostics", () => {
 			() => register(mock.api as ExtensionAPI),
 			(err: Error) => {
 				assert.match(err.message, /\[warning\]/);
-				assert.match(err.message, /failed to (import|load)/i);
+				assert.match(err.message, /failed to import/i);
 				return true;
 			},
 		);
@@ -294,7 +298,7 @@ describe("register(): factory throws on diagnostics", () => {
 			() => register(mock.api as ExtensionAPI),
 			(err: Error) => {
 				assert.match(err.message, /\[warning\]/);
-				assert.match(err.message, /predicate.*sharedKey/i);
+				assert.match(err.message, /duplicate predicate "when\.sharedKey"/);
 				return true;
 			},
 		);
@@ -322,7 +326,7 @@ describe("register(): factory throws on diagnostics", () => {
 			() => register(mock.api as ExtensionAPI),
 			(err: Error) => {
 				assert.match(err.message, /\[warning\]/);
-				assert.match(err.message, /observer.*obs-x/i);
+				assert.match(err.message, /duplicate observer "obs-x"/);
 				return true;
 			},
 		);
@@ -362,7 +366,7 @@ describe("register(): factory throws on diagnostics", () => {
 			() => register(mock.api as ExtensionAPI),
 			(err: Error) => {
 				assert.match(err.message, /\[warning\]/);
-				assert.match(err.message, /rule.*dup/i);
+				assert.match(err.message, /duplicate rule "dup"/);
 				return true;
 			},
 		);
@@ -374,7 +378,7 @@ describe("register(): factory throws on diagnostics", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): factory does NOT throw", () => {
-	useScratchHome();
+	useFactoryTimeScratchHome();
 	captureWarns();
 
 	it("warning-class with failOnWarnings: false falls through to console.warn", async () => {
@@ -480,7 +484,7 @@ describe("register(): factory does NOT throw", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): cwd-mismatch session_start warn", () => {
-	useScratchHome();
+	useFactoryTimeScratchHome();
 	captureWarns();
 
 	it("emits console.warn when ctx.cwd !== launchCwd; engine continues evaluating", async () => {
@@ -532,6 +536,28 @@ describe("register(): cwd-mismatch session_start warn", () => {
 		// crucial assertion is that the call did not throw and the
 		// evaluator was reachable.
 		assert.equal(result, undefined);
+
+		// Pin the LD-5 contract beyond "engine merely continues":
+		// the LAUNCH-CWD rule set must still be in force, so a command
+		// that DEFAULT_RULES blocks (`git push --force`) should still
+		// be blocked even though the cwd mismatch was detected. A
+		// future regression that swapped rule sets on cwd mismatch
+		// would silently unblock here.
+		const blockedEvent: ToolCallEvent = {
+			type: "tool_call",
+			toolName: "bash",
+			toolCallId: "call-2",
+			input: { command: "git push --force" },
+		};
+		const blocked = (await mock.handlers.tool_call(
+			blockedEvent,
+			makeCtx(foreignCwd),
+		)) as ToolCallEventResult | undefined;
+		assert.equal(
+			blocked?.block,
+			true,
+			"launch-cwd default rule must still block after the cwd-mismatch warn",
+		);
 	});
 
 	it("does NOT emit cwd-mismatch warn when ctx.cwd === launchCwd", async () => {
@@ -560,7 +586,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): aggregated render snapshot", () => {
-	useScratchHome();
+	useFactoryTimeScratchHome();
 	captureWarns();
 
 	it("renders 1 error + 2 warnings with errors-first ordering and the multi-line shape", async () => {
@@ -615,17 +641,21 @@ describe("register(): aggregated render snapshot", () => {
 		// brackets, no padding for column alignment.
 		const lines = err.message.split("\n");
 		assert.equal(lines.length, 4, `expected header + 3 bullets; got: ${err.message}`);
-		assert.match(lines[1]!, /^  - \[error\] /);
+		// Errors-first ordering: line 1 is the [error] bullet. Tighten
+		// to enforce that no path prefix slips between the severity
+		// tag and the message text — a future change adding a path
+		// prefix to `reserved-tracker-name` would surface here.
+		assert.match(
+			lines[1]!,
+			/^  - \[error\] tracker name "events" is reserved/,
+		);
 		assert.match(lines[2]!, /^  - \[warning\] /);
 		assert.match(lines[3]!, /^  - \[warning\] /);
 
-		// Errors-first ordering: the [error] bullet is line 1.
-		assert.match(lines[1]!, /tracker name "events" is reserved/);
-
 		// Warnings preserve declaration order from `resolvePlugins`
 		// (observer pass before rule pass).
-		assert.match(lines[2]!, /observer.*obs-x/i);
-		assert.match(lines[3]!, /rule.*dup/i);
+		assert.match(lines[2]!, /duplicate observer "obs-x"/);
+		assert.match(lines[3]!, /duplicate rule "dup"/);
 
 		// No padding (severity tag flush against the next token).
 		assert.doesNotMatch(err.message, /\[error\] {2,}/);

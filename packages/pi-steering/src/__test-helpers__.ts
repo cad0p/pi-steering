@@ -74,6 +74,43 @@ export function useIsolatedHome(
 	});
 }
 
+/**
+ * Per-test scratch `$HOME` PLUS a `chdir` into it. The bridge factory
+ * loads steering configs from `process.cwd()` at register time, so
+ * tests exercising factory-time loading must launch from the scratch
+ * home for the loader walk-up to find the per-test config.
+ *
+ * Single `beforeEach` + `afterEach` pair so the teardown ordering is
+ * explicit: `chdir` back to the prior cwd FIRST, then remove the
+ * scratch dir. The earlier two-helper layering (`useIsolatedHome` +
+ * caller-side chdir hooks) registered them in the wrong order, leaving
+ * `process.cwd()` pointing at the scratch dir during `rmSync` —
+ * invisible under per-file subprocess isolation but fragile under
+ * single-process runners.
+ */
+export function useScratchHome(
+	prefix: string,
+	onReady?: (tmp: string) => void,
+): void {
+	let tmp: string;
+	let priorHome: string | undefined;
+	let priorCwd: string;
+	beforeEach(() => {
+		priorCwd = process.cwd();
+		tmp = mkdtempSync(join(tmpdir(), prefix));
+		priorHome = process.env["HOME"];
+		process.env["HOME"] = tmp;
+		process.chdir(tmp);
+		onReady?.(tmp);
+	});
+	afterEach(() => {
+		process.chdir(priorCwd);
+		if (priorHome === undefined) delete process.env["HOME"];
+		else process.env["HOME"] = priorHome;
+		rmSync(tmp, { recursive: true, force: true });
+	});
+}
+
 // ---------------------------------------------------------------------------
 // Session-entry shape
 // ---------------------------------------------------------------------------

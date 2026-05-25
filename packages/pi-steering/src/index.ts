@@ -36,17 +36,14 @@ import type { EvaluatorHost } from "./evaluator.ts";
  *                         cwd captured at factory time (cross-project
  *                         resume). The engine continues evaluating
  *                         with launch-cwd rules.
- *   - `tool_call`       — gate via the evaluator (returns a
- *                         `ToolCallEventResult` to block, `undefined`
- *                         to allow).
- *   - `tool_result`     — dispatch to all matching observers.
+ *   - `tool_call` / `tool_result` route through the evaluator and
+ *     dispatcher (see {@link buildSessionRuntime}).
  *
  * Exported as the default export per pi's extension convention.
  */
 export default async function register(pi: ExtensionAPI): Promise<void> {
 	let agentLoopIndex = 0;
 
-	// Narrow host surface the evaluator + dispatcher need.
 	const host: EvaluatorHost = {
 		exec: pi.exec,
 		appendEntry: pi.appendEntry,

@@ -219,10 +219,6 @@ export async function buildSessionRuntime(
 		else delete filteredConfig.rules;
 	}
 
-	// Drop observers whose declared writes are unconsumed across
-	// plugin-merged + user-authored streams. Single source of truth
-	// for the orchestration-layer filter; `finalizePluginState` owns
-	// the breadcrumb format.
 	const { pluginKept, userKept } = finalizePluginState(
 		filteredConfig.rules ?? [],
 		resolved.rules,

@@ -278,19 +278,6 @@ async function runList(args: string[]): Promise<number> {
 		recordDiagnostic(d);
 	}
 
-	// User-config rule + observer name validation runs inside
-	// `runMergerPipeline` (unconditionally, between `buildConfig` and
-	// the merge short-circuit) so every surface — production runtime,
-	// `loadHarness`, and this CLI — gets the same `invalid-name`
-	// diagnostic stream. When the merge step short-circuits on an
-	// error-class diagnostic (e.g. `tracker-name-collision`), the
-	// CLI still surfaces the user-config name validation diagnostics
-	// alongside the merge error so a config with both classes of
-	// problem flags both in one run. Plugin-shipped name validation
-	// (which lives inside `resolvePlugins`) IS gated behind the
-	// short-circuit, since `resolvePlugins` is the surface that
-	// consumes plugin names.
-
 	if (format === "json") {
 		process.stdout.write(
 			`${JSON.stringify(renderListJSON(config), null, 2)}\n`,

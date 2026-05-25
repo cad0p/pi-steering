@@ -15,8 +15,9 @@
  *     the v1 JSON loader's inner-over-outer semantics.
  *   - Node ≥ 22 required (native type-stripping via `await import()`).
  *     Loader throws a clear "upgrade Node" error on older runtimes.
- *   - File extensions: `.ts` only. Other files under `.pi/steering/` are
- *     warned about and skipped — a user might keep helpers there.
+ *   - File extensions: `.ts` only. Other files under `.pi/steering/`
+ *     are surfaced as warning-class diagnostics and skipped — a user
+ *     might keep helpers there.
  *
  * Merge semantics ({@link buildConfig}):
  *
@@ -26,16 +27,23 @@
  *   - `disabledRules`,
  *     `disabledPlugins`:  union across layers.
  *   - `defaultNoOverride`,
- *     `disableDefaults`:  inner wins if set.
+ *     `disableDefaults`,
+ *     `failOnWarnings`:   inner wins if set.
  *
- * Engine hard-errors on tracker NAME collisions (two plugins both
- * registering a tracker called `branch`); soft-warns on all other
- * collisions (rule name, observer name, predicate key, tracker-extension
- * `(tracker, basename)` pair).
+ * Diagnostics: every collision and every per-layer load issue
+ * (dual-form coexistence, dynamic-import failure, stray non-`.ts`
+ * file, cross-layer name collision, tracker name collision) is
+ * pushed into a {@link SteeringDiagnostic} array returned by the
+ * loader functions. Tracker-name collisions are error-class
+ * (the engine cannot operate safely with two plugins claiming the
+ * same state dimension); all other categories are warning-class.
+ * The strict-mode throw policy lives in `internal/session-runtime`
+ * and the `pi-steering` CLI; this module does not throw on
+ * collisions.
  *
  * NOTE: this module loads + merges CONFIG SHAPES. It does NOT execute
- * predicates, observers, or resolve plugin wiring. Those are Phase 3's
- * evaluator concerns.
+ * predicates, observers, or resolve plugin wiring. Those are the
+ * evaluator's concerns.
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -474,7 +482,10 @@ function mergeStringUnion(
  *
  * Exported across the loader/internal boundary for that runtime
  * peek; not part of the public package surface (not re-exported
- * from `index.ts`).
+ * from `index.ts`). External callers reading the merged result
+ * of these flags should go through {@link loadSteeringConfig}
+ * — it walks up from a cwd, runs the merger pipeline, and
+ * returns the merged config alongside its diagnostics.
  */
 export function mergeBool(
 	layers: readonly SteeringConfig[],

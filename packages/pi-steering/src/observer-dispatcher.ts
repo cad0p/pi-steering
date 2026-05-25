@@ -118,17 +118,13 @@ export function buildObserverDispatcher(
 	// Plugin observer names are validated inside `resolvePlugins`
 	// and surface through the diagnostic stream.
 	//
-	// Latent mis-attribution risk: this loop iterates `userObservers`
-	// and labels every offender `(user config)`. If a direct caller
-	// ever forwards a plugin/default-shipped observer through
-	// `userObservers` (for testing, embedding, or a future
-	// orchestrator that consolidates observer streams) and that
-	// observer ever lands with a malformed name, this throw will
-	// mis-label it as `(user config)`. The `validateUserConfigNames`
-	// helper at the production pipeline correctly partitions user
-	// vs. plugin/default; this defensive path does not. Defaults are
-	// package-controlled and reviewed, so the case is currently
-	// unreachable.
+	// Defensive throw: exercised directly by the unit test
+	// `buildObserverDispatcher: user observer-name validation (S3)`
+	// in `observer-dispatcher.test.ts`. The throw labels every
+	// offender `(user config)` and trusts the caller to forward only
+	// user-authored observers through `userObservers`; plugin and
+	// default-shipped observers are package-controlled and reviewed,
+	// so they don't land here.
 	for (const o of userObservers) {
 		const d = validateName("observer", o.name, "user config");
 		if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);

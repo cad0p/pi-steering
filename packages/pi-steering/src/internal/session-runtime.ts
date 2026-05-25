@@ -4,22 +4,28 @@
 /**
  * Internal module — not part of the package's public API.
  *
- * This module holds the per-session wiring that `register()` uses to
- * spin up an evaluator + observer dispatcher from a walk-up steering
- * config. It is intentionally NOT re-exported from `index.ts` or any
- * other public entry point; consumers building their own extensions
- * should go through `loadHarness` (subpath `pi-steering/testing`)
- * or call `buildEvaluator` / `buildObserverDispatcher` directly.
+ * This module holds the wiring that the bridge factory in `index.ts`
+ * uses to spin up an evaluator + observer dispatcher from a walk-up
+ * steering config. It is intentionally NOT re-exported from
+ * `index.ts` or any other public entry point; consumers building
+ * their own extensions should go through `loadHarness` (subpath
+ * `pi-steering/testing`) or call `buildEvaluator` /
+ * `buildObserverDispatcher` directly.
  *
- * The runtime owns the strict-mode contract: diagnostics produced by
- * the loader (per-layer import failures, dual-form coexistence,
+ * The runtime owns the strict-mode contract: diagnostics produced
+ * by the loader (per-layer import failures, dual-form coexistence,
  * stray files, cross-layer + within-layer collisions) and by the
  * plugin merger (predicate / observer / rule / extension-orphan /
- * disabled / reserved-name diagnostics) are aggregated here. Any
- * error-class diagnostic always escalates to a thrown error; warning-
- * class diagnostics escalate when `failOnWarnings !== false` on the
- * merged config (default: true). Otherwise warnings are emitted to
- * `console.warn` for legacy fail-soft semantics.
+ * reserved-name / invalid-name diagnostics) are aggregated here.
+ * Any error-class diagnostic always escalates to a thrown error;
+ * warning-class diagnostics escalate when `failOnWarnings !== false`
+ * on the merged config (default: true). Otherwise warnings are
+ * emitted to `console.warn` for legacy fail-soft semantics.
+ *
+ * The bridge calls `buildSessionRuntime` once at extension factory
+ * time. A thrown factory propagates through pi's extension loader
+ * into pi's `[Extension issues]` diagnostic block (which survives
+ * `/reload`); the bridge does not catch.
  */
 
 import { DEFAULT_PLUGINS, DEFAULT_RULES } from "../defaults.ts";

@@ -59,15 +59,19 @@ import {
  * lands in one place; `runMergerPipeline`'s short-circuit means a
  * given session sees only one of the two emissions, but the strings
  * stay in lock-step.
+ *
+ * Parameters refer to plugin registration order: the first plugin to
+ * claim the tracker name owns it; a later plugin attempting the same
+ * name produces the diagnostic.
  */
 export function formatTrackerNameCollisionMessage(
-	prior: string,
-	current: string,
+	firstRegisteredPlugin: string,
+	secondRegisteredPlugin: string,
 	trackerName: string,
 ): string {
 	return (
-		`tracker name collision: both plugins "${prior}" and ` +
-		`"${current}" register a tracker called "${trackerName}". ` +
+		`tracker name collision: both plugins "${firstRegisteredPlugin}" and ` +
+		`"${secondRegisteredPlugin}" register a tracker called "${trackerName}". ` +
 		"Two plugins claiming the same state dimension is always a " +
 		"bug — rename one tracker or disable one plugin."
 	);

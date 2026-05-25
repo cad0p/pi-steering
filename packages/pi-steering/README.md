@@ -813,7 +813,7 @@ pi-steering is a guardrail layer, not a sandbox. Several parts of the system exe
 
 ### Config execution
 
-`.pi/steering/index.ts` (and the `.pi/steering.ts` shorthand) is **arbitrary TypeScript executed at `session_start` with your full user privileges**. The loader walks from `cwd` up to `$HOME`, importing every `.pi/steering/` directory it finds along the way, and merges them inner-first.
+`.pi/steering/index.ts` (and the `.pi/steering.ts` shorthand) is **arbitrary TypeScript executed at extension factory time with your full user privileges**. The loader walks from the launch cwd up to `$HOME`, importing every `.pi/steering/` directory it finds along the way, and merges them inner-first. The bridge factory awaits the load before pi continues startup, so any throw from your config (or from a colliding plugin set) lands in pi's `[Extension issues]` diagnostic block at startup.
 
 Implication: running pi inside a directory hierarchy whose steering configs you don't trust is equivalent to running `node -e '…'` with that same file. Symlinks in the walk-up chain are followed — a symlinked `.pi/steering/` landing in an unexpected directory executes as if it had been placed there directly.
 
@@ -837,13 +837,29 @@ The **read path (`findEntries`) treats every tagged entry in the session JSONL a
 
 This is the out-of-band trust boundary. Within the steering engine, the invariant holds; cross-extension and external writes are outside the engine's reach.
 
-### Fail-open on load errors
+### Strict mode + load failures
 
-If your steering config fails to load at `session_start` (a plugin throws during import, a syntax error in `index.ts`, `pnpm` fails to resolve a dependency), pi-steering **disables itself for the session**. Tools execute unsteered for the rest of the conversation.
+If your steering config fails to load at extension factory time (a plugin throws during import, a syntax error in `index.ts`, `pnpm` fails to resolve a dependency), pi-steering's bridge factory **throws and surfaces the diagnostic in pi's `[Extension issues]` block at startup** (yellow). Pi disables the extension for the session and continues running unsteered.
 
-This is a deliberate fail-open for loader errors, not fail-closed: blocking every tool on a loader bug would leave every pi session unusable until the config was fixed. Fail-open-on-load + fail-closed-per-tool (S1) is the compromise.
+Default behavior: any warning-class loader/merger diagnostic (cross-layer plugin name collision, within-layer rule/observer collision, predicate-key collision, etc.) escalates to the same thrown factory. Error-class diagnostics (tracker-name collision, reserved-name violations) ALWAYS throw. The aggregated message lists every diagnostic with errors first, one bullet per issue.
 
-Check startup logs for `[pi-steering] Failed to load steering config: …` if rules stop firing unexpectedly.
+Opt out of warning-class escalation by setting `failOnWarnings: false` on any layer of your config:
+
+```ts
+import { defineConfig } from "pi-steering";
+export default defineConfig({
+  failOnWarnings: false,   // legacy fail-soft semantics for warnings
+  plugins: [/* ... */],
+});
+```
+
+With `failOnWarnings: false`, warning-class diagnostics fall through to `console.warn` (single-line legacy shape on stderr) and the bridge keeps running with the merged config. Error-class diagnostics still throw — the engine cannot operate safely with two plugins claiming the same state dimension.
+
+Note that `failOnWarnings: false` is not the recommended state in v0.1.x: warnings on `console.warn` are invisible in pi's interactive TUI (the chat view clobbers stderr-bound text on `/reload`). The opt-out exists to match the legacy v0.0.x semantics for users who pre-pinned to that shape.
+
+### Cross-project resume
+
+When you `pi --resume` a session originally created in another project (Tab → "All" scope in the picker), pi-steering's rules are loaded from your launch cwd, NOT the session's cwd. Pi's footer (the bottom bar in interactive TUI mode) shows the session cwd; if it differs from where you launched, the bridge emits a single `[pi-steering] session cwd ... differs from launch cwd ...` line on stderr from `session_start` and continues evaluating with launch-cwd rules. To use the resumed session's project rules, exit pi and re-launch from that project's directory.
 
 ### Block-reason tag trust
 
@@ -866,6 +882,7 @@ Future versions will add a session-manager-side index keyed by `customType`, mov
 
 ## Further reading
 
+- [`CHANGELOG.md`](./CHANGELOG.md) — per-package changelog (Keep-a-Changelog format). Tracks breaking changes and visibility-only behavior shifts.
 - [`examples/`](./examples/) — rule-pack examples (`force-push-strict`, `no-amend`, `draft-prs-only`, `combined-git-discipline`) — copy-paste starting points.
 - [`examples/work-item-plugin/`](./examples/work-item-plugin/) — canonical plugin reference.
 - [`src/plugins/git/`](./src/plugins/git) — production plugin with trackers and tracker extensions.

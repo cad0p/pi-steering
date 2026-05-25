@@ -33,23 +33,14 @@ Concretely:
   `N config issues:` plural).
 - At least one bullet line begins with `  - [warning]`.
 - The bullet text references the colliding rule name `dup`.
-- The bullet has NO path prefix between `[warning]` and the message —
-  cross-plugin collisions are not attributable to a single config file.
-
-Pi's wrapping around this body — the path line, the
-`Failed to load extension:` prefix, and the surrounding
-`[Extension issues]` rendering — is pi-coding-agent's contract
-and may evolve across pi versions. What this fixture pins is the
-body shape and the bullet text the bridge produces; the integration
-tests assert against that body, not pi's wrapping.
-
-Note: the literal message text is set by `plugin-merger.ts`'s
-diagnostic emission. If the wording changes there, update both the
-integration tests' regex assertions and this README in lock-step.
 
 The session continues running but the steering engine is NOT loaded
 for this session (the throw aborted bridge setup). Tool calls pass
 through unsteered.
+
+See conventions in `../README.md` (pi-wrapping out of scope; message
+text owned by `plugin-merger.ts`; cross-plugin collisions carry no
+`path`).
 
 ## Pre-flight
 

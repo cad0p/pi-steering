@@ -25,6 +25,23 @@ appear on stderr from `console.warn`).
 Each fixture's `README.md` documents the launch invocation and the
 expected outcome.
 
+## Conventions (apply to every fixture)
+
+- **Pi's wrapping is out of scope.** Pi-coding-agent's `[Extension
+  issues]` rendering — the path line, the `Failed to load extension:`
+  prefix, and the surrounding yellow block — is pi's contract and may
+  evolve across pi versions. What these fixtures pin is the body
+  shape and bullet text the bridge produces; the integration tests
+  assert against that body, not pi's wrapping.
+- **Diagnostic message text is owned by `plugin-merger.ts`.** The
+  literal `duplicate <kind> "<name>" — plugins ...` wording lives in
+  `plugin-merger.ts`'s diagnostic emission. If it changes there,
+  update both the integration tests' regex assertions and the
+  affected fixture READMEs in lock-step.
+- **Cross-plugin collisions carry no `path`.** No path prefix appears
+  between the `[<severity>]` tag and the message text for
+  plugin-merger collision diagnostics; their `path` is unset.
+
 ## Pre-flight: pin pi at this branch's bridge
 
 Pi is loaded as a separate package; the orchestrator's running pi

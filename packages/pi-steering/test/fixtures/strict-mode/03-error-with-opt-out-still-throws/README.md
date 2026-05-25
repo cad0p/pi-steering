@@ -37,12 +37,8 @@ Concretely:
 - The bullet text references the colliding tracker name `branch`.
 - The session continues running but the steering engine is NOT loaded.
 
-Pi's wrapping around this body — the path line, the
-`Failed to load extension:` prefix, and the surrounding
-`[Extension issues]` rendering — is pi-coding-agent's contract
-and may evolve across pi versions. What this fixture pins is the
-body shape and the bullet text the bridge produces; the integration
-tests assert against that body, not pi's wrapping.
+See conventions in `../README.md` (pi-wrapping out of scope; message
+text owned by `plugin-merger.ts`).
 
 ## What this fixture pins
 

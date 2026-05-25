@@ -25,12 +25,10 @@ cat stderr.log
   (single-line console.warn shape; bracketed `[warning]` severity tag
   matches the multi-line aggregate's per-bullet convention, no
   `<count> config issue` header — that's the aggregated-throw format
-  only. Cross-plugin collisions carry no `path`, so there's no path
-  prefix between `[warning]` and the message text.)
+  only.)
 
-Note: the literal message text is set by `plugin-merger.ts`'s
-diagnostic emission. If the wording changes there, update both the
-integration tests' regex assertions and this README in lock-step.
+See conventions in `../README.md` (message text owned by
+`plugin-merger.ts`; cross-plugin collisions carry no `path`).
 
 ## What this fixture pins
 

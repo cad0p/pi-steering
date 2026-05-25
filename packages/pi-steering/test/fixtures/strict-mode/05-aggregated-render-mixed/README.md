@@ -35,17 +35,8 @@ Concretely:
   `path` is unset).
 - No footer hint after the bullets.
 
-Pi's wrapping around this body — the path line, the
-`Failed to load extension:` prefix, and the surrounding
-`[Extension issues]` rendering — is pi-coding-agent's contract
-and may evolve across pi versions. What this fixture pins is the
-body shape, the errors-first ordering, and the bullet text the
-bridge produces; the integration tests assert against that body,
-not pi's wrapping.
-
-Note: the literal message text is set by `plugin-merger.ts`'s
-diagnostic emission. If the wording changes there, update both the
-integration tests' regex assertions and this README in lock-step.
+See conventions in `../README.md` (pi-wrapping out of scope; message
+text owned by `plugin-merger.ts`).
 
 ## What this fixture pins
 

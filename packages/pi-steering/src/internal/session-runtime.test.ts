@@ -642,53 +642,43 @@ describe("buildSessionRuntime: disableDefaults peek vs post-merge re-derivation"
 	// `mergeBool` BEFORE the full merge runs, so it can decide
 	// whether to inject `DEFAULT_RULES` + `DEFAULT_PLUGINS` into
 	// `buildConfig`'s `defaults` slot. `buildConfig` later
-	// re-derives the same flag onto `merged.disableDefaults` via the
-	// same `mergeBool` export. Today both call sites share one
-	// implementation, so the values agree by construction. These
-	// tests pin the invariant against future refactors that might
-	// introduce a competing precedence rule on either side (e.g.
-	// `buildConfig` switching to a fold-then-stamp scheme that
-	// disagrees with the bare-bones peek).
+	// re-derives the same flag via the same `mergeBool` export, so
+	// the values agree by construction today. The parameterized
+	// table pins the invariant against future refactors that might
+	// introduce a competing precedence rule on either side.
 
-	it("agree when an inner layer sets disableDefaults: true", () => {
-		const layers: SteeringConfig[] = [
-			{ disableDefaults: true },
-			{},
-		];
-		const peek = mergeBool(layers, "disableDefaults");
-		const { config } = buildConfig(layers);
-		assert.equal(peek, true);
-		assert.equal(
-			peek,
-			config.disableDefaults,
-			"runtime peek and merged disableDefaults must agree",
-		);
-	});
+	const cases: ReadonlyArray<{
+		name: string;
+		layers: SteeringConfig[];
+		expected: boolean | undefined;
+	}> = [
+		{
+			name: "inner layer sets disableDefaults: true",
+			layers: [{ disableDefaults: true }, {}],
+			expected: true,
+		},
+		{
+			name: "inner layer sets disableDefaults: false (outer true is overridden)",
+			layers: [{ disableDefaults: false }, { disableDefaults: true }],
+			expected: false,
+		},
+		{
+			name: "no layer sets disableDefaults (both undefined)",
+			layers: [{}, {}],
+			expected: undefined,
+		},
+	];
 
-	it("agree when an inner layer sets disableDefaults: false (outer true is overridden)", () => {
-		const layers: SteeringConfig[] = [
-			{ disableDefaults: false },
-			{ disableDefaults: true },
-		];
-		const peek = mergeBool(layers, "disableDefaults");
-		const { config } = buildConfig(layers);
-		assert.equal(peek, false);
-		assert.equal(
-			peek,
-			config.disableDefaults,
-			"runtime peek and merged disableDefaults must agree",
-		);
-	});
-
-	it("agree when no layer sets disableDefaults (both undefined)", () => {
-		const layers: SteeringConfig[] = [{}, {}];
-		const peek = mergeBool(layers, "disableDefaults");
-		const { config } = buildConfig(layers);
-		assert.equal(peek, undefined);
-		assert.equal(
-			peek,
-			config.disableDefaults,
-			"runtime peek and merged disableDefaults must agree",
-		);
-	});
+	for (const { name, layers, expected } of cases) {
+		it(`peek and merged agree: ${name}`, () => {
+			const peek = mergeBool(layers, "disableDefaults");
+			const { config } = buildConfig(layers);
+			assert.equal(peek, expected);
+			assert.equal(
+				peek,
+				config.disableDefaults,
+				"runtime peek and merged disableDefaults must agree",
+			);
+		});
+	}
 });

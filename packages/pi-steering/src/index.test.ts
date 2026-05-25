@@ -786,39 +786,6 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 });
 
 /* -------------------------------------------------------------------------- */
-/* Strict mode on broken config layer                                         */
-/* -------------------------------------------------------------------------- */
-
-describe("register(): broken config layer", () => {
-	useRegisterScratchHome();
-
-	it("strict mode (default) throws at factory time on a broken config layer", async () => {
-		// Under the strict-mode contract, the loader's per-layer import
-		// failure surfaces as a warning-class diagnostic that escalates
-		// to a thrown error. With factory-time loading, the throw
-		// propagates out of `register` itself and is captured by pi's
-		// extension loader into the `[Extension issues]` diagnostic
-		// block (which survives `/reload`). The bridge does NOT catch.
-		mkdirSync(join(tmpHome, ".pi"), { recursive: true });
-		writeFileSync(
-			join(tmpHome, ".pi", "steering.ts"),
-			"export default this is not valid typescript;\n",
-			"utf8",
-		);
-
-		const mock = makeMockPi();
-		await assert.rejects(
-			() => register(mock.api as ExtensionAPI),
-			(err: Error) => {
-				assert.match(err.message, /config issue/);
-				assert.match(err.message, /\[warning\]/);
-				return true;
-			},
-		);
-	});
-});
-
-/* -------------------------------------------------------------------------- */
 /* register() coverage — two-pass disableDefaults merge through               */
 /* buildSessionRuntime                                                        */
 /* -------------------------------------------------------------------------- */

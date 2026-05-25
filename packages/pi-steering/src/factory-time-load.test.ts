@@ -591,6 +591,17 @@ describe("register(): cwd-mismatch session_start warn", () => {
 			true,
 			"user-defined launch-cwd rule must still fire after the cwd-mismatch warn — confirms launch-cwd config remains in force",
 		);
+		// Pin WHICH rule fired, not just SOME rule fired: a future
+		// regression where a default rule (e.g. a built-in `echo`
+		// guardrail) happened to match `echo LAUNCH_CWD_PROBE` would
+		// silently satisfy the `block === true` assertion above. The
+		// reason field carries `[steering:<rule-name>@<source>]`, so
+		// match on the rule name authored into tmpHome's config.
+		assert.match(
+			blocked?.reason ?? "",
+			/block-launch-cwd-only-rule/,
+			"expected the launch-cwd-only rule (block-launch-cwd-only-rule) to fire — not a default rule shadow",
+		);
 	});
 
 	it("does NOT emit cwd-mismatch warn when ctx.cwd === launchCwd", async () => {

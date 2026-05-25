@@ -28,7 +28,7 @@ import type {
 	ExecResult as PiExecResult,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach } from "node:test";
@@ -83,6 +83,16 @@ export function useIsolatedHome(
  * Single `beforeEach` + `afterEach` pair so teardown order is
  * explicit: `chdir` back FIRST, then `rmSync`. Reverse ordering risks
  * `rmSync`-ing the dir while `process.cwd()` still points at it.
+ *
+ * The temp dir path is canonicalized via `realpathSync` so the value
+ * exposed to tests matches what `process.cwd()` will return after
+ * `process.chdir(tmp)`. On macOS, `os.tmpdir()` is
+ * `/var/folders/.../T` which is a symlink to `/private/var/...`;
+ * without `realpathSync` the value the test reads (the symlink path)
+ * and the value `process.cwd()` reports (the resolved path) diverge
+ * byte-for-byte, producing false cwd-mismatch warns in the
+ * `ctx.cwd === launchCwd` test path. Linux is unaffected since
+ * `os.tmpdir()` is already canonical there.
  */
 export function useScratchHome(
 	prefix: string,
@@ -93,7 +103,7 @@ export function useScratchHome(
 	let priorCwd: string;
 	beforeEach(() => {
 		priorCwd = process.cwd();
-		tmp = mkdtempSync(join(tmpdir(), prefix));
+		tmp = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
 		priorHome = process.env["HOME"];
 		process.env["HOME"] = tmp;
 		process.chdir(tmp);

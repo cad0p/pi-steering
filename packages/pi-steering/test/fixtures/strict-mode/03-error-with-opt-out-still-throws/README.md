@@ -30,13 +30,6 @@ and what the integration tests pin — is:
   - [error] tracker name collision: both plugins "plugin-a" and "plugin-b" register a tracker called "branch". ...
 ```
 
-Concretely:
-
-- The thrown error message starts with `1 config issue:` and the
-  bullet carries an `[error]` severity tag.
-- The bullet text references the colliding tracker name `branch`.
-- The session continues running but the steering engine is NOT loaded.
-
 See conventions in `../README.md`.
 
 ## What this fixture pins

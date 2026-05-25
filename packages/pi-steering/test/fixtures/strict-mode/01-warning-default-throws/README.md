@@ -26,14 +26,6 @@ and what the integration tests pin — is:
   - [warning] duplicate rule "dup" — plugins "plugin-a" (kept) and "plugin-b" (ignored); first-registered wins
 ```
 
-Concretely:
-
-- The thrown error message starts with `1 config issue:` (the
-  singular form; aggregated factories with N>1 issues use the
-  `N config issues:` plural).
-- At least one bullet line begins with `  - [warning]`.
-- The bullet text references the colliding rule name `dup`.
-
 The session continues running but the steering engine is NOT loaded
 for this session (the throw aborted bridge setup). Tool calls pass
 through unsteered.

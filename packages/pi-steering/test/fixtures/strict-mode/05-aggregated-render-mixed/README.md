@@ -32,8 +32,7 @@ Concretely:
   `path` is unset).
 - No footer hint after the bullets.
 
-See conventions in `../README.md` (pi-wrapping out of scope; message
-text owned by `plugin-merger.ts`).
+See conventions in `../README.md`.
 
 ## What this fixture pins
 

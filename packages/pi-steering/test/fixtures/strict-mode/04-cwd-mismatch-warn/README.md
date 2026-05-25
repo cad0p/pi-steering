@@ -43,12 +43,6 @@ At session resume, pi's terminal stderr contains a line of the form:
 
 Concretely:
 
-- The line starts with `[pi-steering] session cwd (`.
-- It references both the session's cwd (the `mktemp -d` directory
-  from step 1, where the session was created) and the launch cwd
-  (the fixture dir, where pi was resumed in step 2).
-- Pi continues running normally; the session's chat resumes; tool
-  calls are evaluated with the launch-cwd rules.
 - After observing the cwd-mismatch warn, ask the model to run
   `echo CWD_PROBE` and the bridge intercepts it: the
   `block-launch-cwd-probe` rule is loaded from the fixture dir's

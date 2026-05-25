@@ -83,8 +83,7 @@ contract.
 Within a single tool_call (or tool_result) phase, rule B's
 `when.happened` predicate MUST see entries rule A's `onFire` wrote
 earlier in the same phase. Implementation: shared cache invalidation
-per `S2`. Concern split: `S2` ≡ cache freshness; `E1` ≡ evaluation
-semantics.
+per `S2`.
 
 ## Orchestration invariants (`O`)
 

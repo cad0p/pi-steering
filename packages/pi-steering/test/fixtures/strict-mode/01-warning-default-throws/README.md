@@ -38,15 +38,11 @@ The session continues running but the steering engine is NOT loaded
 for this session (the throw aborted bridge setup). Tool calls pass
 through unsteered.
 
-See conventions in `../README.md` (pi-wrapping out of scope; message
-text owned by `plugin-merger.ts`; cross-plugin collisions carry no
-`path`).
+See conventions in `../README.md`.
 
 ## Pre-flight
 
-See `packages/pi-steering/test/fixtures/strict-mode/README.md` for
-the steps to point pi at this branch's bridge before running the
-fixture.
+_See [`../README.md`](../README.md) § Pre-flight._
 
 ## What this fixture pins
 

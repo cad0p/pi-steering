@@ -27,8 +27,7 @@ cat stderr.log
   `<count> config issue` header — that's the aggregated-throw format
   only.)
 
-See conventions in `../README.md` (message text owned by
-`plugin-merger.ts`; cross-plugin collisions carry no `path`).
+See conventions in `../README.md`.
 
 ## What this fixture pins
 
@@ -40,4 +39,4 @@ without a thrown factory.
 
 ## Pre-flight
 
-See `packages/pi-steering/test/fixtures/strict-mode/README.md` for the pi-pinning steps.
+_See [`../README.md`](../README.md) § Pre-flight._

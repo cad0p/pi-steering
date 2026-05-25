@@ -37,8 +37,7 @@ Concretely:
 - The bullet text references the colliding tracker name `branch`.
 - The session continues running but the steering engine is NOT loaded.
 
-See conventions in `../README.md` (pi-wrapping out of scope; message
-text owned by `plugin-merger.ts`).
+See conventions in `../README.md`.
 
 ## What this fixture pins
 
@@ -49,4 +48,4 @@ collisions.
 
 ## Pre-flight
 
-See `packages/pi-steering/test/fixtures/strict-mode/README.md` for the pi-pinning steps.
+_See [`../README.md`](../README.md) § Pre-flight._

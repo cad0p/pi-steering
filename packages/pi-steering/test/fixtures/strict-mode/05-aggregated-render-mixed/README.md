@@ -48,4 +48,4 @@ the first one.
 
 ## Pre-flight
 
-See `packages/pi-steering/test/fixtures/strict-mode/README.md` for the pi-pinning steps.
+_See [`../README.md`](../README.md) § Pre-flight._

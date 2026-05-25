@@ -69,15 +69,6 @@ The warn lands on stderr at session resume; on `/reload`, pi's
 chatContainer clobbers stderr, so the warn is only visible at the
 startup boundary.
 
-The integration test `factory-time-load.test.ts` case
-`cwd-mismatch session_start warn → emits console.warn when
-ctx.cwd !== launchCwd` is the bridge-side verification: it drives
-`register()` with a mock `ExtensionAPI` and asserts the
-`session_start` handler calls `console.warn` when
-`ctx.cwd !== launchCwd`. This fixture is the complementary
-sink-side check that the same warn surfaces through pi's real
-cross-process stderr render path.
-
 ## What this fixture pins
 
 Cwd-mismatch behavior: cross-project resume produces a single
@@ -88,4 +79,4 @@ disabling everything for the resumed session.
 
 ## Pre-flight
 
-See `packages/pi-steering/test/fixtures/strict-mode/README.md` for the pi-pinning steps.
+_See [`../README.md`](../README.md) § Pre-flight._

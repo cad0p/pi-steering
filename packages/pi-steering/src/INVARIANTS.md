@@ -16,7 +16,7 @@ call sites on disk.
 The engine evaluates user-authored steering rules against
 LLM-proposed tool calls. The `S` invariants are the layered defenses
 that keep a buggy or malformed plugin / rule from silently
-fail-OPENING the gate.
+failing OPEN the gate.
 
 ### `S1` — fail-closed isolation
 

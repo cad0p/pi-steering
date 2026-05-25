@@ -84,6 +84,8 @@ export function runMergerPipeline(
 		defaults,
 	);
 	const userConfigNameDiagnostics = validateUserConfigNames(layers);
+	// Reads raw layers — don't switch to merged.rules; mis-attributes
+	// DEFAULT_RULES to (user config). Full rationale in JSDoc above.
 	if (mergeDiagnostics.some((d) => d.type === "error")) {
 		return {
 			merged,
@@ -120,11 +122,9 @@ export function runMergerPipeline(
  *
  * No footer.
  *
- * @param diagnostics — non-empty; caller MUST guarantee at least
- *   one diagnostic. The function emits the `Error.message` body
- *   assuming bullets exist; an empty input would render a header
- *   like `0 config issues:` with no bullets, which would mislead a
- *   user grepping CI logs.
+ * @param diagnostics — non-empty; throws on empty (the function
+ *   emits an `Error.message` body and would render a misleading
+ *   header for an empty array).
  */
 export function formatAggregatedDiagnostics(
 	diagnostics: readonly SteeringDiagnostic[],
@@ -190,6 +190,15 @@ export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
  *      `rules` — the plugin merger handles this for plugin-shipped
  *      rules inside `resolvePlugins`, but `buildConfig` leaves
  *      user-authored rules in `config.rules` untouched.
+ *
+ *      Note: disabled-rule handling is scattered across three sites:
+ *      (1) `buildConfig` suppresses collision diagnostics for entries
+ *      already in `disabledPlugins`/`disabledRules`
+ *      (collision-suppression); (2) `resolvePlugins` filters
+ *      plugin-shipped rules whose name is in `disabledRules`
+ *      (filtering); (3) this step filters user-authored
+ *      `config.rules`. A maintainer touching opt-out logic should
+ *      review all three.
  *   6. Drop unused observers via `finalizePluginState` over the
  *      plugin-merged + user-authored streams before handing off to
  *      `buildEvaluator` and `buildObserverDispatcher`.
@@ -246,19 +255,10 @@ export async function buildSessionRuntime(
 		throw new Error(formatAggregatedDiagnostics(aggregated));
 	}
 	if (hasWarning) {
-		// failOnWarnings === false; emit surviving warnings on the
-		// legacy console.warn channel so users running with the opt-out
-		// still see the message stream that pre-strict-mode code
-		// produced. `formatSingleLineDiagnostic` accepts both severities,
-		// but here we deliberately only route warnings — errors above
-		// already threw via the aggregated form, so reaching this branch
-		// with `d.type === "error"` is unreachable. The filter narrows
-		// to the warning subtype as a defensive check.
-		const warnings = aggregated.filter(
-			(d): d is SteeringDiagnostic & { type: "warning" } =>
-				d.type === "warning",
-		);
-		for (const d of warnings) {
+		// Strict-mode throw above absorbed any error-class diagnostic;
+		// anything reaching this branch is warning-class. Iterate directly
+		// and let the formatter handle severity rendering.
+		for (const d of aggregated) {
 			console.warn(formatSingleLineDiagnostic(d));
 		}
 	}

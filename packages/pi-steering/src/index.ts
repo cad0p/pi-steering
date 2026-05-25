@@ -58,7 +58,14 @@ import type { EvaluatorHost } from "./evaluator.ts";
  *                         engine continues evaluating with launch-cwd
  *                         rules — partial guardrails beat silently
  *                         disabling everything for the resumed
- *                         session. The evaluator is NOT reset.
+ *                         session. The evaluator is NOT reset. Pi
+ *                         awaits async factories before continuing
+ *                         startup (per
+ *                         `@earendil-works/pi-coding-agent/docs/extensions.md`
+ *                         §"Async factory functions"), so
+ *                         `session_start` events fire after
+ *                         `register` resolves — the cwd-mismatch
+ *                         handler is reliably installed.
  *   - `tool_call`       — gate via the evaluator. Returns a
  *                         ToolCallEventResult to block or `undefined`
  *                         to allow.
@@ -72,8 +79,8 @@ export default async function register(pi: ExtensionAPI): Promise<void> {
 	// Narrow host surface the evaluator + dispatcher need.
 	// pi-coding-agent's ExtensionAPI exposes `exec` and `appendEntry`
 	// as closure-bound methods (no `this` dependency), verified at
-	// `@earendil-works/pi-coding-agent@0.75.5`'s `loadExtension` in
-	// `loader.js` — detaching is safe.
+	// `@earendil-works/pi-coding-agent`'s `loadExtension`
+	// (closure-bound, no `this`) — detaching is safe.
 	const host: EvaluatorHost = {
 		exec: pi.exec,
 		appendEntry: pi.appendEntry,

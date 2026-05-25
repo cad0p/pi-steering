@@ -80,13 +80,9 @@ export function useIsolatedHome(
  * tests exercising factory-time loading must launch from the scratch
  * home for the loader walk-up to find the per-test config.
  *
- * Single `beforeEach` + `afterEach` pair so the teardown ordering is
- * explicit: `chdir` back to the prior cwd FIRST, then remove the
- * scratch dir. The earlier two-helper layering (`useIsolatedHome` +
- * caller-side chdir hooks) registered them in the wrong order, leaving
- * `process.cwd()` pointing at the scratch dir during `rmSync` —
- * invisible under per-file subprocess isolation but fragile under
- * single-process runners.
+ * Single `beforeEach` + `afterEach` pair so teardown order is
+ * explicit: `chdir` back FIRST, then `rmSync`. Reverse ordering risks
+ * `rmSync`-ing the dir while `process.cwd()` still points at it.
  */
 export function useScratchHome(
 	prefix: string,

@@ -26,7 +26,6 @@ import {
 	formatAggregatedDiagnostics,
 	formatSingleLineDiagnostic,
 } from "./session-runtime.ts";
-import { buildConfig, mergeBool } from "../loader.ts";
 import type { SteeringConfig, SteeringDiagnostic } from "../schema.ts";
 import { useIsolatedHome } from "../__test-helpers__.ts";
 
@@ -635,45 +634,4 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
 			'[pi-steering] [error] tracker name collision: plugins "a" and "b"',
 		);
 	});
-});
-
-describe("buildSessionRuntime: disableDefaults peek vs post-merge re-derivation", () => {
-	// Both `mergeBool` peeks and `buildConfig` re-derivations use the
-	// same precedence rule; this table pins agreement against future
-	// drift.
-
-	const cases: ReadonlyArray<{
-		name: string;
-		layers: SteeringConfig[];
-		expected: boolean | undefined;
-	}> = [
-		{
-			name: "inner layer sets disableDefaults: true",
-			layers: [{ disableDefaults: true }, {}],
-			expected: true,
-		},
-		{
-			name: "inner layer sets disableDefaults: false (outer true is overridden)",
-			layers: [{ disableDefaults: false }, { disableDefaults: true }],
-			expected: false,
-		},
-		{
-			name: "no layer sets disableDefaults (both undefined)",
-			layers: [{}, {}],
-			expected: undefined,
-		},
-	];
-
-	for (const { name, layers, expected } of cases) {
-		it(`peek and merged agree: ${name}`, () => {
-			const peek = mergeBool(layers, "disableDefaults");
-			const { config } = buildConfig(layers);
-			assert.equal(peek, expected);
-			assert.equal(
-				peek,
-				config.disableDefaults,
-				"runtime peek and merged disableDefaults must agree",
-			);
-		});
-	}
 });

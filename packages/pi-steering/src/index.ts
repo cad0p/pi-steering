@@ -36,9 +36,9 @@ import type { EvaluatorHost } from "./evaluator.ts";
  *                         cwd captured at factory time (cross-project
  *                         resume). The engine continues evaluating
  *                         with launch-cwd rules.
- *   - `tool_call`       — gate via the evaluator. Returns a
- *                         ToolCallEventResult to block or `undefined`
- *                         to allow.
+ *   - `tool_call`       — gate via the evaluator (returns a
+ *                         `ToolCallEventResult` to block, `undefined`
+ *                         to allow).
  *   - `tool_result`     — dispatch to all matching observers.
  *
  * Exported as the default export per pi's extension convention.

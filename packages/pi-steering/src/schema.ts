@@ -1952,12 +1952,8 @@ export interface SteeringDiagnostic {
 	 *     intentional rather than picking one of the two coexisting files
 	 *     arbitrarily.
 	 *   - Within-layer collisions (`rule-name-collision`,
-	 *     `observer-name-collision` produced by `mergeRules` /
-	 *     `mergeObservers` from a per-layer `seenInLayer` Set):
-	 *     COULD carry the offending layer's source path — there is
-	 *     a single source path — but the loader does not currently
-	 *     thread it through. Treat unset for now; path plumbing for
-	 *     within-layer collisions is a v0.2 follow-up.
+	 *     `observer-name-collision`): unset (the diagnostic names the
+	 *     offending object inside `message`).
 	 *   - Cross-layer collisions and plugin-shipped diagnostics
 	 *     (`plugin-name-collision`, `tracker-name-collision`,
 	 *     `predicate-collision`, `observer-collision`, `rule-collision`,

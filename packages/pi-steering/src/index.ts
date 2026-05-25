@@ -77,27 +77,14 @@ export default async function register(pi: ExtensionAPI): Promise<void> {
 	let agentLoopIndex = 0;
 
 	// Narrow host surface the evaluator + dispatcher need.
-	// pi-coding-agent's ExtensionAPI exposes `exec` and `appendEntry`
-	// as closure-bound methods (no `this` dependency), so detaching
-	// is safe.
 	const host: EvaluatorHost = {
 		exec: pi.exec,
 		appendEntry: pi.appendEntry,
 	};
 
-	// Capture the launch cwd once for the cross-project-resume
-	// detection in `session_start`. `process.cwd()` may throw if the
-	// launch dir was deleted; the throw propagates to the factory
-	// throw → pi's [Extension issues] block. Pi's main entry calls
-	// `process.cwd()` first (well before extension factories run), so
-	// this case is unreachable in normal CLI flow — only reachable
-	// from SDK embedders that bypass pi's main.
+	// Captured once for the cross-project-resume detection in session_start.
 	const launchCwd = process.cwd();
 
-	// See JSDoc above: any error-class diagnostic, or any warning-class
-	// diagnostic when `failOnWarnings !== false`, throws here. No
-	// try/catch — pi's loader needs the throw to populate
-	// [Extension issues].
 	const { evaluator, dispatcher } = await buildSessionRuntime(
 		launchCwd,
 		host,

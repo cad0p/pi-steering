@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { writeSteeringDirConfig } from "../__test-helpers__.ts";
 
 // ---------------------------------------------------------------------------
 // subprocess runner
@@ -288,18 +289,6 @@ describe("pi-steering import-json: conversion", () => {
 // `list` subcommand
 // ---------------------------------------------------------------------------
 
-/**
- * Write a minimal steering config at `dir/.pi/steering/index.ts`. The
- * module body is `export default { ... } satisfies SteeringConfig;`
- * with a local type stub so the config doesn't need to resolve the
- * `pi-steering` package from the scratch dir.
- */
-function writeScratchConfig(dir: string, body: string): void {
-	const pi = join(dir, ".pi", "steering");
-	mkdirSync(pi, { recursive: true });
-	writeFileSync(join(pi, "index.ts"), body, "utf8");
-}
-
 describe("pi-steering list", () => {
 	it("prints 'no config' when no .pi/steering exists", async () => {
 		const r = await runCli({ cwd: scratch }, "list");
@@ -321,7 +310,7 @@ describe("pi-steering list", () => {
 	});
 
 	it("text format groups plugin + user rules and lists disables", async () => {
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				plugins: [
@@ -365,7 +354,7 @@ describe("pi-steering list", () => {
 	});
 
 	it("--format=json emits a parseable structure with all sections", async () => {
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				plugins: [{ name: "git", rules: [] }],
@@ -422,7 +411,7 @@ describe("pi-steering list", () => {
 	});
 
 	it("summarizes happened: predicate with its event", async () => {
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				rules: [
@@ -443,7 +432,7 @@ describe("pi-steering list", () => {
 	});
 
 	it("marks disabled rules with '(disabled)' suffix in text output (F4)", async () => {
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				plugins: [
@@ -469,7 +458,7 @@ describe("pi-steering list", () => {
 	});
 
 	it("marks disabled plugins with '(disabled)' suffix on the header (F4)", async () => {
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				plugins: [
@@ -491,7 +480,7 @@ describe("pi-steering list", () => {
 	});
 
 	it("JSON output tags disabled rules and plugins with 'disabled: true' (F4)", async () => {
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				plugins: [
@@ -569,7 +558,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 	});
 
 	it("writes an error-class merge diagnostic to stderr with the [error] tag exactly once", async () => {
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -613,7 +602,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		// malformed name. After this change, user-config name validation runs
 		// unconditionally so both classes of error surface together,
 		// matching the production runtime's aggregated throw.
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -655,7 +644,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		// without the merger pass in `runList`, a user running
 		// `pi-steering list` on a config with a reserved tracker name
 		// would see no error, then hit the same violation at extension factory time.
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -676,7 +665,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 	it("writes an [error]-tagged invalid-name diagnostic from the plugin merger to stderr", async () => {
 		// Malformed plugin / rule / observer names flow through the
 		// merger's diagnostic stream after the validateName refactor.
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				plugins: [
@@ -705,7 +694,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 	});
 
 	it("a clean config produces no diagnostic lines on stderr and exits 0", async () => {
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				rules: [
@@ -755,7 +744,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		// `pi-steering list` would render the malformed rule as a valid
 		// listing on stdout, then production would refuse to start —
 		// authors using the CLI as pre-flight would get a false-green.
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				rules: [
@@ -782,7 +771,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		// Same shape as the rule-name case but for observers — ensures
 		// the CLI's pre-flight surface covers both halves of the
 		// `validateUserConfigNames` helper.
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				observers: [
@@ -805,7 +794,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		// would, via the `console.info` interception in
 		// `runCliMergeWithInfoCapture` (lands on stderr; stdout stays
 		// clean for the structured listing).
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				observers: [
@@ -845,7 +834,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		// `dropUnusedObservers` so the observer set the runtime would
 		// drop at extension factory time matches what `pi-steering list`
 		// reports.
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				disabledRules: ["consumer"],
@@ -886,7 +875,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 		// filter (`disabledRules.has(r.name)` ↔ `!disabledRules.has`)
 		// surfaces here — the disabled-true case alone would not catch
 		// it.
-		writeScratchConfig(
+		writeSteeringDirConfig(
 			scratch,
 			`export default {
 				observers: [

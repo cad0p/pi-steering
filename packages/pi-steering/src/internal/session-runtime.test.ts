@@ -18,8 +18,6 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	buildSessionRuntime,
@@ -27,7 +25,10 @@ import {
 	formatSingleLineDiagnostic,
 } from "./session-runtime.ts";
 import type { SteeringDiagnostic } from "../schema.ts";
-import { useIsolatedHome } from "../__test-helpers__.ts";
+import {
+	useIsolatedHome,
+	writeSteeringSingleFileConfig,
+} from "../__test-helpers__.ts";
 
 /** Minimal evaluator host; the strict-mode tests don't drive evaluation. */
 const noopHost = {
@@ -39,11 +40,6 @@ const noopHost = {
 	}),
 	appendEntry: () => {},
 };
-
-function writeSteeringConfig(dir: string, body: string): void {
-	mkdirSync(join(dir, ".pi"), { recursive: true });
-	writeFileSync(join(dir, ".pi", "steering.ts"), body, "utf8");
-}
 
 describe("buildSessionRuntime: strict-mode contract", () => {
 	let tmpHome: string;
@@ -85,7 +81,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// would be hard to stage from a written config; instead, write
 		// a config layer that declares two within-layer duplicate rules
 		// (rule-name-collision, type:'warning').
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -107,7 +103,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 	});
 
 	it("does NOT throw on a warning-class diagnostic when failOnWarnings: false; emits to console.warn", async () => {
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -145,7 +141,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// aggregated message lists the collision exactly once — the
 		// header reads `1 config issue:` (singular), and a regex count
 		// of the bullet line confirms there's no duplicate.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -184,7 +180,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// shape the loader's plugin-name validation accepts — here we
 		// trigger the merger via a malformed RULE name shipped by an
 		// otherwise-valid plugin.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -219,7 +215,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// One error (tracker collision) + one warning (rule
 		// collision). Aggregated message lists the error before the
 		// warning.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -260,7 +256,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// `N config issue:` shape; production callers and tests then had
 		// to handle two distinct error formats for what is structurally
 		// the same kind of issue.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -296,7 +292,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// dropped). Confirms the user-config name diagnostic flows through
 		// the same aggregation path as everything else — single throw,
 		// errors-first ordering.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -348,7 +344,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// malformed user-config rule name. Pins that user-config name
 		// validation runs unconditionally so both surface together
 		// rather than the user seeing them on separate runs.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -431,7 +427,7 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 		// `pi-steering list` continue to surface the breadcrumb
 		// correctly while production silently fails to drop the
 		// observer.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -474,7 +470,7 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 		// `bin/pi-steering.test.ts` (O1 in INVARIANTS.md): both surfaces
 		// must agree that an enabled consumer keeps its observer alive.
 
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,

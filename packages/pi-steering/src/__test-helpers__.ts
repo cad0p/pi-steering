@@ -28,7 +28,7 @@ import type {
 	ExecResult as PiExecResult,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach } from "node:test";
@@ -100,6 +100,33 @@ export function useScratchHome(
 		else process.env["HOME"] = priorHome;
 		rmSync(tmp, { recursive: true, force: true });
 	});
+}
+
+// ---------------------------------------------------------------------------
+// Steering-config fixture writers
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a single-file steering config to `<dir>/.pi/steering.ts`.
+ * `body` is the full module source (must include `export default`).
+ * Used by suites whose fixtures embed regex literals or other
+ * non-JSON-friendly module shapes inline.
+ */
+export function writeSteeringSingleFileConfig(dir: string, body: string): void {
+	mkdirSync(join(dir, ".pi"), { recursive: true });
+	writeFileSync(join(dir, ".pi", "steering.ts"), body, "utf8");
+}
+
+/**
+ * Write a directory-form steering config to
+ * `<dir>/.pi/steering/index.ts`. `body` is the full module source
+ * (must include `export default`). Mirrors the layout the bin tests
+ * use for their isolated `pi-steering` invocations.
+ */
+export function writeSteeringDirConfig(dir: string, body: string): void {
+	const pi = join(dir, ".pi", "steering");
+	mkdirSync(pi, { recursive: true });
+	writeFileSync(join(pi, "index.ts"), body, "utf8");
 }
 
 // ---------------------------------------------------------------------------

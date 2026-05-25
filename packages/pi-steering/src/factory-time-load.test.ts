@@ -39,7 +39,11 @@ import type {
 	ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
 import register from "./index.ts";
-import { makeCtx, useScratchHome } from "./__test-helpers__.ts";
+import {
+	makeCtx,
+	useScratchHome,
+	writeSteeringSingleFileConfig,
+} from "./__test-helpers__.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Mock ExtensionAPI                                                          */
@@ -70,11 +74,6 @@ function makeMockPi(): MockPi {
 		},
 	};
 	return { api, handlers };
-}
-
-function writeConfig(dir: string, body: string): void {
-	mkdirSync(join(dir, ".pi"), { recursive: true });
-	writeFileSync(join(dir, ".pi", "steering.ts"), body, "utf8");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -146,7 +145,7 @@ describe("register(): factory throws on diagnostics", () => {
 	captureWarns();
 
 	it("throws on tracker-name-collision (error-class, failOnWarnings default)", async () => {
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -179,7 +178,7 @@ describe("register(): factory throws on diagnostics", () => {
 	});
 
 	it("throws on reserved-tracker-name (error-class)", async () => {
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -196,7 +195,7 @@ describe("register(): factory throws on diagnostics", () => {
 	});
 
 	it("throws on reserved-predicate-key (error-class)", async () => {
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -219,7 +218,7 @@ describe("register(): factory throws on diagnostics", () => {
 	it("throws on tracker-name-collision EVEN WITH failOnWarnings: false", async () => {
 		// Errors override the opt-out; the engine cannot operate
 		// safely with two plugins claiming the same state dimension.
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -242,14 +241,14 @@ describe("register(): factory throws on diagnostics", () => {
 		// warning-class but escalates under the default
 		// `failOnWarnings: true`.
 		mkdirSync(join(tmpHome, "inner"), { recursive: true });
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
 				plugins: [{ name: "shared" }],
 			};`,
 		);
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			join(tmpHome, "inner"),
 			`export default {
 				plugins: [{ name: "shared" }],
@@ -282,7 +281,7 @@ describe("register(): factory throws on diagnostics", () => {
 	});
 
 	it("throws on predicate-collision (proves resolvePlugins warnings are plumbed)", async () => {
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -305,7 +304,7 @@ describe("register(): factory throws on diagnostics", () => {
 	});
 
 	it("throws on observer-collision", async () => {
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -328,7 +327,7 @@ describe("register(): factory throws on diagnostics", () => {
 	});
 
 	it("throws on rule-collision", async () => {
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -372,7 +371,7 @@ describe("register(): factory does NOT throw", () => {
 	captureWarns();
 
 	it("warning-class with failOnWarnings: false falls through to console.warn", async () => {
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -413,7 +412,7 @@ describe("register(): factory does NOT throw", () => {
 		// matching the disable-then-detect ordering. No throw, no
 		// warn.
 		mkdirSync(join(tmpHome, "inner"), { recursive: true });
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -421,7 +420,7 @@ describe("register(): factory does NOT throw", () => {
 				plugins: [{ name: "shared" }],
 			};`,
 		);
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			join(tmpHome, "inner"),
 			`export default {
 				plugins: [{ name: "shared" }],
@@ -443,7 +442,7 @@ describe("register(): factory does NOT throw", () => {
 	it("failOnWarnings undefined coerces to true (default-on)", async () => {
 		// No `failOnWarnings` field at all; the runtime treats the
 		// absence as `true` and escalates the warning.
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -475,7 +474,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 		// A user-defined rule lives in the launch-cwd config (tmpHome) but
 		// not in foreignCwd's walk-up; if it still fires after the
 		// cwd-mismatch warn, launch-cwd config remained in force.
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				rules: [
@@ -545,7 +544,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 	});
 
 	it("does NOT emit cwd-mismatch warn when ctx.cwd === launchCwd", async () => {
-		writeConfig(tmpHome, "export default {};");
+		writeSteeringSingleFileConfig(tmpHome, "export default {};");
 		const mock = makeMockPi();
 		await register(mock.api as ExtensionAPI);
 
@@ -578,7 +577,7 @@ describe("register(): aggregated render snapshot", () => {
 		// fixture: plugin-a registers reserved tracker `events`
 		// (error), and both plugins ship `obs-x` (warning) + `dup`
 		// (warning).
-		writeConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {

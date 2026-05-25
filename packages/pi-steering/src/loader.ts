@@ -607,11 +607,7 @@ export function buildConfig(
  * `buildSessionRuntime` does. The function never throws on
  * diagnostics; embedders apply their own throw + warning policy.
  * See `failOnWarnings` on {@link SteeringConfig} for production-
- * faithful pre-flight semantics. Same shape as the divergence note
- * on `Harness.diagnostics`.
- *
- * The runtime (`buildSessionRuntime`) does not use this wrapper
- * because it needs the raw layer list for the disable-defaults peek.
+ * faithful pre-flight semantics.
  *
  * @throws when Node < {@link MIN_NODE_MAJOR} (propagated from
  * `loadConfigs`).

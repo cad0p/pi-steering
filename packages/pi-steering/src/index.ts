@@ -49,23 +49,11 @@ import type { EvaluatorHost } from "./evaluator.ts";
  *                         tool calls it spawns.
  *   - `session_start`   — emit a `console.warn` if the resumed
  *                         session's `ctx.cwd` differs from the launch
- *                         cwd captured at factory time. Cross-project
- *                         resume (`pi --resume` with picker Tab →
- *                         "All" scope; `--session <foreign-id>`
- *                         accepted into the current cwd; SDK
- *                         embedders with a custom `cwd`) is the only
- *                         path that produces this divergence. The
- *                         engine continues evaluating with launch-cwd
- *                         rules — partial guardrails beat silently
- *                         disabling everything for the resumed
- *                         session. The evaluator is NOT reset. Pi
- *                         awaits async factories before continuing
- *                         startup (per
- *                         `@earendil-works/pi-coding-agent/docs/extensions.md`
- *                         §"Async factory functions"), so
- *                         `session_start` events fire after
- *                         `register` resolves — the cwd-mismatch
- *                         handler is reliably installed.
+ *                         cwd captured at factory time (cross-project
+ *                         resume). The engine continues evaluating
+ *                         with launch-cwd rules — partial guardrails
+ *                         beat silently disabling everything for the
+ *                         resumed session.
  *   - `tool_call`       — gate via the evaluator. Returns a
  *                         ToolCallEventResult to block or `undefined`
  *                         to allow.

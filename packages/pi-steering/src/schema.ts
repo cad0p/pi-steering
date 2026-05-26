@@ -1623,6 +1623,17 @@ export interface Plugin {
  * layer, and merges them into a single effective config with inner
  * (closer to cwd) layers taking precedence on name collisions.
  *
+ * The five array-typed fields (`disabledRules`, `disabledPlugins`,
+ * `plugins`, `rules`, `observers`) are all `readonly`. This is load-
+ * bearing: {@link DefineConfigInput} extends `SteeringConfig` and
+ * narrows each array field with a const-generic-aware subtype (e.g.
+ * `disabledRules` becomes `readonly AllRuleNames<P, R>[]`). TypeScript's
+ * interface-extension check runs on assignability, and `readonly T[]`
+ * is not assignable to `T[]` — demoting any of these fields to a
+ * mutable array would break every typed-name override on
+ * `DefineConfigInput`. The compiler will catch the regression at
+ * the `extends` site, but the choice originates here.
+ *
  * See ADR "Design → File layout and loader behavior" and
  * "Design → Override default and `onUnknown`".
  */
@@ -1667,13 +1678,6 @@ export interface SteeringConfig {
 	 * import { DEFAULT_RULES } from "pi-steering";
 	 * // hover DEFAULT_RULES[0] to see the rule body
 	 * ```
-	 *
-	 * Type note: `readonly` is load-bearing. {@link DefineConfigInput}
-	 * extends `SteeringConfig` and narrows this field to
-	 * `readonly AllRuleNames<P, R>[]`. Demoting to mutable `string[]`
-	 * would break that override (TypeScript's interface-extension check
-	 * runs on assignability, and `readonly T[]` is not assignable to
-	 * `T[]`).
 	 */
 	disabledRules?: readonly string[];
 
@@ -1695,9 +1699,6 @@ export interface SteeringConfig {
 	 * import { DEFAULT_PLUGINS } from "pi-steering";
 	 * // hover DEFAULT_PLUGINS[0] to see the plugin body
 	 * ```
-	 *
-	 * Type note: same as {@link disabledRules} — `readonly` is
-	 * load-bearing for `DefineConfigInput`'s typed-name override.
 	 */
 	disabledPlugins?: readonly string[];
 

@@ -40,6 +40,7 @@ import type {
 	Plugin,
 	Rule,
 	SteeringConfig,
+	SteeringConfigBoolFields,
 } from "./schema.ts";
 import { DEFAULT_PLUGINS, DEFAULT_RULES } from "./defaults.ts";
 
@@ -238,9 +239,11 @@ export type AllWrites<
  *     time.
  *
  * The boolean fields (`defaultNoOverride`, `disableDefaults`,
- * `failOnWarnings`) are picked from {@link SteeringConfig} so their
- * JSDoc surfaces unchanged on hover — author surface and merged
- * shape stay in sync without copy-paste.
+ * `failOnWarnings`) are inherited from {@link SteeringConfigBoolFields}
+ * via plain `extends` so their JSDoc surfaces unchanged on hover.
+ * Plain inheritance preserves JSDoc; mapped types like `Pick<>` do
+ * not, which is why the shared shape lives in its own interface
+ * rather than being projected off `SteeringConfig`.
  */
 export interface DefineConfigInput<
 	P extends readonly Plugin[],
@@ -249,10 +252,7 @@ export interface DefineConfigInput<
 		AllObserverNames<P, Inline>,
 		AllWrites<P, R, Inline>
 	>[],
-> extends Pick<
-		SteeringConfig,
-		"defaultNoOverride" | "disableDefaults" | "failOnWarnings"
-	> {
+> extends SteeringConfigBoolFields {
 	disabledRules?: readonly AllRuleNames<P, R>[];
 	disabledPlugins?: readonly AllPluginNames<P>[];
 	plugins?: P;

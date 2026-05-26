@@ -1626,7 +1626,17 @@ export interface Plugin {
  * See ADR "Design → File layout and loader behavior" and
  * "Design → Override default and `onUnknown`".
  */
-export interface SteeringConfig {
+/**
+ * Boolean opts shared by the merged-config shape
+ * ({@link SteeringConfig}) and the author-side `defineConfig`
+ * input. Extracted so JSDoc surfaces on both interfaces via plain
+ * `extends` inheritance — mapped types like `Pick<>` strip JSDoc
+ * from the picked properties on hover, plain extension preserves it.
+ *
+ * Maintainer-facing only; consumers should reach for
+ * {@link SteeringConfig} or `defineConfig`'s argument type instead.
+ */
+export interface SteeringConfigBoolFields {
 	/**
 	 * Default value for {@link Rule.noOverride} when a rule doesn't
 	 * specify its own. Defaults to `true` (fail-closed - overrides
@@ -1644,6 +1654,39 @@ export interface SteeringConfig {
 	 */
 	defaultNoOverride?: boolean;
 
+	/**
+	 * Skip the package's built-in default plugins + default rules.
+	 * Handy for isolated test harnesses or strict minimal configs.
+	 *
+	 * Kept in imperative form (action flag: "disable the defaults")
+	 * to distinguish shape at a glance from the past-participle
+	 * `disabledRules` / `disabledPlugins` lists.
+	 *
+	 * Walk-up merge: inner layer wins when specified.
+	 */
+	disableDefaults?: boolean;
+
+	/**
+	 * Strict-mode opt-out. When `true` (default), any warning-class
+	 * {@link SteeringDiagnostic} produced while loading the config
+	 * escalates to a thrown error that disables the bridge for the
+	 * session. When explicitly set to `false`, warnings fall through
+	 * to `console.warn` and the bridge keeps running with whatever
+	 * subset of plugins / rules / observers loaded successfully.
+	 *
+	 * Error-class diagnostics ALWAYS throw regardless of this flag
+	 * (e.g. tracker name collision, reserved name violation) — the
+	 * engine cannot operate safely with those issues present.
+	 *
+	 * Walk-up merge: inner layer wins when specified, identical to
+	 * {@link disableDefaults}.
+	 *
+	 * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
+	 */
+	failOnWarnings?: boolean;
+}
+
+export interface SteeringConfig extends SteeringConfigBoolFields {
 	/**
 	 * Rules to disable by name. Additive union across layers.
 	 *
@@ -1690,37 +1733,6 @@ export interface SteeringConfig {
 	 * ```
 	 */
 	disabledPlugins?: string[];
-
-	/**
-	 * Skip the package's built-in default plugins + default rules.
-	 * Handy for isolated test harnesses or strict minimal configs.
-	 *
-	 * Kept in imperative form (action flag: "disable the defaults")
-	 * to distinguish shape at a glance from the past-participle
-	 * {@link disabledRules} / {@link disabledPlugins} lists.
-	 *
-	 * Walk-up merge: inner layer wins when specified.
-	 */
-	disableDefaults?: boolean;
-
-	/**
-	 * Strict-mode opt-out. When `true` (default), any warning-class
-	 * {@link SteeringDiagnostic} produced while loading the config
-	 * escalates to a thrown error that disables the bridge for the
-	 * session. When explicitly set to `false`, warnings fall through
-	 * to `console.warn` and the bridge keeps running with whatever
-	 * subset of plugins / rules / observers loaded successfully.
-	 *
-	 * Error-class diagnostics ALWAYS throw regardless of this flag
-	 * (e.g. tracker name collision, reserved name violation) — the
-	 * engine cannot operate safely with those issues present.
-	 *
-	 * Walk-up merge: inner layer wins when specified, identical to
-	 * {@link disableDefaults}.
-	 *
-	 * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
-	 */
-	failOnWarnings?: boolean;
 
 	/** Plugins to load. Order matters for first-wins name collisions. */
 	plugins?: readonly Plugin[];

@@ -40,7 +40,6 @@ import type {
 	Plugin,
 	Rule,
 	SteeringConfig,
-	SteeringConfigBoolFields,
 } from "./schema.ts";
 import { DEFAULT_PLUGINS, DEFAULT_RULES } from "./defaults.ts";
 
@@ -238,12 +237,25 @@ export type AllWrites<
  *     are both typed against `AllWrites` — typos rejected at compile
  *     time.
  *
- * The boolean fields (`defaultNoOverride`, `disableDefaults`,
- * `failOnWarnings`) are inherited from {@link SteeringConfigBoolFields}
- * via plain `extends` so their JSDoc surfaces unchanged on hover.
- * Plain inheritance preserves JSDoc; mapped types like `Pick<>` do
- * not, which is why the shared shape lives in its own interface
- * rather than being projected off `SteeringConfig`.
+ * Inherits from {@link SteeringConfig} via plain `extends`. The
+ * non-overridden fields (`defaultNoOverride`, `disableDefaults`,
+ * `failOnWarnings`) carry their JSDoc unchanged into hover. The
+ * five overridden fields all narrow the parent's `readonly`-array
+ * type to a const-generic-aware subtype:
+ *
+ *   - `disabledRules?: readonly AllRuleNames<P, R>[]`
+ *     `⊆ readonly string[]` (typed name union).
+ *   - `disabledPlugins?: readonly AllPluginNames<P>[]`
+ *     `⊆ readonly string[]`.
+ *   - `plugins?: P` `⊆ readonly Plugin[]` (preserves tuple form).
+ *   - `rules?: R` `⊆ readonly Rule[]`.
+ *   - `observers?: Inline` `⊆ readonly Observer[]`.
+ *
+ * Plain extension preserves JSDoc on hover; mapped types like
+ * `Pick<>` strip it. The `readonly` markers on `SteeringConfig`'s
+ * arrays are what let these overrides type-check — `string[]` and
+ * `readonly string[]` are unrelated for the assignability check
+ * TypeScript runs on extending interfaces.
  */
 export interface DefineConfigInput<
 	P extends readonly Plugin[],
@@ -252,7 +264,7 @@ export interface DefineConfigInput<
 		AllObserverNames<P, Inline>,
 		AllWrites<P, R, Inline>
 	>[],
-> extends SteeringConfigBoolFields {
+> extends SteeringConfig {
 	disabledRules?: readonly AllRuleNames<P, R>[];
 	disabledPlugins?: readonly AllPluginNames<P>[];
 	plugins?: P;

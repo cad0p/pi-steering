@@ -615,8 +615,14 @@ describe("loader: buildConfig", () => {
 			disabledPlugins: ["pB"],
 		};
 		const { config: merged } = buildConfig([inner, outer]);
-		assert.deepEqual(merged.disabledRules?.sort(), ["a", "b"]);
-		assert.deepEqual(merged.disabledPlugins?.sort(), ["pA", "pB"]);
+		assert.deepEqual(
+			merged.disabledRules ? [...merged.disabledRules].sort() : undefined,
+			["a", "b"],
+		);
+		assert.deepEqual(
+			merged.disabledPlugins ? [...merged.disabledPlugins].sort() : undefined,
+			["pA", "pB"],
+		);
 	});
 
 	it("inner `defaultNoOverride` wins; missing layer leaves outer in place", () => {

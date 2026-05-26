@@ -1667,6 +1667,13 @@ export interface SteeringConfig {
 	 * import { DEFAULT_RULES } from "pi-steering";
 	 * // hover DEFAULT_RULES[0] to see the rule body
 	 * ```
+	 *
+	 * Type note: `readonly` is load-bearing. {@link DefineConfigInput}
+	 * extends `SteeringConfig` and narrows this field to
+	 * `readonly AllRuleNames<P, R>[]`. Demoting to mutable `string[]`
+	 * would break that override (TypeScript's interface-extension check
+	 * runs on assignability, and `readonly T[]` is not assignable to
+	 * `T[]`).
 	 */
 	disabledRules?: readonly string[];
 
@@ -1688,6 +1695,9 @@ export interface SteeringConfig {
 	 * import { DEFAULT_PLUGINS } from "pi-steering";
 	 * // hover DEFAULT_PLUGINS[0] to see the plugin body
 	 * ```
+	 *
+	 * Type note: same as {@link disabledRules} — `readonly` is
+	 * load-bearing for `DefineConfigInput`'s typed-name override.
 	 */
 	disabledPlugins?: readonly string[];
 

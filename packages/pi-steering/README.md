@@ -50,14 +50,16 @@ Why both steps matter:
 
 ### Hot-reload of the user config
 
-`/reload` **does** pick up edits to your `.pi/steering/index.ts` (or `.pi/steering.ts`) without a pi restart. The loader cache-busts the dynamic import (`?t=<timestamp>_<counter>`) so Node's ESM module map can't serve a stale copy of your config across reloads, and an initial-load failure (broken syntax, missing value import) doesn't poison subsequent loads after you fix the file.
+`/reload` **does** pick up edits to your `.pi/steering/index.ts` (or `.pi/steering.ts`) without a pi restart. The loader cache-busts the dynamic import (`?t=<hrtime-bigint>`) so Node's ESM module map can't serve a stale copy of your config across reloads, and an initial-load failure (broken syntax, missing value import) doesn't poison subsequent loads after you fix the file.
+
+It also picks up edits to **plugin source code** — if the plugin ships its `.ts` source as the package entry (Node 22+ native type-stripping; `"main": "./src/index.ts"`, `allowImportingTsExtensions: true`, `noEmit: true`). Pi loads the bridge via jiti with `moduleCache: false`, so static + dynamic imports inside the user config re-route through jiti's loader on every reload, and `.ts` modules get re-read from disk and re-evaluated.
 
 What `/reload` still does **not** pick up:
 
-- Edits to compiled `dist/index.js` of pi-steering itself or any plugin package the user config statically imports (`pi-steering`, `pi-steering-flags`, `@amzn/your-plugin`, etc.). Those are reached via Node's bare-specifier resolution from inside the user config; the cache-bust on the user-config URL doesn't propagate to its transitive specifiers, and Node ESM caches the resolved module for the process lifetime. Editing a plugin and `/reload`-ing will appear to do nothing until you fully restart pi.
-- Edits to pi-steering's own `dist/`. Same reason — pi loads the bridge factory once at extension-load time; subsequent `/reload`s re-evaluate the entry source via jiti, but cached transitive `dist/` modules persist.
+- Edits to a plugin's **compiled** `dist/index.js` (or other `dist/*.js` files reached through it). Compiled-JS modules in `node_modules` end up cached for the process lifetime; only `.ts` source goes through jiti's re-evaluation path.
+- Edits to pi-steering's own `dist/`. Same reason — the bridge entry (`src/index.ts`) is re-evaluated each reload, but transitively-imported compiled-JS modules from `dist/` are cached.
 
-For the plugin case, switch the plugin to ship `.ts` source via Node 22+ native type-stripping (set `"main": "./src/index.ts"`, `allowImportingTsExtensions: true`, `noEmit: true`) and you remove the dist build entirely — but the resolved `.ts` URL is still cached by Node ESM, so this on its own doesn't enable hot-reload of plugin code. The cache-bust covers only the user config layer.
+**Recommendation for plugin authors:** ship `.ts` source as the package entry to enable hot-reload during plugin development. The migration is small: switch `package.json#main` to `./src/index.ts`, drop the `tsc` build step (or keep it as `tsc --noEmit` for typecheck), set `allowImportingTsExtensions: true` and `noEmit: true` in `tsconfig.json`, optionally add `erasableSyntaxOnly: true` to reject non-strippable TS features (`enum`, namespaces, parameter properties) at compile time. Consumers must run Node ≥ 22.6 for native type-stripping.
 
 
 ## Quick start

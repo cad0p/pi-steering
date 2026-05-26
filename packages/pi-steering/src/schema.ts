@@ -1623,6 +1623,17 @@ export interface Plugin {
  * layer, and merges them into a single effective config with inner
  * (closer to cwd) layers taking precedence on name collisions.
  *
+ * The five array-typed fields (`disabledRules`, `disabledPlugins`,
+ * `plugins`, `rules`, `observers`) are all `readonly`. This is load-
+ * bearing: {@link DefineConfigInput} extends `SteeringConfig` and
+ * narrows each array field with a const-generic-aware subtype (e.g.
+ * `disabledRules` becomes `readonly AllRuleNames<P, R>[]`). TypeScript's
+ * interface-extension check runs on assignability, and `readonly T[]`
+ * is not assignable to `T[]` — demoting any of these fields to a
+ * mutable array would break every typed-name override on
+ * `DefineConfigInput`. The compiler will catch the regression at
+ * the `extends` site, but the choice originates here.
+ *
  * See ADR "Design → File layout and loader behavior" and
  * "Design → Override default and `onUnknown`".
  */
@@ -1668,7 +1679,7 @@ export interface SteeringConfig {
 	 * // hover DEFAULT_RULES[0] to see the rule body
 	 * ```
 	 */
-	disabledRules?: string[];
+	disabledRules?: readonly string[];
 
 	/**
 	 * Plugins to disable by name. Additive union across layers.
@@ -1689,7 +1700,7 @@ export interface SteeringConfig {
 	 * // hover DEFAULT_PLUGINS[0] to see the plugin body
 	 * ```
 	 */
-	disabledPlugins?: string[];
+	disabledPlugins?: readonly string[];
 
 	/**
 	 * Skip the package's built-in default plugins + default rules.
@@ -1717,14 +1728,6 @@ export interface SteeringConfig {
 	 *
 	 * Walk-up merge: inner layer wins when specified, identical to
 	 * {@link disableDefaults}.
-	 *
-	 * Note: a broken layer cannot communicate its OWN `failOnWarnings:
-	 * false` opt-out, since the loader can't read the failed file. To
-	 * recover from a `layer-import-failed` diagnostic on an outer
-	 * (ancestor) layer, set `failOnWarnings: false` on a successfully-
-	 * loaded inner layer; the inner-wins merge picks up the opt-out
-	 * before the broken layer's warning-class diagnostic escalates to
-	 * a thrown error. Alternatively, fix the broken file.
 	 *
 	 * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
 	 */
@@ -1771,12 +1774,6 @@ export interface SteeringConfig {
  *     set; `invalid-name` flags a plugin / rule / observer name
  *     containing characters that are disallowed in source-tagged
  *     block reasons.
- *
- * Naming asymmetry: loader-side kinds suffix `-name-collision`;
- * plugin-merger-side kinds suffix bare `-collision`. The split is
- * intentional but doesn't strictly track within-layer vs across-layer
- * (e.g. `plugin-name-collision` is loader-side and fires across
- * layers). Consumers should branch on `kind`, not on the suffix shape.
  *
  * Disabling a plugin via `config.disabledPlugins` or a plugin-shipped
  * rule via `config.disabledRules` is by-design behavior, not a
@@ -1889,11 +1886,11 @@ export type SteeringDiagnosticKind =
 /**
  * Structured issue surfaced while loading a steering config.
  *
- * Diagnostics flow up from the loader (and, in later refactor steps,
- * the plugin merger) into the bridge runtime, which decides whether to
- * throw or log per the user's strict-mode preference. The shape is
- * stable so tests and future tooling can dispatch on {@link kind}
- * without scanning {@link message} substrings.
+ * Diagnostics flow up from the loader and the plugin merger into the
+ * bridge runtime, which decides whether to throw or log per the user's
+ * strict-mode preference. The shape is stable so tests and future
+ * tooling can dispatch on {@link kind} without scanning {@link message}
+ * substrings.
  *
  * Channel-ownership split (loader / merger vs. runtime). Diagnostics
  * captured in this stream are by-design surfaced to the strict-mode
@@ -1901,11 +1898,12 @@ export type SteeringDiagnosticKind =
  * `console.warn`. The loader (`loader.ts`) does not call
  * `console.*` directly — the runtime owns the policy decision.
  * However, by-design info breadcrumbs that are NOT configuration
- * issues (`plugin-disabled`, `rule-disabled` from `resolvePlugins`,
- * dropped-observer notices from `dropUnusedObservers`) go directly
- * to `console.info` from where they're produced. They're not in
- * this kind union because they describe normal behavior the user
- * opted into, not problems that need actioning.
+ * issues (`disabledPlugins` and `disabledRules` opt-outs from
+ * `resolvePlugins`, dropped-observer notices from
+ * `dropUnusedObservers`) go directly to `console.info` from where
+ * they're produced. They're not in this kind union because they
+ * describe normal behavior the user opted into, not problems that
+ * need actioning.
  *
  * Render-format matrix — the same diagnostic surfaces in two
  * shapes depending on which renderer the runtime picks:
@@ -1916,16 +1914,18 @@ export type SteeringDiagnosticKind =
  *     Used when at least one diagnostic must abort the session.
  *     Produced by `formatAggregatedDiagnostics`.
  *   - Single-line per-diagnostic (`formatSingleLineDiagnostic`):
- *     `[pi-steering] <ERROR: >?<path: >?<message>` per diagnostic.
- *     Routed to `console.warn` for legacy fail-soft mode
+ *     `[pi-steering] [<severity>] <path: >?<message>` per diagnostic.
+ *     Severity tag (`[error]` / `[warning]`) follows the same
+ *     bracketed convention as the multi-line aggregate's per-line
+ *     bullets. Routed to `console.warn` for legacy fail-soft mode
  *     (`failOnWarnings: false`). Only warnings reach this route in
  *     practice — error-class diagnostics escalate to a thrown error
  *     via the aggregated form before warnings are flushed. Also
  *     routed to stderr for the CLI `pi-steering list` pre-flight
- *     surface (both warnings and errors render here, with `ERROR: `
- *     distinguishing the latter). The function itself accepts both
- *     severities; the warnings-only narrowing is a property of the
- *     `console.warn` route's caller, not the formatter.
+ *     surface (both warnings and errors render here; the bracketed
+ *     severity tag distinguishes them). The function itself accepts
+ *     both severities; the warnings-only narrowing is a property of
+ *     the `console.warn` route's caller, not the formatter.
  *
  * The CLI prints diagnostics inline as the loader yields them, rather
  * than aggregating into a thrown error — the single-line shape
@@ -1959,12 +1959,8 @@ export interface SteeringDiagnostic {
 	 *     intentional rather than picking one of the two coexisting files
 	 *     arbitrarily.
 	 *   - Within-layer collisions (`rule-name-collision`,
-	 *     `observer-name-collision` produced by `mergeRules` /
-	 *     `mergeObservers` from a per-layer `seenInLayer` Set):
-	 *     COULD carry the offending layer's source path — there is
-	 *     a single source path — but the loader does not currently
-	 *     thread it through. Treat unset for now; path plumbing for
-	 *     within-layer collisions is a v0.2 follow-up.
+	 *     `observer-name-collision`): unset (the diagnostic names the
+	 *     offending object inside `message`).
 	 *   - Cross-layer collisions and plugin-shipped diagnostics
 	 *     (`plugin-name-collision`, `tracker-name-collision`,
 	 *     `predicate-collision`, `observer-collision`, `rule-collision`,

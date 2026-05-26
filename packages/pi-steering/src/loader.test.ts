@@ -445,6 +445,64 @@ describe("loader: loadConfigs", () => {
 			"expected inner-first ordering regardless of per-layer form",
 		);
 	});
+
+	it("re-imports config when file content changes between calls", async () => {
+		// Regression: Node's ESM module map is keyed on URL and caches
+		// indefinitely within a process. Without cache-busting, an edit
+		// to `.pi/steering/index.ts` between two `loadConfigs` calls is
+		// invisible — `/reload` looks like it does nothing. The loader
+		// appends a `?t=<timestamp>` query string to defeat the cache.
+		const dir = join(tmp, "reimport");
+		mkdirSync(dir, { recursive: true });
+		const configFile = join(dir, ".pi", "steering", "index.ts");
+
+		writeConfig(configFile, configModule("{ disabledRules: ['v1'] }"));
+		const first = await loadConfigs(dir);
+		assert.equal(first.layers[0]?.disabledRules?.[0], "v1");
+
+		writeConfig(configFile, configModule("{ disabledRules: ['v2'] }"));
+		const second = await loadConfigs(dir);
+		assert.equal(
+			second.layers[0]?.disabledRules?.[0],
+			"v2",
+			"expected fresh-fetch on second call after file edit; got cached " +
+				"version, which means the cache-bust in importConfigFile is broken",
+		);
+	});
+
+	it("recovers from initial-load failure on next call", async () => {
+		// Node's ESM cache also caches FAILED imports — once a URL has
+		// thrown during evaluation, every subsequent `import(url)` of
+		// that URL throws the same error, even after the file is fixed.
+		// Cache-busting fixes this for free: a unique URL each call gets
+		// a fresh evaluation attempt.
+		//
+		// We use a runtime throw (`throw new Error(...)`) rather than a
+		// syntax error — syntax errors are surfaced by the TS stripper
+		// before the module reaches Node's ESM cache, so they don't
+		// poison subsequent loads. The interesting case for cache-bust
+		// is the runtime-throw path.
+		const dir = join(tmp, "recover");
+		mkdirSync(dir, { recursive: true });
+		const configFile = join(dir, ".pi", "steering", "index.ts");
+
+		// First load: file evaluates but throws.
+		writeConfig(configFile, "throw new Error('first-load-boom');\n");
+		const first = await loadConfigs(dir);
+		assert.equal(first.layers.length, 0);
+		assert.equal(first.diagnostics[0]?.kind, "layer-import-failed");
+
+		// Second load: file fixed.
+		writeConfig(configFile, configModule("{ disabledRules: ['fixed'] }"));
+		const second = await loadConfigs(dir);
+		assert.equal(
+			second.layers[0]?.disabledRules?.[0],
+			"fixed",
+			"expected fixed file to load on second call; got cached failure, " +
+				"which means the cache-bust in importConfigFile is broken",
+		);
+		assert.deepEqual(second.diagnostics, []);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -557,8 +615,14 @@ describe("loader: buildConfig", () => {
 			disabledPlugins: ["pB"],
 		};
 		const { config: merged } = buildConfig([inner, outer]);
-		assert.deepEqual(merged.disabledRules?.sort(), ["a", "b"]);
-		assert.deepEqual(merged.disabledPlugins?.sort(), ["pA", "pB"]);
+		assert.deepEqual(
+			merged.disabledRules ? [...merged.disabledRules].sort() : undefined,
+			["a", "b"],
+		);
+		assert.deepEqual(
+			merged.disabledPlugins ? [...merged.disabledPlugins].sort() : undefined,
+			["pA", "pB"],
+		);
 	});
 
 	it("inner `defaultNoOverride` wins; missing layer leaves outer in place", () => {

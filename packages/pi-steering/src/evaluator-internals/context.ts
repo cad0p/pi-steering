@@ -169,7 +169,8 @@ export function isPlainObject(x: unknown): x is Record<string, unknown> {
  * {@link createFindEntries} closure. When supplied, every `appendEntry`
  * call invalidates the cache entry for the written `customType` so
  * the next `findEntries(customType)` re-reads the session JSONL and
- * sees the newly-written entry (S2/E1). Omit the parameter to keep
+ * sees the newly-written entry (S2/E1; see ../INVARIANTS.md for the
+ * S/E tag glossary). Omit the parameter to keep
  * the pre-S2 behaviour (no invalidation) — handy for tests or callers
  * that don't pair the two closures.
  */

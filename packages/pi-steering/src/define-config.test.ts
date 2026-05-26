@@ -83,11 +83,13 @@ describe("defineConfig: runtime behavior", () => {
 			disabledRules: disables,
 		});
 		assert.deepEqual(cfg.disabledRules, ["x", "y"]);
-		// Sanity: the returned array is detached from the input, so
-		// callers can freely mutate the built config without poisoning
-		// the (probably module-scoped) source.
-		cfg.disabledRules?.push("z");
-		assert.equal(disables.length, 2);
+		// Sanity: the returned array is detached from the input —
+		// different reference, so module-scoped sources can't be
+		// poisoned by a later mutation downstream of `defineConfig`.
+		// (`disabledRules` is `readonly` on the public type, so we can't
+		// push to it without a cast — reference inequality is the
+		// underlying invariant.)
+		assert.notStrictEqual(cfg.disabledRules, disables);
 	});
 
 	it("omits keys the caller didn't pass (no undefined leakage)", () => {

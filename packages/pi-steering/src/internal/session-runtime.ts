@@ -4,22 +4,28 @@
 /**
  * Internal module — not part of the package's public API.
  *
- * This module holds the per-session wiring that `register()` uses to
- * spin up an evaluator + observer dispatcher from a walk-up steering
- * config. It is intentionally NOT re-exported from `index.ts` or any
- * other public entry point; consumers building their own extensions
- * should go through `loadHarness` (subpath `pi-steering/testing`)
- * or call `buildEvaluator` / `buildObserverDispatcher` directly.
+ * This module holds the wiring that the bridge factory in `index.ts`
+ * uses to spin up an evaluator + observer dispatcher from a walk-up
+ * steering config. It is intentionally NOT re-exported from
+ * `index.ts` or any other public entry point; consumers building
+ * their own extensions should go through `loadHarness` (subpath
+ * `pi-steering/testing`) or call `buildEvaluator` /
+ * `buildObserverDispatcher` directly.
  *
- * The runtime owns the strict-mode contract: diagnostics produced by
- * the loader (per-layer import failures, dual-form coexistence,
+ * The runtime owns the strict-mode contract: diagnostics produced
+ * by the loader (per-layer import failures, dual-form coexistence,
  * stray files, cross-layer + within-layer collisions) and by the
  * plugin merger (predicate / observer / rule / extension-orphan /
- * disabled / reserved-name diagnostics) are aggregated here. Any
- * error-class diagnostic always escalates to a thrown error; warning-
- * class diagnostics escalate when `failOnWarnings !== false` on the
- * merged config (default: true). Otherwise warnings are emitted to
- * `console.warn` for legacy fail-soft semantics.
+ * reserved-name / invalid-name diagnostics) are aggregated here.
+ * Any error-class diagnostic always escalates to a thrown error;
+ * warning-class diagnostics escalate when `failOnWarnings !== false`
+ * on the merged config (default: true). Otherwise warnings are
+ * emitted to `console.warn` for legacy fail-soft semantics.
+ *
+ * The bridge calls `buildSessionRuntime` once at extension factory
+ * time. A thrown factory propagates through pi's extension loader
+ * into pi's `[Extension issues]` diagnostic block (which survives
+ * `/reload`); the bridge does not catch.
  */
 
 import { DEFAULT_PLUGINS, DEFAULT_RULES } from "../defaults.ts";
@@ -45,24 +51,10 @@ import { finalizePluginState } from "./finalize-plugin-state.ts";
 /**
  * Run `buildConfig` then `resolvePlugins` over the raw layer list,
  * short-circuiting before `resolvePlugins` if any merge-side
- * diagnostic is error-class. The short-circuit avoids double-emitting
- * `tracker-name-collision`, which both `buildConfig` and
- * `resolvePlugins` independently detect.
- *
- * `validateUserConfigNames` runs unconditionally — between
- * `buildConfig` and the short-circuit — so a config with both a
- * merge-side error AND a malformed user-config name surfaces both in
- * one pass. It reads names off the raw input `layers` (NOT the
- * post-merge `merged` config, which can carry `DEFAULT_RULES` and
- * would mis-attribute package-controlled names to `(user config)`).
- *
- * Loader-side diagnostics from `loadConfigs` are NOT included here;
- * callers that walked up from a cwd (`buildSessionRuntime`, the CLI)
- * thread those in separately.
- *
- * Returns the merged config, the `ResolvedPluginState` (or `null` on
- * short-circuit), and the aggregated diagnostics in declaration order
- * (merge-side, user-config name validation, resolve-side).
+ * diagnostic is error-class. Avoids double-emitting
+ * `tracker-name-collision` (O2 in INVARIANTS.md).
+ * `validateUserConfigNames` runs unconditionally so user-config name
+ * issues surface alongside merge errors.
  */
 export function runMergerPipeline(
 	layers: readonly SteeringConfig[],
@@ -103,16 +95,10 @@ export function runMergerPipeline(
 
 /**
  * Render a diagnostics array into a single multi-line message
- * suitable for use as a thrown Error's `message`. The format:
- *
- *   - Header: `${count} config issue${plural}:` (singular when
- *     `count === 1`).
- *   - One bullet per diagnostic, severity tag in brackets, optional
- *     path prefix when {@link SteeringDiagnostic.path} is set.
- *   - Severity ordering: errors first, then warnings. Within each
- *     severity, declaration order is preserved.
- *
- * No footer.
+ * suitable for use as a thrown Error's `message`. See {@link
+ * SteeringDiagnostic} render-format matrix for the canonical shape;
+ * the `formatAggregatedDiagnostics: rule-based spec` describe block in
+ * `internal/session-runtime.test.ts` pins the rules.
  */
 export function formatAggregatedDiagnostics(
 	diagnostics: readonly SteeringDiagnostic[],
@@ -130,64 +116,22 @@ export function formatAggregatedDiagnostics(
 }
 
 /**
- * Render a single {@link SteeringDiagnostic} as a one-line message
- * suitable for the two single-diagnostic surfaces:
- *
- *   - `console.warn` (legacy fail-soft channel under
- *     `failOnWarnings: false`) — `buildSessionRuntime` only routes
- *     warnings through here; errors always throw via the aggregated
- *     form.
- *   - CLI stderr (`pi-steering list` pre-flight surface) — both
- *     warnings and errors render through this helper inline as the
- *     loader / merger yields them.
- *
- * Errors get an `ERROR: ` severity prefix after the `[pi-steering]`
- * tag so a user grepping CI logs has a clear handle; warnings have
- * none. Path prefix is conditional on {@link SteeringDiagnostic.path}
- * being set — cross-layer collisions (no source path) render with
- * the message alone.
- *
- * The aggregated multi-line form (for thrown-Error message bodies
- * in strict mode) is produced by {@link formatAggregatedDiagnostics},
- * not this helper.
+ * Single-line render of one diagnostic; see {@link SteeringDiagnostic}
+ * render-format matrix for the canonical contract.
  */
 export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
-	const severity = d.type === "error" ? "ERROR: " : "";
 	const pathPrefix = d.path !== undefined ? `${d.path}: ` : "";
-	return `[pi-steering] ${severity}${pathPrefix}${d.message}`;
+	return `[pi-steering] [${d.type}] ${pathPrefix}${d.message}`;
 }
 
 /**
  * Build the per-session evaluator + observer dispatcher from the walk-
- * up config rooted at `cwd`. `disableDefaults: true` in any layer is
- * honored before defaults are injected:
- *
- *   1. `loadConfigs(cwd)` — async IO, read every layer from cwd →
- *      $HOME.
- *   2. `mergeBool(layers, "disableDefaults")` — inner-wins peek
- *      across raw layers without paying for a full merge.
- *   3. `buildConfig(layers, defaults?)` with defaults conditional on
- *      the disableDefaults peek, producing the effective config.
- *   3a. Short-circuit on error-class loader / merge diagnostics
- *      before running plugin merger — avoids double-reporting
- *      tracker-name-collision when both surfaces detect it.
- *   4. Apply `config.disabledRules` to the merged `rules` — the plugin
- *      merger handles this for plugin-shipped rules, but
- *      `buildConfig` leaves user/default rules in `config.rules`
- *      untouched on the assumption that the caller (this function)
- *      filters them before handing off to `buildEvaluator`.
- *   5. Run `resolvePlugins` to get the plugin-merger-side diagnostics.
- *   6. Aggregate every diagnostic produced along the way and apply
- *      the strict-mode contract: throw when any error-class
- *      diagnostic is present, throw when any warning-class diagnostic
- *      is present and `failOnWarnings !== false`, otherwise emit
- *      surviving warnings via `console.warn`.
- *
- * Factored out of `register()` so the wiring is unit-testable without
- * a pi runtime stub. The `config` from earlier versions of this
- * function is absorbed into the runtime: the bridge no longer needs
- * to inspect it, and exposing it tempted callers to bypass the
- * strict-mode contract.
+ * up config rooted at `cwd`. Honors `disableDefaults` via inner-wins
+ * peek before injecting `DEFAULT_*`. Throws on any error-class
+ * diagnostic and on warning-class diagnostics when
+ * `failOnWarnings !== false`; otherwise emits surviving warnings via
+ * `console.warn`. See {@link runMergerPipeline} for the merge contract
+ * and `finalizePluginState` for observer-drop.
  */
 export async function buildSessionRuntime(
 	cwd: string,
@@ -202,18 +146,12 @@ export async function buildSessionRuntime(
 		await loadConfigs(cwd);
 	aggregated.push(...loaderDiagnostics);
 
-	// Peek at `disableDefaults` across raw layers without paying for
-	// a full merge. `mergeBool` walks layers inner-first and returns the
-	// first explicit value, matching `buildConfig`'s precedence.
 	const disableDefaults =
 		mergeBool(rawLayers, "disableDefaults") === true;
 	const defaults: SteeringConfig | undefined = disableDefaults
 		? undefined
 		: { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS };
 
-	// Run buildConfig + resolvePlugins through the shared helper so the
-	// short-circuit between the two passes is uniform across
-	// `buildSessionRuntime`, `loadHarness`, and the CLI's `runList`.
 	const { merged, resolved, diagnostics: mergeAndResolveDiagnostics } =
 		runMergerPipeline(
 			rawLayers,
@@ -225,42 +163,21 @@ export async function buildSessionRuntime(
 	const failOnWarnings = merged.failOnWarnings;
 	const treatWarningsAsErrors = failOnWarnings !== false;
 
-	// Strict-mode contract: error-class diagnostics ALWAYS throw;
-	// warning-class diagnostics throw only when `failOnWarnings !==
-	// false` (default true). Otherwise warnings fall through to
-	// console.warn for legacy fail-soft semantics.
 	const hasError = aggregated.some((d) => d.type === "error");
 	const hasWarning = aggregated.some((d) => d.type === "warning");
 	if (hasError || (treatWarningsAsErrors && hasWarning)) {
 		throw new Error(formatAggregatedDiagnostics(aggregated));
 	}
 	if (hasWarning) {
-		// failOnWarnings === false; emit surviving warnings on the
-		// legacy console.warn channel so users running with the opt-out
-		// still see the message stream that pre-strict-mode code
-		// produced. `formatSingleLineDiagnostic` accepts both severities,
-		// but here we deliberately only route warnings — errors above
-		// already threw via the aggregated form, so reaching this branch
-		// with `d.type === "error"` is unreachable. The filter narrows
-		// to the warning subtype as a defensive check.
-		const warnings = aggregated.filter(
-			(d): d is SteeringDiagnostic & { type: "warning" } =>
-				d.type === "warning",
-		);
-		for (const d of warnings) {
+		for (const d of aggregated) {
 			console.warn(formatSingleLineDiagnostic(d));
 		}
 	}
 
-	// `resolved` is non-null at this point: `runMergerPipeline` returns
-	// `resolved: null` only when merge-side diagnostics include an
-	// error-class entry, and the strict-mode throw above fires on any
-	// error-class diagnostic.
+	if (resolved === null) {
+		throw new Error("internal: resolved null without error diagnostic");
+	}
 
-	// Apply `disabledRules` to the merged rule set. Plugin-shipped rules
-	// are filtered inside `resolvePlugins`; user / default rules go
-	// through `config.rules` on the evaluator side, so we filter them
-	// here to keep the semantic consistent across both sources.
 	const disabled = new Set(merged.disabledRules ?? []);
 	const filteredConfig: SteeringConfig = { ...merged };
 	if (merged.rules !== undefined) {
@@ -269,18 +186,14 @@ export async function buildSessionRuntime(
 		else delete filteredConfig.rules;
 	}
 
-	// Drop observers whose declared writes are unconsumed across
-	// plugin-merged + user-authored streams. Single source of truth
-	// for the orchestration-layer filter; `finalizePluginState` owns
-	// the breadcrumb format.
 	const { pluginKept, userKept } = finalizePluginState(
 		filteredConfig.rules ?? [],
-		resolved!.rules,
+		resolved.rules,
 		filteredConfig.observers ?? [],
-		resolved!.observers,
+		resolved.observers,
 	);
 	const filteredResolved = {
-		...resolved!,
+		...resolved,
 		observers: [...pluginKept],
 	};
 

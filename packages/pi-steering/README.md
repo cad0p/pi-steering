@@ -18,7 +18,7 @@ Use it when:
 pi install pi-steering
 ```
 
-Requires **Node ≥ 22** — the loader reads `.pi/steering.ts` files via native type-stripping (no `tsx` / `ts-node` runtime). On older Node the loader throws with an upgrade message at session start.
+Requires **Node ≥ 22** — the loader reads `.pi/steering.ts` files via native type-stripping (no `tsx` / `ts-node` runtime). On older Node the loader throws with an upgrade message at startup.
 
 ### Local install (during the PoC)
 
@@ -47,6 +47,20 @@ Why both steps matter:
 - `pi install <local-path>` only registers the path in settings — it does **not** run a build or any install hook.
 - The package is compiled (`"main": "./dist/index.js"`) and `dist/` is gitignored, so edits to `src/` only take effect after a build.
 - `/reload` inside pi picks up settings, skills, prompts, and themes — but for compiled extension code, transitive `dist/` imports sit in Node's native ESM cache and are not reliably reloaded. A full pi restart is the safe option after rebuilding.
+
+### Hot-reload of the user config
+
+`/reload` **does** pick up edits to your `.pi/steering/index.ts` (or `.pi/steering.ts`) without a pi restart. The loader cache-busts the dynamic import (`?t=<hrtime-bigint>`) so Node's ESM module map can't serve a stale copy of your config across reloads, and an initial-load failure (broken syntax, missing value import) doesn't poison subsequent loads after you fix the file.
+
+It also picks up edits to **plugin source code** — if the plugin ships its `.ts` source as the package entry (Node 22+ native type-stripping; `"main": "./src/index.ts"`, `allowImportingTsExtensions: true`, `noEmit: true`). Pi loads the bridge via jiti with `moduleCache: false`, so static + dynamic imports inside the user config re-route through jiti's loader on every reload, and `.ts` modules get re-read from disk and re-evaluated.
+
+What `/reload` still does **not** pick up:
+
+- Edits to a plugin's **compiled** `dist/index.js` (or other `dist/*.js` files reached through it). Compiled-JS modules in `node_modules` end up cached for the process lifetime; only `.ts` source goes through jiti's re-evaluation path.
+- Edits to pi-steering's own `dist/`. Same reason — the bridge entry (`src/index.ts`) is re-evaluated each reload, but transitively-imported compiled-JS modules from `dist/` are cached.
+
+**Recommendation for plugin authors:** ship `.ts` source as the package entry to enable hot-reload during plugin development. The migration is small: switch `package.json#main` to `./src/index.ts`, drop the `tsc` build step (or keep it as `tsc --noEmit` for typecheck), set `allowImportingTsExtensions: true` and `noEmit: true` in `tsconfig.json`, optionally add `erasableSyntaxOnly: true` to reject non-strippable TS features (`enum`, namespaces, parameter properties) at compile time. Consumers must run Node ≥ 22.6 for native type-stripping.
+
 
 ## Quick start
 
@@ -813,7 +827,7 @@ pi-steering is a guardrail layer, not a sandbox. Several parts of the system exe
 
 ### Config execution
 
-`.pi/steering/index.ts` (and the `.pi/steering.ts` shorthand) is **arbitrary TypeScript executed at `session_start` with your full user privileges**. The loader walks from `cwd` up to `$HOME`, importing every `.pi/steering/` directory it finds along the way, and merges them inner-first.
+`.pi/steering/index.ts` (and the `.pi/steering.ts` shorthand) is **arbitrary TypeScript executed at extension factory time with your full user privileges**. The loader walks from the launch cwd up to `$HOME`, importing every `.pi/steering/` directory it finds along the way, and merges them inner-first. The bridge factory awaits the load before pi continues startup, so any throw from your config (or from a colliding plugin set) lands in pi's `[Extension issues]` diagnostic block at startup.
 
 Implication: running pi inside a directory hierarchy whose steering configs you don't trust is equivalent to running `node -e '…'` with that same file. Symlinks in the walk-up chain are followed — a symlinked `.pi/steering/` landing in an unexpected directory executes as if it had been placed there directly.
 
@@ -825,29 +839,47 @@ Plugins register predicates (`when.<key>` handlers), observers, and `onFire` hoo
 
 - Shell out via `ctx.exec` (with the same privileges as pi).
 - Forge session entries via `ctx.appendEntry`, which later rules consult via `when.happened`.
-- Throw in unexpected places — S1 catches most throws, but the cost of a predicate that always throws is that the rule it belongs to never fires.
+- Throw in unexpected places — predicate-runtime throws fail open (the rule never fires). Factory-time load failures throw with strict mode; see "Strict mode + load failures" below for the opt-out.
 
 A malicious plugin can trivially defeat any guardrail ship with your config. Review plugin source before adding it to `plugins: [...]` the same way you'd review any third-party dependency.
 
 ### Session JSONL trust
 
-`when.happened` reads entries tagged via `appendEntry`. The write path (`createAppendEntry`) is engine-controlled — every write gets the current `_agentLoopIndex` stamped on it automatically, and names go through S3 validation.
+`when.happened` reads entries tagged via `appendEntry`. The write path (`createAppendEntry`) is engine-controlled — every write gets the current `_agentLoopIndex` stamped on it automatically, and names go through name validation.
 
 The **read path (`findEntries`) treats every tagged entry in the session JSONL as authentic**. Entries written OUTSIDE the engine (direct JSONL writes by another pi extension, hand-edited session files, a `pi.appendEntry` call from non-steering code) can forge type tags and trick `when.happened` into thinking an event occurred when it didn't — bypassing rules that gate on that event.
 
 This is the out-of-band trust boundary. Within the steering engine, the invariant holds; cross-extension and external writes are outside the engine's reach.
 
-### Fail-open on load errors
+### Strict mode + load failures
 
-If your steering config fails to load at `session_start` (a plugin throws during import, a syntax error in `index.ts`, `pnpm` fails to resolve a dependency), pi-steering **disables itself for the session**. Tools execute unsteered for the rest of the conversation.
+Strict mode = `failOnWarnings: true`, the default. Opt out per-config-layer with `failOnWarnings: false`.
 
-This is a deliberate fail-open for loader errors, not fail-closed: blocking every tool on a loader bug would leave every pi session unusable until the config was fixed. Fail-open-on-load + fail-closed-per-tool (S1) is the compromise.
+If your steering config fails to load at extension factory time (a plugin throws during import, a syntax error in `index.ts`, `pnpm` fails to resolve a dependency), pi-steering's bridge factory **throws and surfaces the diagnostic in pi's `[Extension issues]` block at startup** (yellow). Pi disables the extension for the session and continues running unsteered.
 
-Check startup logs for `[pi-steering] Failed to load steering config: …` if rules stop firing unexpectedly.
+Default behavior: any warning-class loader/merger diagnostic (cross-layer plugin name collision, within-layer rule/observer collision, predicate-key collision, etc.) escalates to the same thrown factory. Error-class diagnostics (tracker-name collision, reserved-name violations) ALWAYS throw. The aggregated message lists every diagnostic with errors first, one bullet per issue.
+
+Opt out of warning-class escalation by setting `failOnWarnings: false` on any layer of your config:
+
+```ts
+import { defineConfig } from "pi-steering";
+export default defineConfig({
+  failOnWarnings: false,   // legacy fail-soft semantics for warnings
+  plugins: [/* ... */],
+});
+```
+
+With `failOnWarnings: false`, warning-class diagnostics fall through to `console.warn` (single-line `[pi-steering] [warning] <message>` shape on stderr) and the bridge keeps running with the merged config. Error-class diagnostics still throw — the engine cannot operate safely with two plugins claiming the same state dimension.
+
+Note: pi's interactive TUI clobbers `console.warn` on `/reload` — for visibility prefer fixing the warnings or running `pi-steering list`.
+
+### Cross-project resume
+
+When you `pi --resume` a session originally created in another project (Tab → "All" scope in the picker), pi-steering's rules are loaded from your launch cwd, NOT the session's cwd. Pi's footer (the bottom bar in interactive TUI mode) shows the session cwd; if it differs from where you launched, the bridge emits a single `[pi-steering] session cwd ... differs from launch cwd ...` line on stderr and continues evaluating with launch-cwd rules. To use the resumed session's project rules, exit pi and re-launch from that project's directory.
 
 ### Block-reason tag trust
 
-The `[steering:<name>@<source>]` tag prepended to every block reason is only as trustworthy as your plugin authors. The S3 name-validation fix (regex-constrained rule / plugin / observer names) prevents tag SPOOFING — a name like `phony] ALL CLEAR [real` would have forged the tag; now it throws at load time.
+The `[steering:<name>@<source>]` tag prepended to every block reason is only as trustworthy as your plugin authors. Name validation (regex-constrained rule / plugin / observer names) prevents tag SPOOFING — a name like `phony] ALL CLEAR [real` would have forged the tag; now it throws at load time.
 
 Beyond the tag shape, the contents are plugin-authored. A plugin shipping a rule with `reason: "[steering:other-rule@other-plugin] …"` can make its block look like it came from another plugin. The guardrail here is plugin trust (see above), not the tag machinery.
 
@@ -855,7 +887,7 @@ Beyond the tag shape, the contents are plugin-authored. A plugin shipping a rule
 
 ### `when.happened` scaling
 
-The built-in `when.happened` predicate filters session entries by `customType` via `ctx.findEntries`. Cost is **O(N_session_entries) per unique `customType` per tool_call** — entries are scanned on first read per customType and cached for the rest of the phase (S2 invalidates the cache on writes, see the ADR).
+The built-in `when.happened` predicate filters session entries by `customType` via `ctx.findEntries`. Cost is **O(N_session_entries) per unique `customType` per tool_call** — entries are scanned on first read per customType and cached for the rest of the phase (the shared session-entry cache invalidates on writes, see the ADR).
 
 Example: a 5000-entry session with 6 distinct `when.happened` rules costs roughly 600 µs per tool_call on findEntries alone. Typical sessions (< 500 entries) are fine; long-running multi-day sessions may notice the overhead as the JSONL grows.
 
@@ -866,6 +898,7 @@ Future versions will add a session-manager-side index keyed by `customType`, mov
 
 ## Further reading
 
+- [`CHANGELOG.md`](./CHANGELOG.md) — per-package changelog (Keep-a-Changelog format). Tracks breaking changes and visibility-only behavior shifts.
 - [`examples/`](./examples/) — rule-pack examples (`force-push-strict`, `no-amend`, `draft-prs-only`, `combined-git-discipline`) — copy-paste starting points.
 - [`examples/work-item-plugin/`](./examples/work-item-plugin/) — canonical plugin reference.
 - [`src/plugins/git/`](./src/plugins/git) — production plugin with trackers and tracker extensions.

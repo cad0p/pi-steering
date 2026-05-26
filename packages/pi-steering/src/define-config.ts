@@ -244,12 +244,9 @@ export interface DefineConfigInput<
 		AllObserverNames<P, Inline>,
 		AllWrites<P, R, Inline>
 	>[],
-> {
-	defaultNoOverride?: boolean;
+> extends SteeringConfig {
 	disabledRules?: readonly AllRuleNames<P, R>[];
 	disabledPlugins?: readonly AllPluginNames<P>[];
-	disableDefaults?: boolean;
-	failOnWarnings?: boolean;
 	plugins?: P;
 	rules?: R;
 	observers?: Inline;

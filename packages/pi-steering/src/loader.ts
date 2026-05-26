@@ -2,40 +2,11 @@
 // Part of pi-steering.
 
 /**
- * TS-only config loader — walk-up discovery + merge.
- *
- * Per the accepted ADR ("Design → File layout and loader behavior"):
- *
- *   - Walk up from the session cwd to `$HOME` (inclusive), checking each
- *     layer for `.pi/steering/index.ts` FIRST, then `.pi/steering.ts`.
- *     First hit wins per layer. A bare `<ancestor>/steering.ts` is
- *     intentionally NOT discovered.
- *   - Inner (closer to session cwd) layers take precedence on name
- *     collisions — matches pi's project-local → global convention and
- *     the v1 JSON loader's inner-over-outer semantics.
- *   - Node ≥ 22 required (native type-stripping via `await import()`).
- *     Loader throws a clear "upgrade Node" error on older runtimes.
- *   - File extensions: `.ts` only. Other files under `.pi/steering/` are
- *     warned about and skipped — a user might keep helpers there.
- *
- * Merge semantics ({@link buildConfig}):
- *
- *   - `rules`:            concat; inner layer's rule name overrides outer's.
- *   - `plugins`:          concat in declaration order; inner layers first.
- *   - `observers`:        concat; inner name overrides outer.
- *   - `disabledRules`,
- *     `disabledPlugins`:  union across layers.
- *   - `defaultNoOverride`,
- *     `disableDefaults`:  inner wins if set.
- *
- * Engine hard-errors on tracker NAME collisions (two plugins both
- * registering a tracker called `branch`); soft-warns on all other
- * collisions (rule name, observer name, predicate key, tracker-extension
- * `(tracker, basename)` pair).
- *
- * NOTE: this module loads + merges CONFIG SHAPES. It does NOT execute
- * predicates, observers, or resolve plugin wiring. Those are Phase 3's
- * evaluator concerns.
+ * TS config loader. Walk up cwd → `$HOME`, find `.pi/steering/index.ts`
+ * or `.pi/steering.ts` per layer, dynamic-import each, merge
+ * inner-first. Per-symbol JSDoc carries the contract; see also the
+ * {@link SteeringDiagnostic} / {@link SteeringDiagnosticKind} JSDoc
+ * for the diagnostic stream.
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -61,16 +32,9 @@ import type {
 const MIN_NODE_MAJOR = 22;
 
 /**
- * Runtime check: throws with an actionable message when Node is older
- * than the minimum supported version.
- *
- * Note: native TS type-stripping shipped stable in Node 22.6+. On Node
- * 22.0–22.5, dynamic import of `.ts` files requires the
- * `--experimental-strip-types` runtime flag; without it, imports fail
- * with `ERR_UNKNOWN_FILE_EXTENSION`. The error is caught at the per-layer
- * boundary and logged, but users seeing repeated import failures on Node
- * 22.0–22.5 should either upgrade Node or add the flag to their pi
- * invocation.
+ * Runtime check: throws when Node is older than the minimum required
+ * for native `.ts` import. See README §Install for the supported
+ * Node range.
  */
 function assertNodeVersion(): void {
 	const raw = process.versions.node;
@@ -156,16 +120,9 @@ export function ancestorChain(cwd: string): string[] {
 
 /**
  * Find the config file (if any) for a single layer. Returns the
- * resolved file path plus an optional diagnostic when both candidate
- * forms coexist at the same directory.
- *
- * When BOTH `.pi/steering/index.ts` AND `.pi/steering.ts` exist in
- * the same directory the directory form wins, but ambiguous
- * coexistence is almost always an authoring mistake (forgotten
- * cleanup, stale file). The returned diagnostic gives callers a
- * structured handle on that case so they can plumb it into the
- * aggregate diagnostics array instead of reporting via
- * `console.warn`.
+ * resolved file path and a `layer-form-coexistence` diagnostic when
+ * both `.pi/steering/index.ts` and `.pi/steering.ts` coexist in the
+ * same directory (the directory form wins).
  *
  * Exported for tests.
  */
@@ -210,10 +167,34 @@ export function findConfigFile(dir: string): {
  * default export, or when the default export isn't a plain object —
  * the caller surfaces these per-layer without bringing the whole
  * session down (a single bad layer shouldn't nuke the engine).
+ *
+ * Each call appends a unique `?t=<timestamp>` query string to the
+ * import URL. Node's ESM module map is keyed on URL and persists for
+ * the lifetime of the process, so a plain `await import(url)` returns
+ * the cached module forever — even after `/reload` and even after
+ * the file's content has changed (or, worse, after a previous load
+ * threw, since failed loads are also cached). The cache-bust forces
+ * Node to re-fetch and re-evaluate the file each call. See the
+ * "Hot-reload" section in the README for the limits of this approach
+ * (it does NOT bust transitively-imported plugin packages, which the
+ * user config reaches via static `import` of bare specifiers like
+ * `"pi-steering"` — those still require a full pi restart).
  */
 async function importConfigFile(path: string): Promise<SteeringConfig> {
 	const url = pathToFileURL(path).href;
-	const mod = (await import(url)) as {
+	/**
+	 * Cache-bust query string. `process.hrtime.bigint()` returns
+	 * monotonic nanoseconds since an arbitrary process-relative
+	 * origin — each call returns a strictly greater value, even
+	 * back-to-back within the same millisecond, so no two
+	 * `importConfigFile` invocations ever share a URL. If a future
+	 * Node version changes the cache-bust contract (e.g. ignores
+	 * query strings on `file:` URLs), this will silently revert to
+	 * the cached-forever behavior, and the integration tests in
+	 * `loader.test.ts` will fail.
+	 */
+	const bust = `${url.includes("?") ? "&" : "?"}t=${process.hrtime.bigint()}`;
+	const mod = (await import(url + bust)) as {
 		default?: unknown;
 	} & Record<string, unknown>;
 
@@ -253,11 +234,6 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
  * — the bridge runtime owns the policy decision (throw vs. log) once
  * it has collected diagnostics from every source.
  *
- * Errors within a single layer (bad default export, import failure)
- * are recorded as `kind: "layer-import-failed"` diagnostics and the
- * layer is skipped — a broken ancestor config shouldn't prevent the
- * session from starting with a sensible subset.
- *
  * @throws when Node is older than {@link MIN_NODE_MAJOR}.
  */
 export async function loadConfigs(cwd: string): Promise<{
@@ -274,9 +250,9 @@ export async function loadConfigs(cwd: string): Promise<{
 		if (diagnostic !== null) diagnostics.push(diagnostic);
 		if (file === null) {
 			// Surface stray files under `.pi/steering/` that the loader
-			// won't pick up (e.g. `.js`, `.mjs`, `.mts`). Only check when
-			// the directory exists but has no `index.ts` — otherwise a
-			// project without any steering directory would emit noise.
+			// won't pick up. Only check when the directory exists but has
+			// no `index.ts` — otherwise a project without any steering
+			// directory would emit noise.
 			const steeringDir = join(dir, ".pi", "steering");
 			if (existsSync(steeringDir)) {
 				for (const stray of unexpectedFilesUnderSteering(dir)) {
@@ -293,12 +269,9 @@ export async function loadConfigs(cwd: string): Promise<{
 		try {
 			layers.push(await importConfigFile(file));
 		} catch (err) {
-			// Use err.message (not String(err)) to drop the `Error: ` class
-			// prefix. Native runtime errors (jiti syntax errors,
-			// ERR_UNKNOWN_FILE_EXTENSION) may still embed the path inside
-			// their own message; we accept that duplication rather than
-			// regex-strip a moving-target prefix. The diagnostic's own
-			// `path` field carries the authoritative location.
+			// Use err.message to drop the `Error: ` class prefix; native
+			// runtime errors (jiti syntax errors) may embed their path inside
+			// the message and we accept that duplication.
 			const body = err instanceof Error ? err.message : String(err);
 			diagnostics.push({
 				type: "warning",
@@ -368,13 +341,8 @@ function mergePlugins(
  * collisions stay silent: overriding a rule by name is the documented
  * customization path.
  *
- * The caller is responsible for unioning `config.disabledRules` across
- * layers and passing the result as `disabledRules` (see `buildConfig`).
- * Rules whose name appears in the supplied set are still merged into
- * the output (so downstream surfaces like `pi-steering list` can render
- * them tagged as disabled), but they're EXEMPT from collision
- * detection. Mirrors the `disabledPlugins` handling in
- * {@link mergePlugins}.
+ * Disabled rules are merged but exempt from collision detection (see
+ * {@link mergePlugins} for rationale).
  */
 function mergeRules(
 	layers: readonly SteeringConfig[],
@@ -402,9 +370,6 @@ function mergeRules(
 			if (!byName.has(rule.name)) {
 				byName.set(rule.name, rule);
 			}
-			// Else: an inner layer already placed this rule. We intentionally
-			// do NOT record a diagnostic here — overriding a rule by name is
-			// the documented way to customize behavior from an outer layer.
 		}
 	}
 	return [...byName.values()];
@@ -463,18 +428,10 @@ function mergeStringUnion(
 }
 
 /**
- * Inner-wins boolean merge over walked-up layers — walks `layers`
- * left-to-right (inner-first), returns the first explicit
- * boolean, or `undefined` if no layer sets the field.
- *
- * Used by `buildConfig` to merge `defaultNoOverride`,
- * `disableDefaults`, and `failOnWarnings`, and by
- * `buildSessionRuntime` to peek at `disableDefaults` before
- * deciding whether to inject `DEFAULT_PLUGINS` / `DEFAULT_RULES`.
- *
- * Exported across the loader/internal boundary for that runtime
- * peek; not part of the public package surface (not re-exported
- * from `index.ts`).
+ * Inner-wins boolean merge over walked-up layers. Walks left-to-right
+ * (inner-first); returns the first explicit boolean or `undefined`.
+ * Used by `buildConfig` and the session runtime for the inner-wins
+ * boolean fields. Internal — not in the package's `exports` surface.
  */
 export function mergeBool(
 	layers: readonly SteeringConfig[],
@@ -495,10 +452,7 @@ export function mergeBool(
  * preference.
  *
  * Plugins whose name appears in `disabledPlugins` are skipped before
- * collision detection so a user resolving the error by following the
- * diagnostic's own remedy ("disable one plugin") sees the diagnostic
- * go away in the same edit. Mirrors the disable-then-detect ordering
- * in {@link mergePlugins} and {@link mergeRules}.
+ * collision detection (mirrors {@link mergePlugins}).
  */
 function detectTrackerNameCollisions(
 	plugins: readonly Plugin[],
@@ -552,12 +506,6 @@ export function buildConfig(
 
 	const diagnostics: SteeringDiagnostic[] = [];
 
-	// Compute the disable-sets up-front so the merge passes can drop
-	// disabled entities BEFORE running collision detection. A user
-	// resolving a duplicate-plugin warning by adding the plugin to
-	// `disabledPlugins` should see the warning go away in the same
-	// config edit — detect-then-disable would still surface the
-	// warning even though the disable already settled the conflict.
 	const disabledPluginsList = mergeStringUnion(effective, "disabledPlugins");
 	const disabledRulesList = mergeStringUnion(effective, "disabledRules");
 	const disabledPluginsSet = new Set(disabledPluginsList ?? []);
@@ -603,25 +551,15 @@ export function buildConfig(
  * check sees the SAME diagnostic stream the production runtime sees
  * — no surface is silently skipped.
  *
- * The merge pipeline short-circuits on error-class merge diagnostics
- * (e.g. `tracker-name-collision`) before running `resolvePlugins`,
- * mirroring `buildSessionRuntime`. On short-circuit the returned
- * diagnostics array contains the merge-side stream PLUS the user-
- * config name validation stream (which runs unconditionally so a
- * config with both classes of error surfaces both in one read);
- * otherwise it carries every loader / merger / user-config-name
- * diagnostic in declaration order.
+ * Diagnostics return in declaration order; merge-side errors
+ * short-circuit `resolvePlugins` before its diagnostics are added.
  *
  * Production-strictness divergence: `loadSteeringConfig` does NOT
  * apply the strict-mode `failOnWarnings` throw policy that
  * `buildSessionRuntime` does. The function never throws on
  * diagnostics; embedders apply their own throw + warning policy.
  * See `failOnWarnings` on {@link SteeringConfig} for production-
- * faithful pre-flight semantics. Same shape as the divergence note
- * on `Harness.diagnostics`.
- *
- * The runtime (`buildSessionRuntime`) does not use this wrapper
- * because it needs the raw layer list for the disable-defaults peek.
+ * faithful pre-flight semantics.
  *
  * @throws when Node < {@link MIN_NODE_MAJOR} (propagated from
  * `loadConfigs`).

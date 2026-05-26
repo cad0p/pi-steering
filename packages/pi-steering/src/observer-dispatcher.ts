@@ -107,28 +107,12 @@ export function buildObserverDispatcher(
 	userObservers: readonly Observer[],
 	host: EvaluatorHost,
 ): ObserverDispatcher {
-	// S3: validate user-supplied observer names. Production callers
-	// go through `runMergerPipeline`, which produces an
-	// `invalid-name` diagnostic for malformed user-config names and
-	// aggregates it into the strict-mode throw — so this throw is
-	// unreachable from the standard pipeline. It remains as defense-
-	// in-depth for direct callers (unit tests, future SDK embedders)
-	// that build an observer dispatcher without going through
-	// `buildSessionRuntime` / `loadHarness` / `loadSteeringConfig`.
-	// Plugin observer names are validated inside `resolvePlugins`
-	// and surface through the diagnostic stream.
-	//
-	// Latent mis-attribution risk: this loop iterates `userObservers`
-	// and labels every offender `(user config)`. If a direct caller
-	// ever forwards a plugin/default-shipped observer through
-	// `userObservers` (for testing, embedding, or a future
-	// orchestrator that consolidates observer streams) and that
-	// observer ever lands with a malformed name, this throw will
-	// mis-label it as `(user config)`. The `validateUserConfigNames`
-	// helper at the production pipeline correctly partitions user
-	// vs. plugin/default; this defensive path does not. Defaults are
-	// package-controlled and reviewed, so the case is currently
-	// unreachable.
+	// S3 defense-in-depth: validate user-authored observer names so a
+	// malformed name surfaces with the same `(user config)` label as
+	// production diagnostics. Production routes through
+	// `runMergerPipeline`'s `invalid-name` diagnostic; this throw
+	// covers direct-caller paths (unit tests, SDK embedders).
+	// See ./INVARIANTS.md for the S/E tag glossary.
 	for (const o of userObservers) {
 		const d = validateName("observer", o.name, "user config");
 		if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);
@@ -159,14 +143,13 @@ async function dispatchEvent(
 	observers: readonly Observer[],
 	host: EvaluatorHost,
 ): Promise<void> {
-	// Top-level fail-open wrap (S1 follow-up, promised in d728ef0).
-	// Per-observer throws are already isolated in the inner loop; this
-	// outer wrap exists so a throw in the dispatch SCAFFOLDING (e.g. a
-	// session-JSONL read blowing up inside `createFindEntries`, or an
-	// unexpected shape on the incoming event) is logged rather than
-	// propagating back into pi's `tool_result` hook. Observers are
-	// best-effort state recorders — a broken engine should not take
-	// down the tool_result pipeline.
+	// Top-level fail-open wrap. Per-observer throws are already
+	// isolated in the inner loop; this outer wrap exists so a throw in
+	// the dispatch SCAFFOLDING (e.g. a session-JSONL read blowing up
+	// inside `createFindEntries`, or an unexpected shape on the
+	// incoming event) is logged rather than propagating back into pi's
+	// `tool_result` hook. Observers are best-effort state recorders —
+	// a broken engine should not take down the tool_result pipeline.
 	try {
 		await dispatchEventInner(event, ctx, agentLoopIndex, observers, host);
 	} catch (err) {

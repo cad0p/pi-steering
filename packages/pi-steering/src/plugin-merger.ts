@@ -54,20 +54,18 @@ import {
 
 /**
  * Single source of truth for the `tracker-name-collision` diagnostic
- * message text. Both `loader.ts:detectTrackerNameCollisions` and
- * `plugin-merger.ts:resolvePlugins` call this so a wording update
- * lands in one place; `runMergerPipeline`'s short-circuit means a
- * given session sees only one of the two emissions, but the strings
- * stay in lock-step.
+ * message. Both `loader.ts:detectTrackerNameCollisions` and
+ * `plugin-merger.ts:resolvePlugins` call this so the wording stays in
+ * lock-step.
  */
 export function formatTrackerNameCollisionMessage(
-	prior: string,
-	current: string,
+	firstRegisteredPlugin: string,
+	secondRegisteredPlugin: string,
 	trackerName: string,
 ): string {
 	return (
-		`tracker name collision: both plugins "${prior}" and ` +
-		`"${current}" register a tracker called "${trackerName}". ` +
+		`tracker name collision: both plugins "${firstRegisteredPlugin}" and ` +
+		`"${secondRegisteredPlugin}" register a tracker called "${trackerName}". ` +
 		"Two plugins claiming the same state dimension is always a " +
 		"bug — rename one tracker or disable one plugin."
 	);
@@ -76,6 +74,8 @@ export function formatTrackerNameCollisionMessage(
 // ---------------------------------------------------------------------------
 // Name validation (S3)
 // ---------------------------------------------------------------------------
+//
+// See ./INVARIANTS.md for the S/E tag glossary.
 
 /**
  * Allowed shape for rule / plugin / observer names. Letters, digits,
@@ -142,7 +142,7 @@ export function validateName(
  * Validate the `name` field on every user-config rule and observer.
  * Plugin-shipped rule / observer / plugin names are validated inside
  * {@link resolvePlugins}; user-config rules and observers reach
- * {@link validateName} only at session_start (via
+ * {@link validateName} only at factory time (via
  * `buildEvaluator` / `buildObserverDispatcher`'s build-time throw).
  *
  * The CLI's `pi-steering list` pre-flight surface uses this helper

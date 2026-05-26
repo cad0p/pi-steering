@@ -18,8 +18,6 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	buildSessionRuntime,
@@ -27,7 +25,10 @@ import {
 	formatSingleLineDiagnostic,
 } from "./session-runtime.ts";
 import type { SteeringDiagnostic } from "../schema.ts";
-import { useIsolatedHome } from "../__test-helpers__.ts";
+import {
+	useIsolatedHome,
+	writeSteeringSingleFileConfig,
+} from "../__test-helpers__.ts";
 
 /** Minimal evaluator host; the strict-mode tests don't drive evaluation. */
 const noopHost = {
@@ -39,11 +40,6 @@ const noopHost = {
 	}),
 	appendEntry: () => {},
 };
-
-function writeSteeringConfig(dir: string, body: string): void {
-	mkdirSync(join(dir, ".pi"), { recursive: true });
-	writeFileSync(join(dir, ".pi", "steering.ts"), body, "utf8");
-}
 
 describe("buildSessionRuntime: strict-mode contract", () => {
 	let tmpHome: string;
@@ -85,7 +81,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// would be hard to stage from a written config; instead, write
 		// a config layer that declares two within-layer duplicate rules
 		// (rule-name-collision, type:'warning').
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -107,7 +103,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 	});
 
 	it("does NOT throw on a warning-class diagnostic when failOnWarnings: false; emits to console.warn", async () => {
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -137,7 +133,15 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// diagnostic; the strict-mode opt-out applies only to warnings,
 		// not errors. Setting `failOnWarnings: false` does NOT change
 		// the throw — errors always escalate.
-		writeSteeringConfig(
+		//
+		// Single-emission lock: both `buildConfig` and `resolvePlugins`
+		// independently detect tracker-name collisions. The runtime's
+		// short-circuit between the two passes (when merge-side has any
+		// error-class diagnostic) drops the second detection so the
+		// aggregated message lists the collision exactly once — the
+		// header reads `1 config issue:` (singular), and a regex count
+		// of the bullet line confirms there's no duplicate.
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -152,8 +156,17 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		await assert.rejects(
 			() => buildSessionRuntime(tmpHome, noopHost),
 			(err: Error) => {
+				assert.match(err.message, /^1 config issue:/);
 				assert.match(err.message, /\[error\]/);
 				assert.match(err.message, /tracker name collision/);
+				const collisionLines = err.message.match(
+					/tracker name collision/g,
+				);
+				assert.equal(
+					collisionLines?.length,
+					1,
+					`expected exactly one tracker-name-collision bullet (short-circuit drops the second emission); got ${collisionLines?.length}: ${err.message}`,
+				);
 				return true;
 			},
 		);
@@ -167,7 +180,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// shape the loader's plugin-name validation accepts — here we
 		// trigger the merger via a malformed RULE name shipped by an
 		// otherwise-valid plugin.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -202,7 +215,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// One error (tracker collision) + one warning (rule
 		// collision). Aggregated message lists the error before the
 		// warning.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -243,7 +256,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// `N config issue:` shape; production callers and tests then had
 		// to handle two distinct error formats for what is structurally
 		// the same kind of issue.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -279,7 +292,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// dropped). Confirms the user-config name diagnostic flows through
 		// the same aggregation path as everything else — single throw,
 		// errors-first ordering.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -331,7 +344,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 		// malformed user-config rule name. Pins that user-config name
 		// validation runs unconditionally so both surface together
 		// rather than the user seeing them on separate runs.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
@@ -407,14 +420,14 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 		// `disabledRules`"). The runtime filters `merged.rules` against
 		// `disabledRules` BEFORE handing the union to
 		// `dropUnusedObservers`, so an observer whose only consumer is
-		// disabled gets dropped at session_start. This test pins the
+		// disabled gets dropped at extension factory time. This test pins the
 		// production code path — a future refactor that swaps the
 		// runtime's filter order (filtering after observer-drop instead
 		// of before, or skipping the filter entirely) would let
 		// `pi-steering list` continue to surface the breadcrumb
 		// correctly while production silently fails to drop the
 		// observer.
-		writeSteeringConfig(
+		writeSteeringSingleFileConfig(
 			tmpHome,
 			`export default {
 				disableDefaults: true,
@@ -449,6 +462,47 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 		assert.ok(
 			breadcrumb !== undefined,
 			`expected observer-drop breadcrumb on console.info (consumer rule was disabled, observer should be reported as dropped); got: ${JSON.stringify(infos)}`,
+		);
+	});
+
+	it("does NOT drop the observer when the consumer rule is enabled (inverse parity)", async () => {
+		// Cross-surface symmetry with the inverse-parity test in
+		// `bin/pi-steering.test.ts` (O1 in INVARIANTS.md): both surfaces
+		// must agree that an enabled consumer keeps its observer alive.
+
+		writeSteeringSingleFileConfig(
+			tmpHome,
+			`export default {
+				disableDefaults: true,
+				observers: [
+					{
+						name: "obs-x",
+						writes: ["X"],
+						onResult: () => {},
+					},
+				],
+				rules: [
+					{
+						name: "consumer",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+						when: { happened: { event: "X" } },
+					},
+				],
+			};`,
+		);
+		const result = await buildSessionRuntime(tmpHome, noopHost);
+		assert.ok(result.evaluator);
+		assert.ok(result.dispatcher);
+		const breadcrumb = infos.find((m) =>
+			/\[pi-steering\] observer 'obs-x' dropped/.test(m),
+		);
+		assert.equal(
+			breadcrumb,
+			undefined,
+			`expected NO observer-drop breadcrumb (consumer rule is enabled, observer is consumed); got: ${JSON.stringify(infos)}`,
 		);
 	});
 });
@@ -526,7 +580,7 @@ describe("formatAggregatedDiagnostics: rule-based spec", () => {
 });
 
 describe("formatSingleLineDiagnostic: rule-based spec", () => {
-	it("renders a warning with a path prefix and no severity tag", () => {
+	it("renders a warning with a [warning] severity tag and a path prefix", () => {
 		const d: SteeringDiagnostic = {
 			type: "warning",
 			kind: "layer-import-failed",
@@ -535,11 +589,11 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
 		};
 		assert.equal(
 			formatSingleLineDiagnostic(d),
-			"[pi-steering] /u/.pi/steering.ts: failed to import: SyntaxError",
+			"[pi-steering] [warning] /u/.pi/steering.ts: failed to import: SyntaxError",
 		);
 	});
 
-	it("renders a warning without a path prefix when path is unset", () => {
+	it("renders a warning with a [warning] severity tag and no path prefix", () => {
 		const d: SteeringDiagnostic = {
 			type: "warning",
 			kind: "plugin-name-collision",
@@ -547,11 +601,11 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
 		};
 		assert.equal(
 			formatSingleLineDiagnostic(d),
-			'[pi-steering] duplicate plugin "git"; keeping first-registered entry.',
+			'[pi-steering] [warning] duplicate plugin "git"; keeping first-registered entry.',
 		);
 	});
 
-	it("renders an error with an ERROR: severity prefix and a path prefix", () => {
+	it("renders an error with an [error] severity tag and a path prefix", () => {
 		const d: SteeringDiagnostic = {
 			type: "error",
 			kind: "layer-import-failed",
@@ -560,11 +614,11 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
 		};
 		assert.equal(
 			formatSingleLineDiagnostic(d),
-			"[pi-steering] ERROR: /u/.pi/steering.ts: failed to import: SyntaxError",
+			"[pi-steering] [error] /u/.pi/steering.ts: failed to import: SyntaxError",
 		);
 	});
 
-	it("renders an error with an ERROR: severity prefix and no path prefix", () => {
+	it("renders an error with an [error] severity tag and no path prefix", () => {
 		const d: SteeringDiagnostic = {
 			type: "error",
 			kind: "tracker-name-collision",
@@ -572,7 +626,7 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
 		};
 		assert.equal(
 			formatSingleLineDiagnostic(d),
-			'[pi-steering] ERROR: tracker name collision: plugins "a" and "b"',
+			'[pi-steering] [error] tracker name collision: plugins "a" and "b"',
 		);
 	});
 });

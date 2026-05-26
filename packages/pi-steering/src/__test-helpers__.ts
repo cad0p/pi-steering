@@ -2,7 +2,7 @@
 // Part of pi-steering.
 
 /**
- * Shared test-double helpers for v2 suites.
+ * Shared test-double helpers.
  *
  * `evaluator.test.ts` and `observer-dispatcher.test.ts` both need:
  *
@@ -28,7 +28,7 @@ import type {
 	ExecResult as PiExecResult,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach } from "node:test";
@@ -72,6 +72,59 @@ export function useIsolatedHome(
 		else process.env["HOME"] = priorHome;
 		rmSync(tmp, { recursive: true, force: true });
 	});
+}
+
+/**
+ * Like {@link useIsolatedHome} but also chdirs into the scratch dir, so factory-time tests find the per-test config via the loader walk-up. macOS tmpdir is a symlink; canonicalized via `realpathSync` so cwd-mismatch tests don't see false-divergence.
+ */
+export function useScratchHome(
+	prefix: string,
+	onReady?: (tmp: string) => void,
+): void {
+	let tmp: string;
+	let priorHome: string | undefined;
+	let priorCwd: string;
+	beforeEach(() => {
+		priorCwd = process.cwd();
+		tmp = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+		priorHome = process.env["HOME"];
+		process.env["HOME"] = tmp;
+		process.chdir(tmp);
+		onReady?.(tmp);
+	});
+	afterEach(() => {
+		process.chdir(priorCwd);
+		if (priorHome === undefined) delete process.env["HOME"];
+		else process.env["HOME"] = priorHome;
+		rmSync(tmp, { recursive: true, force: true });
+	});
+}
+
+// ---------------------------------------------------------------------------
+// Steering-config fixture writers
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a single-file steering config to `<dir>/.pi/steering.ts`.
+ * `body` is the full module source (must include `export default`).
+ * Used by suites whose fixtures embed regex literals or other
+ * non-JSON-friendly module shapes inline.
+ */
+export function writeSteeringSingleFileConfig(dir: string, body: string): void {
+	mkdirSync(join(dir, ".pi"), { recursive: true });
+	writeFileSync(join(dir, ".pi", "steering.ts"), body, "utf8");
+}
+
+/**
+ * Write a directory-form steering config to
+ * `<dir>/.pi/steering/index.ts`. `body` is the full module source
+ * (must include `export default`). Mirrors the layout the bin tests
+ * use for their isolated `pi-steering` invocations.
+ */
+export function writeSteeringDirConfig(dir: string, body: string): void {
+	const pi = join(dir, ".pi", "steering");
+	mkdirSync(pi, { recursive: true });
+	writeFileSync(join(pi, "index.ts"), body, "utf8");
 }
 
 // ---------------------------------------------------------------------------

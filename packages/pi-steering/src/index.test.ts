@@ -2,7 +2,7 @@
 // Part of pi-steering.
 
 /**
- * End-to-end exercise of the pi extension wiring in v2 `register()`.
+ * End-to-end exercise of the pi extension wiring in `register()`.
  *
  * Uses an in-memory mock of `ExtensionAPI` that captures `on(...)`
  * handlers and records `appendEntry(...)` + `exec(...)` calls. We then
@@ -17,25 +17,25 @@
  *   - the walk-up TS-config loader: {@link buildSessionRuntime} reads
  *     `.pi/steering.ts` from an isolated `$HOME`.
  *
- * Why not reuse the v2 evaluator / dispatcher tests directly? Because
- * `register()` wires lifecycle events + config loading + fail-open
- * error handling into a single surface. None of the unit suites cover
- * the glue. Phase 3c is exactly this glue — hence end-to-end here.
+ * The bridge factory's lifecycle wiring + config-loading glue isn't
+ * covered by the unit suites; this file is the only end-to-end check.
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import type {
-	ExtensionContext,
+	ExtensionAPI,
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import register from "./index.ts";
-import { buildSessionRuntime } from "./internal/session-runtime.ts";
-import { useIsolatedHome } from "./__test-helpers__.ts";
+import {
+	makeCtx,
+	useScratchHome,
+	writeSteeringSingleFileConfig,
+} from "./__test-helpers__.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Mock ExtensionAPI                                                          */
@@ -68,16 +68,12 @@ interface MockPi {
 	>;
 	entries: Entry[];
 	execCalls: Array<{ cmd: string; args: string[] }>;
-	warnings: string[];
-	errors: string[];
 }
 
 function makeMockPi(): MockPi {
 	const handlers: MockPi["handlers"] = {};
 	const entries: Entry[] = [];
 	const execCalls: MockPi["execCalls"] = [];
-	const warnings: string[] = [];
-	const errors: string[] = [];
 	const api = {
 		on(event: EventName, handler: (e: unknown, ctx: unknown) => unknown) {
 			handlers[event] = handler;
@@ -90,7 +86,7 @@ function makeMockPi(): MockPi {
 			return { stdout: "", stderr: "", code: 0, killed: false };
 		},
 	};
-	return { api, handlers, entries, execCalls, warnings, errors };
+	return { api, handlers, entries, execCalls };
 }
 
 function fireAgentStart(mock: MockPi): void {
@@ -99,27 +95,12 @@ function fireAgentStart(mock: MockPi): void {
 	h({ type: "agent_start" }, {});
 }
 
-/**
- * Build a minimal ExtensionContext stub. Only `cwd` + `sessionManager`
- * are populated — the evaluator + dispatcher read those; everything
- * else throws on access.
- */
-function makeExtensionCtx(cwd: string): ExtensionContext {
-	return {
-		cwd,
-		sessionManager: {
-			getEntries: () => [],
-		} as unknown as ExtensionContext["sessionManager"],
-	} as ExtensionContext;
-}
-
 async function fireSessionStart(mock: MockPi, cwd: string): Promise<void> {
 	const h = mock.handlers.session_start;
 	if (!h) throw new Error("session_start handler not registered");
-	// Extension's session_start returns a Promise; await it.
 	await h(
 		{ type: "session_start", reason: "startup" },
-		makeExtensionCtx(cwd),
+		makeCtx(cwd),
 	);
 }
 
@@ -136,7 +117,7 @@ async function fireBashToolCall(
 		toolCallId: "call-1",
 		input: { command },
 	};
-	const r = await h(event, makeExtensionCtx(cwd));
+	const r = await h(event, makeCtx(cwd));
 	return r as ToolCallEventResult | undefined;
 }
 
@@ -154,7 +135,7 @@ async function fireWriteToolCall(
 		toolCallId: "call-2",
 		input: { path, content },
 	};
-	const r = await h(event, makeExtensionCtx(cwd));
+	const r = await h(event, makeCtx(cwd));
 	return r as ToolCallEventResult | undefined;
 }
 
@@ -172,7 +153,7 @@ async function fireEditToolCall(
 		toolCallId: "call-3",
 		input: { path, edits: [...edits] },
 	};
-	const r = await h(event, makeExtensionCtx(cwd));
+	const r = await h(event, makeCtx(cwd));
 	return r as ToolCallEventResult | undefined;
 }
 
@@ -193,7 +174,7 @@ async function fireBashToolResult(
 		isError: exitCode !== 0,
 		details: { exitCode },
 	} as unknown as ToolResultEvent;
-	await h(event, makeExtensionCtx(cwd));
+	await h(event, makeCtx(cwd));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -202,9 +183,15 @@ async function fireBashToolResult(
 
 let tmpHome: string;
 
-/** Bind a fresh `$HOME` for each test in the enclosing `describe`. */
-function useScratchHome(): void {
-	useIsolatedHome("pi-steering-register-v2-", (t) => {
+/**
+ * Bind a fresh `$HOME` per test AND chdir into it via the shared
+ * {@link useScratchHome} helper. The bridge factory eagerly loads
+ * from `process.cwd()` at register time, so tests must launch from
+ * the scratch home for the loader walk-up to find the per-test
+ * config.
+ */
+function useRegisterScratchHome(): void {
+	useScratchHome("pi-steering-register-", (t) => {
 		tmpHome = t;
 	});
 }
@@ -215,24 +202,22 @@ function useScratchHome(): void {
  * wrapper) so call sites read as declarative configs.
  */
 function writeSteeringConfig(dir: string, body: string): void {
-	mkdirSync(join(dir, ".pi"), { recursive: true });
-	writeFileSync(
-		join(dir, ".pi", "steering.ts"),
+	writeSteeringSingleFileConfig(
+		dir,
 		`// Generated by index.test.ts\nexport default ${body};\n`,
-		"utf8",
 	);
 }
 
 /* -------------------------------------------------------------------------- */
-/* session_start + tool_call with default rules                               */
+/* factory-time-load + tool_call with default rules                           */
 /* -------------------------------------------------------------------------- */
 
 describe("register(): default rules wiring", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("blocks `git push --force` via default rule", async () => {
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(mock, "git push --force", tmpHome);
@@ -243,7 +228,7 @@ describe("register(): default rules wiring", () => {
 
 	it("allows `git push --force-with-lease`", async () => {
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -256,7 +241,7 @@ describe("register(): default rules wiring", () => {
 
 	it("blocks `git push --force` behind `sh -c` wrapper", async () => {
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -270,7 +255,7 @@ describe("register(): default rules wiring", () => {
 
 	it("blocks `git -C /other/dir push --force` (pre-subcommand flag bypass)", async () => {
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -284,7 +269,7 @@ describe("register(): default rules wiring", () => {
 
 	it("does NOT block `echo 'git push --force'` (echo args are not AST-extracted)", async () => {
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -297,7 +282,7 @@ describe("register(): default rules wiring", () => {
 
 	it("blocks `rm -rf /` and ignores override (noOverride: true)", async () => {
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -317,7 +302,7 @@ describe("register(): default rules wiring", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): inline override escape hatch", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("accepts override comment, does not block, appends audit entry", async () => {
 		// The v2 default is `defaultNoOverride: true` (fail-closed per
@@ -327,7 +312,7 @@ describe("register(): inline override escape hatch", () => {
 		writeSteeringConfig(tmpHome, "{ defaultNoOverride: false }");
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -356,7 +341,7 @@ describe("register(): inline override escape hatch", () => {
 		writeSteeringConfig(tmpHome, "{ defaultNoOverride: false }");
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -372,7 +357,7 @@ describe("register(): inline override escape hatch", () => {
 		// NO config layer → defaultNoOverride defaults to `true`. The
 		// override comment is ignored and the block fires.
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(
@@ -393,7 +378,7 @@ describe("register(): inline override escape hatch", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): user-defined rules via .pi/steering.ts", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("blocks a write to a .env file via a user-defined write rule", async () => {
 		writeSteeringConfig(
@@ -412,7 +397,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 		);
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireWriteToolCall(
@@ -442,7 +427,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 		);
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireEditToolCall(
@@ -473,7 +458,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 		);
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		// cwd does not match → should NOT block.
@@ -496,7 +481,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 		writeSteeringConfig(tmpHome, '{ disabledRules: ["no-force-push"] }');
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		// Rule disabled → push --force no longer blocked.
@@ -513,7 +498,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 		writeSteeringConfig(tmpHome, "{ disableDefaults: true }");
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		assert.equal(
@@ -533,7 +518,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): observer dispatcher wiring", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("runs observers on matching tool_result events", async () => {
 		// Use a module-scoped sentinel so the dynamically-imported config
@@ -556,7 +541,7 @@ describe("register(): observer dispatcher wiring", () => {
 		);
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		await fireBashToolResult(
@@ -596,7 +581,7 @@ describe("register(): observer dispatcher wiring", () => {
 		);
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		await fireBashToolResult(
@@ -618,11 +603,11 @@ describe("register(): observer dispatcher wiring", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): unrelated tool calls pass through", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("returns undefined for a tool call that matches no rule", async () => {
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const result = await fireBashToolCall(mock, "ls -la", tmpHome);
@@ -631,7 +616,7 @@ describe("register(): unrelated tool calls pass through", () => {
 
 	it("returns undefined for a `read` tool call (not in any rule's tool set)", async () => {
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const h = mock.handlers.tool_call;
@@ -642,7 +627,7 @@ describe("register(): unrelated tool calls pass through", () => {
 			toolCallId: "call-read",
 			input: { path: "/etc/passwd" },
 		};
-		const result = await h(event, makeExtensionCtx(tmpHome));
+		const result = await h(event, makeCtx(tmpHome));
 		assert.equal(result, undefined);
 	});
 });
@@ -652,7 +637,7 @@ describe("register(): unrelated tool calls pass through", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("register(): agent_start bumps agentLoopIndex threaded into evaluator", () => {
-	useScratchHome();
+	useRegisterScratchHome();
 
 	it("passes the current agentLoopIndex into predicate context", async () => {
 		// Rule uses when.condition to assert agentLoopIndex threading.
@@ -680,7 +665,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 		);
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		// Each agent_start bumps the engine's internal counter by 1.
@@ -700,7 +685,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 		);
 	});
 
-	it("tool_call fired before any agent_start sees agentLoopIndex === 0 (G6)", async () => {
+	it("tool_call fired before any agent_start sees agentLoopIndex === 0", async () => {
 		// Pins the counter's initial value. The counter bumps from 0 to 1
 		// on the first agent_start; a tool_call that happens BEFORE any
 		// agent_start (background tool, prompt autocompletion, extension
@@ -729,7 +714,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 		);
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 		// Intentionally skip fireAgentStart.
 		await fireBashToolCall(mock, "echo hi", tmpHome);
@@ -742,7 +727,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 		);
 	});
 
-	it("tool_call + tool_result in the same loop share the same agentLoopIndex (G6)", async () => {
+	it("tool_call + tool_result in the same loop share the same agentLoopIndex", async () => {
 		// The predicate captures the agentLoopIndex it sees; the
 		// observer's auto-tagged write records the loop index the
 		// dispatcher saw. Both must agree, end-to-end via register().
@@ -777,7 +762,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 		);
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 		fireAgentStart(mock); // loop 1
 		fireAgentStart(mock); // loop 2
@@ -802,68 +787,18 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 });
 
 /* -------------------------------------------------------------------------- */
-/* Fail-open on config load error                                             */
+/* register() coverage — two-pass disableDefaults merge through               */
+/* buildSessionRuntime                                                        */
 /* -------------------------------------------------------------------------- */
 
-describe("register(): broken config layer", () => {
-	useScratchHome();
-
-	it("strict mode (default) throws on a broken config layer; bridge disables itself and tool calls pass through", async () => {
-		// Under the strict-mode contract, the loader's per-layer import
-		// failure surfaces as a warning-class diagnostic that escalates
-		// to a thrown error. The bridge's session_start catch logs the
-		// throw and resets evaluator + dispatcher to null — every
-		// subsequent tool call passes through with no verdict. Once the
-		// bridge moves to factory-time loading, this throw will land in
-		// pi's [Extension issues] block; for now it surfaces only on
-		// stderr.
-		mkdirSync(join(tmpHome, ".pi"), { recursive: true });
-		writeFileSync(
-			join(tmpHome, ".pi", "steering.ts"),
-			"export default this is not valid typescript;\n",
-			"utf8",
-		);
-
-		// Suppress the expected console.error / console.info emissions.
-		const origWarn = console.warn;
-		const origError = console.error;
-		const origInfo = console.info;
-		console.warn = () => {};
-		console.error = () => {};
-		console.info = () => {};
-
-		try {
-			const mock = makeMockPi();
-			register(mock.api as never);
-			await fireSessionStart(mock, tmpHome);
-
-			const result = await fireBashToolCall(
-				mock,
-				"git push --force",
-				tmpHome,
-			);
-			// Strict mode aborted setup; tool calls pass through.
-			assert.equal(result, undefined);
-		} finally {
-			console.warn = origWarn;
-			console.error = origError;
-			console.info = origInfo;
-		}
-	});
-});
-
-/* -------------------------------------------------------------------------- */
-/* buildSessionRuntime direct coverage (two-pass disableDefaults merge)       */
-/* -------------------------------------------------------------------------- */
-
-describe("buildSessionRuntime: two-pass disableDefaults merge", () => {
-	useScratchHome();
+describe("register(): two-pass disableDefaults merge", () => {
+	useRegisterScratchHome();
 
 	it("inner `disableDefaults: true` wins — defaults are NOT injected", async () => {
 		writeSteeringConfig(tmpHome, "{ disableDefaults: true }");
 
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		// `disableDefaults: true` in the user layer suppresses
@@ -876,7 +811,7 @@ describe("buildSessionRuntime: two-pass disableDefaults merge", () => {
 	it("no `disableDefaults` — DEFAULT_RULES are injected", async () => {
 		// No config file at all.
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		const pushResult = await fireBashToolCall(
@@ -895,7 +830,7 @@ describe("buildSessionRuntime: two-pass disableDefaults merge", () => {
 	it("`disabledRules` filters default rules out of the merged config", async () => {
 		writeSteeringConfig(tmpHome, '{ disabledRules: ["no-force-push"] }');
 		const mock = makeMockPi();
-		register(mock.api as never);
+		await register(mock.api as ExtensionAPI);
 		await fireSessionStart(mock, tmpHome);
 
 		// `no-force-push` is disabled — the rule that would have blocked

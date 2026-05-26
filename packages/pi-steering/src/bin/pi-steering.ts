@@ -220,11 +220,8 @@ async function runList(args: string[]): Promise<number> {
 		}
 	}
 
-	// Walk up from cwd and merge. We intentionally DON'T inject
-	// DEFAULT_PLUGINS / DEFAULT_RULES here — the `list` output should
-	// reflect what the USER authored, not the engine's built-ins. Users
-	// wanting to see built-ins can check the package README or run with
-	// a verbose flag we can add later.
+	// Walk up from cwd and merge. CLI deliberately omits
+	// DEFAULT_PLUGINS / DEFAULT_RULES; runtime injects them.
 	let layers;
 	let loaderDiagnostics: readonly SteeringDiagnostic[] = [];
 	try {
@@ -248,6 +245,10 @@ async function runList(args: string[]): Promise<number> {
 	// class diagnostic was emitted so the CLI can exit non-zero, giving
 	// CI lint pipelines a binary signal that the config would refuse to
 	// start in production.
+	//
+	// CLI deliberately renders errors inline rather than via the
+	// aggregated thrown-Error form: the audience is a CI grep target,
+	// not a human reading a single Error.message.
 	let sawError = false;
 	const recordDiagnostic = (d: SteeringDiagnostic) => {
 		if (d.type === "error") sawError = true;
@@ -274,19 +275,6 @@ async function runList(args: string[]): Promise<number> {
 		recordDiagnostic(d);
 	}
 
-	// User-config rule + observer name validation runs inside
-	// `runMergerPipeline` (unconditionally, between `buildConfig` and
-	// the merge short-circuit) so every surface — production runtime,
-	// `loadHarness`, and this CLI — gets the same `invalid-name`
-	// diagnostic stream. When the merge step short-circuits on an
-	// error-class diagnostic (e.g. `tracker-name-collision`), the
-	// CLI still surfaces the user-config name validation diagnostics
-	// alongside the merge error so a config with both classes of
-	// problem flags both in one run. Plugin-shipped name validation
-	// (which lives inside `resolvePlugins`) IS gated behind the
-	// short-circuit, since `resolvePlugins` is the surface that
-	// consumes plugin names.
-
 	if (format === "json") {
 		process.stdout.write(
 			`${JSON.stringify(renderListJSON(config), null, 2)}\n`,
@@ -298,25 +286,12 @@ async function runList(args: string[]): Promise<number> {
 }
 
 /**
- * Run the merge+resolve pipeline through the shared
- * {@link runMergerPipeline} helper, intercepting
- * `console.info` for the duration so the plugin-merger's disabled-
- * plugin / disabled-rule breadcrumbs go to stderr instead of
- * contaminating stdout (which carries the structured `--format=json`
- * output). The save/restore is wrapped in `try`/`finally` so a throw
- * inside the helper still restores the original `console.info`.
- *
- * After the pipeline completes successfully (no merge short-circuit),
- * also run `dropUnusedObservers` over the plugin-merger and
- * user-authored observer streams. The runtime emits an info-level
- * breadcrumb for each dropped observer ("observer 'X' dropped; its
- * writes (...) are not consumed by any rule"). The CLI's
- * `console.info` interception captures those breadcrumbs onto stderr
- * for the same reason as the disabled-plugin breadcrumbs above:
- * stdout stays clean for `--format=json` consumers, but a plugin
- * author running `pi-steering list` to debug "why isn't my observer
- * firing?" sees the same breadcrumb the production runtime would
- * have emitted at session_start.
+ * CLI variant of the merge pipeline. Redirects `console.info`
+ * breadcrumbs (disabled-plugin / disabled-rule / dropped-observer)
+ * onto stderr so stdout stays clean for `--format=json`. After
+ * {@link runMergerPipeline}, mirrors {@link buildSessionRuntime}'s
+ * `disabledRules` filter + `finalizePluginState` so `pi-steering
+ * list` reports the same observer-drop set production sees.
  */
 function runCliMergeWithInfoCapture(
 	layers: readonly SteeringConfig[],
@@ -334,13 +309,8 @@ function runCliMergeWithInfoCapture(
 			undefined,
 			EVALUATOR_BUILTIN_TRACKERS,
 		);
-		// Mirror `buildSessionRuntime`'s observer-drop pass so the CLI
-		// surfaces the same `[pi-steering] observer 'X' dropped` info-
-		// level breadcrumbs the production runtime emits at
-		// session_start. Skipped on merge short-circuit (`resolved ===
-		// null`) — without a resolved plugin state we can't enumerate
-		// plugin-side observers, and the merge-error short-circuit
-		// suppresses downstream surfaces uniformly.
+		// Skipped on merge short-circuit; without resolved we can't
+		// enumerate plugin-side observers.
 		if (resolved !== null) {
 			const userObservers = merged.observers ?? [];
 			// Mirror the runtime's `disabledRules` filter (see

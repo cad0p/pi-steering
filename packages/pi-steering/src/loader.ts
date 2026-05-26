@@ -167,10 +167,34 @@ export function findConfigFile(dir: string): {
  * default export, or when the default export isn't a plain object —
  * the caller surfaces these per-layer without bringing the whole
  * session down (a single bad layer shouldn't nuke the engine).
+ *
+ * Each call appends a unique `?t=<timestamp>` query string to the
+ * import URL. Node's ESM module map is keyed on URL and persists for
+ * the lifetime of the process, so a plain `await import(url)` returns
+ * the cached module forever — even after `/reload` and even after
+ * the file's content has changed (or, worse, after a previous load
+ * threw, since failed loads are also cached). The cache-bust forces
+ * Node to re-fetch and re-evaluate the file each call. See the
+ * "Hot-reload" section in the README for the limits of this approach
+ * (it does NOT bust transitively-imported plugin packages, which the
+ * user config reaches via static `import` of bare specifiers like
+ * `"pi-steering"` — those still require a full pi restart).
  */
 async function importConfigFile(path: string): Promise<SteeringConfig> {
 	const url = pathToFileURL(path).href;
-	const mod = (await import(url)) as {
+	/**
+	 * Cache-bust query string. `process.hrtime.bigint()` returns
+	 * monotonic nanoseconds since an arbitrary process-relative
+	 * origin — each call returns a strictly greater value, even
+	 * back-to-back within the same millisecond, so no two
+	 * `importConfigFile` invocations ever share a URL. If a future
+	 * Node version changes the cache-bust contract (e.g. ignores
+	 * query strings on `file:` URLs), this will silently revert to
+	 * the cached-forever behavior, and the integration tests in
+	 * `loader.test.ts` will fail.
+	 */
+	const bust = `${url.includes("?") ? "&" : "?"}t=${process.hrtime.bigint()}`;
+	const mod = (await import(url + bust)) as {
 		default?: unknown;
 	} & Record<string, unknown>;
 

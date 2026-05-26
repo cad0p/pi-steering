@@ -236,6 +236,11 @@ export type AllWrites<
  *   - `rules[].when.happened.event` and `rules[].when.happened.since`
  *     are both typed against `AllWrites` — typos rejected at compile
  *     time.
+ *
+ * The boolean fields (`defaultNoOverride`, `disableDefaults`,
+ * `failOnWarnings`) are picked from {@link SteeringConfig} so their
+ * JSDoc surfaces unchanged on hover — author surface and merged
+ * shape stay in sync without copy-paste.
  */
 export interface DefineConfigInput<
 	P extends readonly Plugin[],
@@ -244,12 +249,12 @@ export interface DefineConfigInput<
 		AllObserverNames<P, Inline>,
 		AllWrites<P, R, Inline>
 	>[],
-> {
-	defaultNoOverride?: boolean;
+> extends Pick<
+		SteeringConfig,
+		"defaultNoOverride" | "disableDefaults" | "failOnWarnings"
+	> {
 	disabledRules?: readonly AllRuleNames<P, R>[];
 	disabledPlugins?: readonly AllPluginNames<P>[];
-	disableDefaults?: boolean;
-	failOnWarnings?: boolean;
 	plugins?: P;
 	rules?: R;
 	observers?: Inline;

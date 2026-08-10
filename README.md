@@ -4,7 +4,7 @@ AST-backed steering rules for [pi](https://github.com/earendil-works/pi) agents,
 
 ## What this is
 
-A deterministic guardrail layer that sits between your pi agent and the tools it invokes. You declare TypeScript rules that gate `bash` / `write` / `edit` tool calls; the engine parses every command with [`unbash-walker`](../unbash-walker/), walks a per-call tracker state, matches against your rules, and returns a block verdict before pi executes. Observers record state from `tool_result` events so later rules can say "this must have happened first".
+A deterministic guardrail layer that sits between your pi agent and the tools it invokes. You declare TypeScript rules that gate `bash` / `write` / `edit` tool calls; the engine parses every command with [`unbash-walker`](https://github.com/cad0p/unbash-walker), walks a per-call tracker state, matches against your rules, and returns a block verdict before pi executes. Observers record state from `tool_result` events so later rules can say "this must have happened first".
 
 Use it when:
 
@@ -685,7 +685,7 @@ Changing more than the reason (tightening the pattern, scoping by cwd, swapping 
 
 Plugin authors who need a new walker state dimension (something beyond `cwd` / `env` / `branch`) register a `Tracker<T>` under `Plugin.trackers`. The engine composes trackers at config load and feeds the merged map into unbash-walker's `walk()`.
 
-Tracker authoring is a larger topic — see the [unbash-walker README](../unbash-walker/) for the full `Tracker<T>` / `Modifier<T>` API. Plugins extend an existing tracker (e.g. layering a `--git-dir=…` parser on the core cwd tracker) via `Plugin.trackerExtensions`. Name collisions on `Plugin.trackers` are a hard error; modifier collisions log a WARN and keep the first-registered.
+Tracker authoring is a larger topic — see the [unbash-walker README](https://github.com/cad0p/unbash-walker) for the full `Tracker<T>` / `Modifier<T>` API. Plugins extend an existing tracker (e.g. layering a `--git-dir=…` parser on the core cwd tracker) via `Plugin.trackerExtensions`. Name collisions on `Plugin.trackers` are a hard error; modifier collisions log a WARN and keep the first-registered.
 
 Most users never need this — plugin-registered predicates alone cover 90% of use cases.
 
@@ -698,7 +698,7 @@ The engine ships an `envTracker` alongside the built-in `cwdTracker`. It capture
 - Subshell isolation: `(FOO=/s; cd "$FOO"); cmd` — outer `cmd` sees neither `FOO` nor the subshell's `cd`.
 - Seeded from `process.env.{HOME, USER, PWD}` at tracker initialization, so `~` / `$HOME` / `$USER` / `$PWD` expand out of the box.
 
-Out of scope for v0.1.0: `readonly`, `local`, `declare`, `typeset`, `source` / `.`, function-body walking. The envTracker's module-level JSDoc (`packages/unbash-walker/src/trackers/env.ts`) lists the full deferred-scope inventory and graduation criteria.
+Out of scope for v0.1.0: `readonly`, `local`, `declare`, `typeset`, `source` / `.`, function-body walking. The envTracker's module-level JSDoc (`src/trackers/env.ts` in the [unbash-walker repo](https://github.com/cad0p/unbash-walker)) lists the full deferred-scope inventory and graduation criteria.
 
 **`resolveWord(word, env)`** — re-exported from the package root — is the shared helper the built-in `cd` modifier uses to resolve a dynamic word (`$VAR`, `${VAR}`, `~`) through an env map. Plugin predicates that want the same semantics on user-supplied args should reuse it:
 
@@ -907,7 +907,7 @@ Future versions will add a session-manager-side index keyed by `customType`, mov
 - [`examples/`](./examples/) — rule-pack examples (`force-push-strict`, `no-amend`, `draft-prs-only`, `combined-git-discipline`) — copy-paste starting points.
 - [`examples/work-item-plugin/`](./examples/work-item-plugin/) — canonical plugin reference.
 - [`src/plugins/git/`](./src/plugins/git) — production plugin with trackers and tracker extensions.
-- [`../unbash-walker/`](../unbash-walker/) — the AST walker.
+- [`unbash-walker`](https://github.com/cad0p/unbash-walker) — the AST walker (own repo since the monorepo split).
 - Design decisions behind every field, flag, and semantic covered above are recorded in the repo's ADR log (napkin vault).
 
 ## Relationship to related packages

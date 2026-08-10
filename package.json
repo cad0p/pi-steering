@@ -46,6 +46,7 @@
     "type": "git",
     "url": "git+https://github.com/cad0p/pi-steering.git"
   },
+  "license": "MIT",
   "pi": {
     "extensions": [
       "./src/index.ts"

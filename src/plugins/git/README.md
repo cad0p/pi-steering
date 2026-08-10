@@ -4,12 +4,11 @@ Git plugin for [pi-steering](../../../README.md) — branch
 awareness, upstream checks, and git-specific cwd tracking on top of
 the core steering engine.
 
-> **Default-on.** As of v0.1.0 this plugin is registered
-> automatically via [`DEFAULT_PLUGINS`](../../defaults.ts). New
-> consumers get the predicates, rules, tracker, and cwd extensions
-> without an explicit `import`. Opt out via
-> `defineConfig({ disabledPlugins: ["git"] })` or drop all defaults
-> with `disableDefaults: true`. See [Disabling](#disabling) below.
+> **Opt-in since the v0.1.x monorepo split.** This plugin is NOT
+> registered automatically: `DEFAULT_PLUGINS` is empty. Declare it via
+> `plugins: [gitPlugin]` (import from `pi-steering/plugins/git`) to get
+> the predicates, rules, tracker, and cwd extensions — see
+> [Usage](#usage) below.
 
 ## What it ships
 
@@ -25,9 +24,13 @@ the core steering engine.
 ```ts
 // .pi/steering.ts
 import { defineConfig } from "pi-steering";
+import gitPlugin from "pi-steering/plugins/git";
 
 export default defineConfig({
-  // No explicit `plugins: [gitPlugin]` needed — it's in DEFAULT_PLUGINS.
+  // The plugin is opt-in: declaring it registers it at runtime AND
+  // feeds its rule / predicate names into defineConfig's type unions
+  // (typo-checking on disabledRules / disabledPlugins).
+  plugins: [gitPlugin],
   rules: [
     // Custom rule layered on top of the plugin's predicates:
     {
@@ -57,7 +60,11 @@ export default defineConfig({
 
 ### Disabling
 
-Disabling snippets need an explicit `plugins: [gitPlugin]` for `defineConfig`'s generics to type-check the rule / plugin names against the git plugin's registry. DEFAULT_PLUGINS gives runtime registration but doesn't extend the inference — without the explicit import, `disabledRules` / `disabledPlugins` types as `never[]` and the snippet fails `tsc --noEmit`.
+Disabling snippets declare `plugins: [gitPlugin]` first — that's what
+feeds the rule / plugin names into `defineConfig`'s generics for
+typo-checking. (Since the monorepo split, `DEFAULT_PLUGINS` is empty:
+there is no default registration to lean on, and disabling an
+undeclared plugin is a compile error.)
 
 Keep the predicates + tracker, drop the shipped rule:
 
@@ -84,8 +91,8 @@ export default defineConfig({
 });
 ```
 
-Drop EVERYTHING shipped — both `DEFAULT_RULES` and
-`DEFAULT_PLUGINS`:
+Drop EVERYTHING shipped — `DEFAULT_RULES` (and whatever plugins
+you declared):
 
 ```ts
 import { defineConfig } from "pi-steering";

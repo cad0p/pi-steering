@@ -15,7 +15,7 @@ Use it when:
 ## Install
 
 ```bash
-pi install pi-steering
+pi install npm:@cad0p/pi-steering
 ```
 
 Requires **Node ≥ 22** — the loader reads `.pi/steering.ts` files via native type-stripping (no `tsx` / `ts-node` runtime). On older Node the loader throws with an upgrade message at startup.

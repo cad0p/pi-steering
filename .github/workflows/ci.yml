@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          # Floating major so we pick up pnpm 11.x security/patch releases
+          # automatically (11.5.2, 11.6.0, 11.8.0 each shipped security
+          # fixes). A major bump (12) would be an explicit change. pnpm's
+          # installer/lockfile format is stable within a major.
+          version: 11
+      - uses: actions/setup-node@v6
+        with:
+          # Node 24 for native TS type-stripping (node --test on .ts files)
+          # and the node:test runner (describe/it/afterEach parity with
+          # the previous bun:test API).
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: ./node_modules/.bin/biome check src/ examples/ skills/ scripts/
+      - name: Type check
+        run: ./node_modules/.bin/tsc --noEmit
+      - name: Run tests
+        run: node --test --experimental-strip-types 'src/**/*.test.ts'

@@ -1,25 +1,83 @@
 {
-  "name": "pi-steering-hooks-monorepo",
+  "name": "pi-steering",
   "version": "0.0.0-poc.0",
   "private": true,
-  "description": "PoC monorepo for pi-steering (steering engine) and unbash-walker (AST utility).",
+  "description": "AST-backed steering hooks for pi — deterministic tool-call guardrails with command-level effective-cwd scoping.",
+  "keywords": [
+    "pi-package",
+    "extension",
+    "steering",
+    "guardrails",
+    "safety",
+    "hooks",
+    "ast",
+    "bash"
+  ],
   "type": "module",
-  "packageManager": "pnpm@10.33.0",
-  "engines": {
-    "node": ">=22"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "pi-steering": "./dist/bin/pi-steering.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./plugins/git": {
+      "types": "./dist/plugins/git/index.d.ts",
+      "import": "./dist/plugins/git/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "examples",
+    "skills",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cad0p/pi-steering.git"
   },
   "pi": {
     "extensions": [
-      "packages/pi-steering/src/index.ts"
+      "./src/index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "pnpm -r build",
-    "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck",
-    "prepare": "pnpm -r build"
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "pnpm build",
+    "test": "node --test --experimental-strip-types 'src/**/*.test.ts'",
+    "test:examples": "pnpm -r test",
+    "typecheck": "tsc --noEmit",
+    "typecheck:examples": "pnpm -r typecheck",
+    "lint": "biome check src/ examples/ skills/ scripts/",
+    "lint:fix": "biome check --write src/ examples/ skills/ scripts/",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "unbash": "^3.0.0",
+    "unbash-walker": "github:cad0p/unbash-walker"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
     "@types/node": "^20.19.39",
     "typescript": "^5.4.5"
   }

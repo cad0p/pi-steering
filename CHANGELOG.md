@@ -16,6 +16,10 @@ All notable changes to this project will be documented in this file.
 
 - PUBLISHING.md reflects scoped @cad0p publish + semver-calver-release flow ([#15](https://github.com/cad0p/pi-steering/pull/15))
 
+### 🎨 Styling
+
+- Biome format + organizeImports after scoped-rename edits ([#18](https://github.com/cad0p/pi-steering/pull/18))
+
 
 ## [0.1.0] — 2026-08-10
 

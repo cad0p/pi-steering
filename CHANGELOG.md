@@ -1,10 +1,17 @@
 # Changelog
 
-All notable changes to `@cad0p/pi-steering` are documented in this file.
+All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
-once `v0.1.0` publishes to npm.
+## [calver-released]
+
+<!-- USER-EDITABLE SECTION START -->
+<!-- Add your curated release notes here. -->
+<!-- USER-EDITABLE SECTION END -->
+
+### 📚 Documentation
+
+- PUBLISHING.md reflects scoped @cad0p publish + semver-calver-release flow ([#15](https://github.com/cad0p/pi-steering/pull/15))
+
 
 ## [0.1.0] — 2026-08-10
 

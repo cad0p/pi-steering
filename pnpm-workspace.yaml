@@ -1,9 +1,13 @@
 packages:
   - 'examples/*'
 # Own packages: fresh publishes (<24h old) trip pnpm 11's minimumReleaseAge
-# guard; bare names exclude all versions (the @version form only matched
-# the first named version — see pi-napkin's workspace file for the same
-# comment).
+# guard; bare names exclude all versions.
 minimumReleaseAgeExclude:
   - '@cad0p/unbash-walker'
   - '@cad0p/pi-steering'
+# Build-script approval for the @earendil-works/pi-coding-agent peer graph
+# (mirrors pi-napkin's workspace file): genai's postinstall is needed for
+# its JS runtime; protobufjs works without its postinstall.
+allowBuilds:
+  '@google/genai': true
+  protobufjs: false

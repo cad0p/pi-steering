@@ -229,7 +229,10 @@ describe("pi-steering import-json: conversion", () => {
     const r = await runCli("import-json", path);
     assert.equal(r.code, 0);
     assert.equal(r.stderr.trim(), "");
-    assert.match(r.stdout, /import \{ defineConfig \} from "@cad0p\/pi-steering"/);
+    assert.match(
+      r.stdout,
+      /import \{ defineConfig \} from "@cad0p\/pi-steering"/,
+    );
     assert.match(r.stdout, /export default defineConfig\(/);
     assert.match(r.stdout, /"no-amend"/);
     assert.match(r.stdout, /"Don't rewrite history\."/);

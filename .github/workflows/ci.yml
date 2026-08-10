@@ -36,3 +36,8 @@ jobs:
         run: ./node_modules/.bin/tsc --noEmit
       - name: Run tests
         run: node --test --experimental-strip-types 'src/**/*.test.ts'
+      - name: Build + run example smoke tests
+        # Examples are workspace members depending on the root package;
+        # their pretest builds it, then runs the rule-pack smoke tests
+        # (locks README code blocks against drift).
+        run: pnpm -r test

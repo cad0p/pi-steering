@@ -4,7 +4,7 @@
 /**
  * Testing primitives for rule and plugin authors.
  *
- * Subpath export: `pi-steering/testing`. Also re-exported
+ * Subpath export: `@cad0p/pi-steering/testing`. Also re-exported
  * at the package root for discoverability.
  *
  * Phase 5a ships four low-level primitives that wrap the engine's
@@ -123,7 +123,7 @@ function bufferingAppendHost(buffer: CapturedEntry[]): EvaluatorHost {
     exec: () =>
       Promise.reject(
         new Error(
-          "[pi-steering/testing] internal: bufferingAppendHost.exec " +
+          "[@cad0p/pi-steering/testing] internal: bufferingAppendHost.exec " +
             "should never be called",
         ),
       ),

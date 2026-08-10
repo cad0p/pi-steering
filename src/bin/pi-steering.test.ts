@@ -2,7 +2,7 @@
 // Part of pi-steering.
 
 /**
- * Tests for the `pi-steering` CLI (`./pi-steering.ts`).
+ * Tests for the `@cad0p/pi-steering` CLI (`./pi-steering.ts`).
  *
  * Runs the CLI as a subprocess via `node --experimental-strip-types
  * src/bin/pi-steering.ts …`. This mirrors real invocation (the built
@@ -229,7 +229,7 @@ describe("pi-steering import-json: conversion", () => {
     const r = await runCli("import-json", path);
     assert.equal(r.code, 0);
     assert.equal(r.stderr.trim(), "");
-    assert.match(r.stdout, /import \{ defineConfig \} from "pi-steering"/);
+    assert.match(r.stdout, /import \{ defineConfig \} from "@cad0p\/pi-steering"/);
     assert.match(r.stdout, /export default defineConfig\(/);
     assert.match(r.stdout, /"no-amend"/);
     assert.match(r.stdout, /"Don't rewrite history\."/);

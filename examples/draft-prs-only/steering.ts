@@ -16,7 +16,7 @@
  * The rule is additive.
  */
 
-import { defineConfig } from "pi-steering";
+import { defineConfig } from "@cad0p/pi-steering";
 
 export default defineConfig({
   rules: [

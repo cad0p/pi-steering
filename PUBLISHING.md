@@ -1,14 +1,14 @@
 # Publishing plan (deferred)
 
-All four packages (`pi-steering`, `unbash-walker`, `pi-steering-commit-format`, `pi-steering-flags`) are currently `private: true` with version `0.0.0-poc.0`. Publishing is deferred and gated; this document is the runbook for when it happens.
+All four packages (`@cad0p/pi-steering`, `unbash-walker`, `pi-steering-commit-format`, `pi-steering-flags`) are currently `private: true` with version `0.0.0-poc.0`. Publishing is deferred and gated; this document is the runbook for when it happens.
 
 ## Post-split state (2026-08-10)
 
 The monorepo was split into four standalone repos, each with its own CI (`ci.yml`, pnpm + node 24 + biome + tsc + node --test):
 
-- `pi-steering` — this repo (renamed from `pi-steering-hooks`; keeps the full git history, issues, and PRs).
+- `@cad0p/pi-steering` — this repo (renamed from `pi-steering-hooks`; keeps the full git history, issues, and PRs).
 - `cad0p/unbash-walker` — the AST/tracker utility. Consumed here via `"unbash-walker": "github:cad0p/unbash-walker"` (resolvable pre-publish; `prepare` builds `dist` on install).
-- `cad0p/pi-steering-commit-format`, `cad0p/pi-steering-flags` — the two official plugins, peer-depending on `pi-steering` via `github:cad0p/pi-steering`.
+- `cad0p/pi-steering-commit-format`, `cad0p/pi-steering-flags` — the two official plugins, peer-depending on `@cad0p/pi-steering` via `github:cad0p/pi-steering`.
 
 ## Gate criteria
 
@@ -19,11 +19,11 @@ Before the first npm publish, both of these must be true:
 
 ## What changes at publish time
 
-1. **npm OIDC trusted publishing** (per repo, on npmjs.com): add the GitHub repository as an OIDC publisher for each unscoped package name — `unbash-walker`, `pi-steering`, `pi-steering-commit-format`, `pi-steering-flags`. This is a manual npmjs.com step; the release workflow below assumes it.
+1. **npm OIDC trusted publishing** (per repo, on npmjs.com): add the GitHub repository as an OIDC publisher for each unscoped package name — `unbash-walker`, `@cad0p/pi-steering`, `pi-steering-commit-format`, `pi-steering-flags`. This is a manual npmjs.com step; the release workflow below assumes it.
 2. **Version/manifest bumps per repo**, in dependency order:
    - `cad0p/unbash-walker`: drop `"private": true`, bump to `0.1.0`. Publish FIRST.
    - `cad0p/pi-steering`: drop `"private": true`, bump to `0.1.0`, swap `"unbash-walker": "github:cad0p/unbash-walker"` → `"unbash-walker": "^0.1.0"`. Publish SECOND.
-   - `cad0p/pi-steering-commit-format` + `cad0p/pi-steering-flags`: drop `"private": true`, bump to `0.1.0`, swap the `pi-steering` peer/dev github: specs → `^0.1.0`. Publish LAST (either order).
+   - `cad0p/pi-steering-commit-format` + `cad0p/pi-steering-flags`: drop `"private": true`, bump to `0.1.0`, swap the `@cad0p/pi-steering` peer/dev github: specs → `^0.1.0`. Publish LAST (either order).
 3. **Add the release workflows** to each repo from [`cad0p/semver-calver-release/examples/basic-npm-package`](https://github.com/cad0p/semver-calver-release/tree/main/examples/basic-npm-package): `release.yml` (push to `main` + `release/*`; OIDC `id-token: write`), `validate-package-version.yml`, `validate-release-pr.yml`. Branch triggers use `main` as-is.
 4. **README install instructions** flip from `pi install git:github.com/cad0p/pi-steering` to `pi install npm:pi-steering`.
 

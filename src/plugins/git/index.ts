@@ -2,7 +2,7 @@
 // Part of pi-steering.
 
 /**
- * Git plugin for `pi-steering`.
+ * Git plugin for `@cad0p/pi-steering`.
  *
  * Subpath import: `pi-steering/plugins/git`.
  *
@@ -57,7 +57,7 @@
  * so this plugin is registered ONLY when the user declares it:
  *
  * ```ts
- * import gitPlugin from "pi-steering/plugins/git";
+ * import gitPlugin from "@cad0p/pi-steering/plugins/git";
  * export default defineConfig({ plugins: [gitPlugin] });
  * ```
  *
@@ -77,7 +77,7 @@
  * them. Copy-adapt liberally.
  */
 
-import type { Tracker } from "unbash-walker";
+import type { Tracker } from "@cad0p/unbash-walker";
 import type { DEFAULT_PLUGINS } from "../../defaults.ts";
 import type {
   BuiltInWhenLeaves,

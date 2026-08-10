@@ -70,7 +70,7 @@ import {
   isStaticallyResolvable,
   type Modifier,
   type Tracker,
-} from "unbash-walker";
+} from "@cad0p/unbash-walker";
 
 /**
  * Sentinel value for `branchTracker.initial` - marks "no branch-

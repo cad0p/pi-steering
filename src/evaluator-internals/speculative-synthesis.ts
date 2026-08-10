@@ -66,7 +66,7 @@
  * @internal — not part of the public pi-steering surface.
  */
 
-import type { CommandRef } from "unbash-walker";
+import type { CommandRef } from "@cad0p/unbash-walker";
 import { refToText } from "../internal/ref-text.ts";
 import { matchesWatch } from "../internal/watch-matcher.ts";
 import type { Observer } from "../schema.ts";

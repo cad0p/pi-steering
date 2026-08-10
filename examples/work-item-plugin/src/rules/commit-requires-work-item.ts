@@ -29,7 +29,7 @@
  * explicitly.
  */
 
-import type { Rule } from "pi-steering";
+import type { Rule } from "@cad0p/pi-steering";
 
 export const commitRequiresWorkItem = {
   name: "commit-requires-work-item",

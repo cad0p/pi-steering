@@ -67,7 +67,7 @@ What `/reload` still does **not** pick up:
 Create `.pi/steering/index.ts` at your project root:
 
 ```ts
-import { defineConfig } from "pi-steering";
+import { defineConfig } from "@cad0p/pi-steering";
 
 export default defineConfig({
   rules: [
@@ -101,8 +101,8 @@ One default bundle ships with the package and is layered onto every config autom
 **`DEFAULT_PLUGINS` is deliberately empty** — domain plugins are opt-in. The [git plugin](./src/plugins/git/README.md) (the `branch` / `upstream` / `commitsAhead` / `hasStagedChanges` / `isClean` / `remote` predicates, the `no-main-commit` and `no-main-commit-github` rules (both overridable per commit via `# steering-override: <name> — <reason>`), the branch tracker (tool_call-scoped `git checkout` awareness), and the `cwd.git` tracker extension (`--git-dir=` / `--work-tree=` parsing)) is enabled by declaring it:
 
 ```ts
-import { defineConfig } from "pi-steering";
-import gitPlugin from "pi-steering/plugins/git";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({ plugins: [gitPlugin] });
 ```
@@ -110,7 +110,7 @@ export default defineConfig({ plugins: [gitPlugin] });
 Declaring the plugin is what gives `defineConfig`'s generics the rule / plugin name unions for typo-checking on `disabledRules` / `disabledPlugins` — relying on a default would silently widen the union and let typos through. That is why the default is empty: runtime registration and type-level visibility must not diverge.
 
 ```ts
-import gitPlugin from "pi-steering/plugins/git";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 // Drop the shipped rule but keep the git predicates + tracker:
 defineConfig({ plugins: [gitPlugin], disabledRules: ["no-main-commit"] });
@@ -315,7 +315,7 @@ Plugin-registered predicate leaves come from the `PiSteeringPredicates` registry
 
 ```ts
 // inside a plugin's index.ts
-import type { Patterns, PredicateShape } from "pi-steering";
+import type { Patterns, PredicateShape } from "@cad0p/pi-steering";
 
 declare global {
   interface PiSteeringPredicates {
@@ -363,7 +363,7 @@ interface WhenWalkerState {
 `walkerState.env` carries the per-ref env map: bare assignments (`FOO=bar`), `export NAME=value`, and `unset NAME` from the same bash chain, plus `HOME`/`USER`/`PWD` seeded from `process.env` at session start. Use it to resolve `$VAR` / `${VAR}` / `~` in user-supplied patterns via the `resolveWord` helper re-exported from the package root:
 
 ```ts
-import { resolveWord } from "pi-steering";
+import { resolveWord } from "@cad0p/pi-steering";
 
 const myPredicate: PredicateHandler = (args, ctx) => {
   const expanded = resolveWord(userWord, ctx.walkerState!.env);
@@ -518,7 +518,7 @@ const crNeedsSync = {
 ### Compile-time safety via `defineConfig`
 
 ```ts
-import { defineConfig } from "pi-steering";
+import { defineConfig } from "@cad0p/pi-steering";
 
 export default defineConfig({
   plugins: [gitPlugin, myPlugin],
@@ -598,7 +598,7 @@ See [`examples/work-item-plugin/src/observers/npm-test-tracker.ts`](./examples/w
 ### Typed predicate handlers
 
 ```ts
-import { definePredicate } from "pi-steering";
+import { definePredicate } from "@cad0p/pi-steering";
 
 interface BranchArgs {
   pattern: RegExp;
@@ -642,8 +642,8 @@ Tag your plugin's `package.json` `keywords` with:
 
 Publishing conventions:
 
-- **Package name**: `pi-steering-<domain>` (unscoped). Mirrors `pi-steering` core and `pi-steering-flags`. Scoped names (`@org/pi-steering-<x>`) are fine for internal packages.
-- **Peer range**: pin to a major once `pi-steering` is v1+ (`"pi-steering": "^1"`). During the v0.x window, match the release train closely (`"pi-steering": "^0.1.0"`).
+- **Package name**: `pi-steering-<domain>` (unscoped). Mirrors `@cad0p/pi-steering` core and `pi-steering-flags`. Scoped names (`@org/pi-steering-<x>`) are fine for internal packages.
+- **Peer range**: pin to a major once `@cad0p/pi-steering` is v1+ (`"pi-steering": "^1"`). During the v0.x window, match the release train closely (`"pi-steering": "^0.1.0"`).
 - **License**: MIT by default, matching the core. Amazon-internal / proprietary plugins use their own license; the core has no opinion on this.
 
 ### Overriding a built-in rule
@@ -651,9 +651,9 @@ Publishing conventions:
 Plugin-shipped rules are individually exported from their plugins (see `pi-steering/plugins/git`'s named exports). To tighten a rule's reason message — e.g. pointing your agents at an internal skill or team runbook — disable the original and re-register under a new name:
 
 ```ts
-import { defineConfig } from "pi-steering";
-import gitPlugin, { noMainCommit } from "pi-steering/plugins/git";
-import type { Rule } from "pi-steering";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin, { noMainCommit } from "@cad0p/pi-steering/plugins/git";
+import type { Rule } from "@cad0p/pi-steering";
 
 // Reuse everything about the original, just swap the reason.
 const myNoMainCommit = {
@@ -703,7 +703,7 @@ Out of scope for v0.1.0: `readonly`, `local`, `declare`, `typeset`, `source` / `
 **`resolveWord(word, env)`** — re-exported from the package root — is the shared helper the built-in `cd` modifier uses to resolve a dynamic word (`$VAR`, `${VAR}`, `~`) through an env map. Plugin predicates that want the same semantics on user-supplied args should reuse it:
 
 ```ts
-import { resolveWord, type PredicateHandler } from "pi-steering";
+import { resolveWord, type PredicateHandler } from "@cad0p/pi-steering";
 
 export const matchesHome: PredicateHandler = (args, ctx) => {
   const word = /* one of ctx.input.args */ args as Word;
@@ -716,11 +716,11 @@ Returning `undefined` means the word is statically intractable (unknown var, com
 
 ## Testing rules
 
-The package exports a `pi-steering/testing` subpath with primitives that exercise the full pipeline without booting pi:
+The package exports a `@cad0p/pi-steering/testing` subpath with primitives that exercise the full pipeline without booting pi:
 
 ```ts
 import { loadHarness, expectBlocks, expectAllows, testPredicate, testObserver }
-  from "pi-steering/testing";
+  from "@cad0p/@cad0p/pi-steering/testing";
 ```
 
 ### Harness-level
@@ -763,7 +763,7 @@ const { entries, watchMatched } = await testObserver(
 For bug-pinning tables:
 
 ```ts
-import { runMatrix, formatMatrix } from "pi-steering/testing";
+import { runMatrix, formatMatrix } from "@cad0p/@cad0p/pi-steering/testing";
 
 const result = await runMatrix(harness, [
   { name: "raw",           event: { command: "git push --force" },           expect: "block" },
@@ -867,7 +867,7 @@ Default behavior: any warning-class loader/merger diagnostic (cross-layer plugin
 Opt out of warning-class escalation by setting `failOnWarnings: false` on any layer of your config:
 
 ```ts
-import { defineConfig } from "pi-steering";
+import { defineConfig } from "@cad0p/pi-steering";
 export default defineConfig({
   failOnWarnings: false,   // legacy fail-soft semantics for warnings
   plugins: [/* ... */],

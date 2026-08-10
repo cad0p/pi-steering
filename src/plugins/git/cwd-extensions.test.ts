@@ -25,7 +25,7 @@ import {
   parse as parseBash,
   type Tracker,
   walk,
-} from "unbash-walker";
+} from "@cad0p/unbash-walker";
 import { gitCwdExtensions } from "./cwd-extensions.ts";
 
 // ---------------------------------------------------------------------------

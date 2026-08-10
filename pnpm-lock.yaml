@@ -8,15 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@cad0p/unbash-walker':
+        specifier: ^0.1.0
+        version: 0.1.0
       '@earendil-works/pi-coding-agent':
         specifier: '*'
         version: 0.84.1(ws@8.21.3)(zod@4.4.3)
       unbash:
         specifier: ^3.0.0
         version: 3.0.0
-      unbash-walker:
-        specifier: github:cad0p/unbash-walker
-        version: https://codeload.github.com/cad0p/unbash-walker/tar.gz/b2aaeb0a0583277032ac421094112de1ff75ffed
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.3.14
@@ -30,42 +30,42 @@ importers:
 
   examples/combined-git-discipline:
     devDependencies:
-      pi-steering:
+      '@cad0p/pi-steering':
         specifier: workspace:*
         version: link:../..
 
   examples/draft-prs-only:
     devDependencies:
-      pi-steering:
+      '@cad0p/pi-steering':
         specifier: workspace:*
         version: link:../..
 
   examples/dynamic-reason-runtime-cwd:
     devDependencies:
-      pi-steering:
+      '@cad0p/pi-steering':
         specifier: workspace:*
         version: link:../..
 
   examples/force-push-strict:
     devDependencies:
-      pi-steering:
+      '@cad0p/pi-steering':
         specifier: workspace:*
         version: link:../..
 
   examples/no-amend:
     devDependencies:
-      pi-steering:
+      '@cad0p/pi-steering':
         specifier: workspace:*
         version: link:../..
 
   examples/work-item-plugin:
     devDependencies:
-      pi-steering:
+      '@cad0p/pi-steering':
         specifier: workspace:*
         version: link:../..
-      unbash-walker:
-        specifier: github:cad0p/unbash-walker
-        version: https://codeload.github.com/cad0p/unbash-walker/tar.gz/b2aaeb0a0583277032ac421094112de1ff75ffed
+      '@cad0p/unbash-walker':
+        specifier: ^0.1.0
+        version: 0.1.0
 
 packages:
 
@@ -235,6 +235,10 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@cad0p/unbash-walker@0.1.0':
+    resolution: {integrity: sha512-DVtmALxhJDd2PegCgQ8tPzd8kpb8WuILRhi5a1bTwJyrqb9GQTs6V3t3/SVogcNeoNY+AVdR4RPM+qv0bwTmbg==}
+    engines: {node: '>=22'}
 
   '@earendil-works/pi-agent-core@0.84.1':
     resolution: {integrity: sha512-evyzXYWCLQGmcaBYHlmSku02r8qoN4SGI60GZABo6iV+H+nqX+P9ud8fEZ4GmRq9mUSREvvfX+w9dA9ThF9C6w==}
@@ -675,11 +679,6 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
-  unbash-walker@https://codeload.github.com/cad0p/unbash-walker/tar.gz/b2aaeb0a0583277032ac421094112de1ff75ffed:
-    resolution: {gitHosted: true, integrity: sha512-/7gau7a4lFnDi+eYYrMDeIDGumhKH56OwEzE60rdvdgwVnU0JlgNURvqzPPhXPjvDJXpvqjbOKo1f07xZKJiAA==, tarball: https://codeload.github.com/cad0p/unbash-walker/tar.gz/b2aaeb0a0583277032ac421094112de1ff75ffed}
-    version: 0.0.0-poc.0
-    engines: {node: '>=22'}
-
   unbash@3.0.0:
     resolution: {integrity: sha512-FeFPZ/WFT0mbRCuydiZzpPFlrYN8ZUpphQKoq4EeElVIYjYyGzPMxQR/simUwCOJIyVhpFk4RbtyO7RuMpMnHA==}
     engines: {node: '>=14'}
@@ -983,6 +982,10 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.5.7':
     optional: true
+
+  '@cad0p/unbash-walker@0.1.0':
+    dependencies:
+      unbash: 3.0.0
 
   '@earendil-works/pi-agent-core@0.84.1(ws@8.21.3)(zod@4.4.3)':
     dependencies:
@@ -1440,10 +1443,6 @@ snapshots:
   typebox@1.3.7: {}
 
   typescript@5.9.3: {}
-
-  unbash-walker@https://codeload.github.com/cad0p/unbash-walker/tar.gz/b2aaeb0a0583277032ac421094112de1ff75ffed:
-    dependencies:
-      unbash: 3.0.0
 
   unbash@3.0.0: {}
 

@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { testObserver } from "pi-steering/testing";
+import { testObserver } from "@cad0p/pi-steering/testing";
 import { npmTestTracker, TEST_PASSED_EVENT } from "./npm-test-tracker.ts";
 
 describe("npm-test-tracker observer", () => {

@@ -36,7 +36,7 @@ import {
   expandWrapperCommands,
   extractAllCommandsFromAST,
   parse as parseBash,
-} from "unbash-walker";
+} from "@cad0p/unbash-walker";
 import { matchesPattern } from "../evaluator-internals/predicates.ts";
 import type { ObserverWatch, Pattern, ToolResultEvent } from "../schema.ts";
 import { refToText } from "./ref-text.ts";

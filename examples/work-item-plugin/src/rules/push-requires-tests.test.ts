@@ -23,14 +23,14 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Plugin } from "pi-steering";
+import type { Plugin } from "@cad0p/pi-steering";
 import {
   createRecordingHost,
   expectAllows,
   expectBlocks,
   loadHarness,
   mockExtensionContext,
-} from "pi-steering/testing";
+} from "@cad0p/pi-steering/testing";
 import {
   npmTestTracker,
   TEST_PASSED_EVENT,

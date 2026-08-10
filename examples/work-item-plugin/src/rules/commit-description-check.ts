@@ -26,7 +26,7 @@
  * Override: allowed. Skipping the reminder is a workflow choice.
  */
 
-import type { PredicateContext, Rule } from "pi-steering";
+import type { PredicateContext, Rule } from "@cad0p/pi-steering";
 
 /**
  * Session-entry type written by this rule's `onFire`. Exported so

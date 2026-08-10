@@ -9,7 +9,7 @@ Worked example tying together two pi-steering primitives:
   leaf-level (or block-level inside `not:`) `onUnknown:` policy then
   projects to a definite verdict — default `"block"` (fail-CLOSED, rule
   fires).
-- `walkerUnknownCwdReason` (from `pi-steering`) — the agent-facing reason
+- `walkerUnknownCwdReason` (from `@cad0p/pi-steering`) — the agent-facing reason
   text helper for the walker-unknown-cwd fail-CLOSED branch.
 
 Together these give external plugin authors the ergonomics story for

@@ -25,7 +25,7 @@
  * downstream typos become compile errors.
  */
 
-import type { Observer, ObserverContext, PredicateContext } from "pi-steering";
+import type { Observer, ObserverContext, PredicateContext } from "@cad0p/pi-steering";
 
 /**
  * Session-entry type written when `npm test` succeeds. Rules gate via

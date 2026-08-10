@@ -1,8 +1,8 @@
 {
-  "name": "pi-steering",
-  "version": "0.0.0-poc.0",
-  "private": true,
-  "description": "AST-backed steering hooks for pi — deterministic tool-call guardrails with command-level effective-cwd scoping.",
+  "name": "@cad0p/pi-steering",
+  "version": "0.1.0",
+  "private": false,
+  "description": "AST-backed steering hooks for pi \u2014 deterministic tool-call guardrails with command-level effective-cwd scoping.",
   "keywords": [
     "pi-package",
     "extension",
@@ -72,7 +72,7 @@
   },
   "dependencies": {
     "unbash": "^3.0.0",
-    "unbash-walker": "github:cad0p/unbash-walker"
+    "@cad0p/unbash-walker": "^0.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
@@ -81,5 +81,8 @@
     "@biomejs/biome": "^2.3.14",
     "@types/node": "^20.19.39",
     "typescript": "^5.4.5"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -1,10 +1,21 @@
 # Changelog
 
-All notable changes to `pi-steering` are documented in this file.
+All notable changes to `@cad0p/pi-steering` are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once `v0.1.0` publishes to npm.
+
+## [0.1.0] — 2026-08-10
+
+### Added
+
+- First public npm release as `@cad0p/pi-steering` (scoped — reverses the ADR's unscoped-name decision per maintainer request).
+- `publishConfig.access: public` for OIDC/CLI publishing.
+
+### Changed
+
+- `unbash-walker` dependency: `github:cad0p/unbash-walker` → `@cad0p/unbash-walker ^0.1.0`.
 
 ## [Unreleased] — pre-publish (v0.1.x)
 

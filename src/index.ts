@@ -100,7 +100,7 @@ export type {
   WalkResult,
   Word,
   WordPart,
-} from "unbash-walker";
+} from "@cad0p/unbash-walker";
 // Walker functions re-exported for plugin authors writing custom
 // predicates and trackers. Forward-compatible with future
 // unbash-walker extraction.
@@ -117,7 +117,7 @@ export {
   parse,
   resolveWord,
   walk,
-} from "unbash-walker";
+} from "@cad0p/unbash-walker";
 // JSON compat — convert v1 JSON configs to v2 TS configs.
 export { FromJSONError, fromJSON } from "./compat.ts";
 // Defaults — bundled rule and plugin starter set.
@@ -207,7 +207,7 @@ export type {
   WriteShorthand,
 } from "./testing/index.ts";
 // Testing primitives — re-exported at the root for discoverability.
-// The canonical import path is `pi-steering/testing`;
+// The canonical import path is `@cad0p/pi-steering/testing`;
 // this root re-export means a test file that already imports
 // `defineConfig` from the root doesn't need a second import line for
 // `loadHarness`. See `./testing/index.ts` for the API docs.

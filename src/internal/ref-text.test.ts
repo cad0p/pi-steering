@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { extractAllCommandsFromAST, parse } from "unbash-walker";
+import { extractAllCommandsFromAST, parse } from "@cad0p/unbash-walker";
 import { refToText } from "./ref-text.ts";
 
 function refsFor(command: string) {

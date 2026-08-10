@@ -9,7 +9,11 @@
  * @internal — not part of the public pi-steering surface.
  */
 
-import { type CommandRef, getBasename, getCommandArgs } from "@cad0p/unbash-walker";
+import {
+  type CommandRef,
+  getBasename,
+  getCommandArgs,
+} from "@cad0p/unbash-walker";
 
 /** Render a ref as `"{basename} {args joined by space}"`, trimmed. */
 export function refToText(ref: CommandRef): string {

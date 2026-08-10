@@ -28,7 +28,11 @@
  * from downstream rules.
  */
 
-import type { Observer, ObserverContext, PredicateContext } from "@cad0p/pi-steering";
+import type {
+  Observer,
+  ObserverContext,
+  PredicateContext,
+} from "@cad0p/pi-steering";
 
 /**
  * Session-entry event written when `git pull` succeeds. Rules that

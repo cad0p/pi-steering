@@ -43,12 +43,6 @@
  * `evaluateCandidate` stays tool-agnostic.
  */
 
-import type {
-  ExtensionContext,
-  ToolCallEvent,
-  ToolCallEventResult,
-} from "@earendil-works/pi-coding-agent";
-import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import {
   type CommandRef,
   cwdTracker,
@@ -63,6 +57,12 @@ import {
   type Word,
   walk,
 } from "@cad0p/unbash-walker";
+import type {
+  ExtensionContext,
+  ToolCallEvent,
+  ToolCallEventResult,
+} from "@earendil-works/pi-coding-agent";
+import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import {
   createAppendEntry,
   createExecCache,

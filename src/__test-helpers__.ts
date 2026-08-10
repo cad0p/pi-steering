@@ -125,7 +125,7 @@ export function writeSteeringSingleFileConfig(dir: string, body: string): void {
  * Write a directory-form steering config to
  * `<dir>/.pi/steering/index.ts`. `body` is the full module source
  * (must include `export default`). Mirrors the layout the bin tests
- * use for their isolated `pi-steering` invocations.
+ * use for their isolated `@cad0p/pi-steering` invocations.
  */
 export function writeSteeringDirConfig(dir: string, body: string): void {
   const pi = join(dir, ".pi", "steering");

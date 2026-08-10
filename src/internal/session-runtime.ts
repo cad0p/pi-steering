@@ -9,7 +9,7 @@
  * steering config. It is intentionally NOT re-exported from
  * `index.ts` or any other public entry point; consumers building
  * their own extensions should go through `loadHarness` (subpath
- * `pi-steering/testing`) or call `buildEvaluator` /
+ * `@cad0p/pi-steering/testing`) or call `buildEvaluator` /
  * `buildObserverDispatcher` directly.
  *
  * The runtime owns the strict-mode contract: diagnostics produced

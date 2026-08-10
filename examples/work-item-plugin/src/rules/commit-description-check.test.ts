@@ -16,7 +16,7 @@ import {
   expectAllows,
   loadHarness,
   mockExtensionContext,
-} from "pi-steering/testing";
+} from "@cad0p/pi-steering/testing";
 import {
   commitDescriptionCheck,
   DESCRIPTION_REVIEWED_EVENT,

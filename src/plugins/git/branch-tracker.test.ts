@@ -19,7 +19,7 @@ import {
   getCommandArgs,
   parse as parseBash,
   walk,
-} from "unbash-walker";
+} from "@cad0p/unbash-walker";
 import { branchTracker } from "./branch-tracker.ts";
 
 // ---------------------------------------------------------------------------

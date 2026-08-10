@@ -25,8 +25,8 @@
  * tree.
  */
 
-import { defineConfig, type Rule, walkerUnknownCwdReason } from "pi-steering";
-import gitPlugin from "pi-steering/plugins/git";
+import { defineConfig, type Rule, walkerUnknownCwdReason } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 /**
  * Rule: block `npm run deploy` when the working tree isn't clean.

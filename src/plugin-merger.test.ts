@@ -12,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Modifier, Tracker } from "unbash-walker";
+import type { Modifier, Tracker } from "@cad0p/unbash-walker";
 import {
   resolvePlugins,
   validateName,

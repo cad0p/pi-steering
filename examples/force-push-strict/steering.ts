@@ -29,8 +29,8 @@
  * `disabledRules: ["no-force-push", "no-main-commit"]`.
  */
 
-import { defineConfig } from "pi-steering";
-import gitPlugin from "pi-steering/plugins/git";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
   plugins: [gitPlugin],

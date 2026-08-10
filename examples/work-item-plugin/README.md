@@ -62,7 +62,7 @@ pnpm install
 pnpm --filter @examples/work-item-plugin test
 ```
 
-The `pretest` script builds `pi-steering` first, so the example resolves
+The `pretest` script builds `@cad0p/pi-steering` first, so the example resolves
 the package through its emitted `dist/` exports. On a fresh clone this
 adds a few seconds on the first run; subsequent runs skip the rebuild if
 nothing changed.
@@ -73,7 +73,7 @@ Or `pnpm -r test` runs all packages' suites including this one.
 
 ```ts
 // .pi/steering/index.ts
-import { defineConfig } from "pi-steering";
+import { defineConfig } from "@cad0p/pi-steering";
 import workItemPlugin from "@examples/work-item-plugin";
 
 export default defineConfig({

@@ -25,7 +25,7 @@
  * only defines shapes. Evaluation is Phase 3's concern.
  */
 
-import type { EnvState, Tracker, Word } from "unbash-walker";
+import type { EnvState, Tracker, Word } from "@cad0p/unbash-walker";
 
 // ---------------------------------------------------------------------------
 // Primitive predicate types
@@ -59,7 +59,7 @@ export type Pattern = string | RegExp;
  *
  * @example
  * ```ts
- * import type { Patterns, PredicateShape } from "pi-steering";
+ * import type { Patterns, PredicateShape } from "@cad0p/pi-steering";
  *
  * declare global {
  *   interface PiSteeringPredicates {
@@ -279,7 +279,7 @@ declare global {
    *
    * @example Plugin author registering a typed predicate
    * ```ts
-   * import type { Plugin, PredicateShape } from "pi-steering";
+   * import type { Plugin, PredicateShape } from "@cad0p/pi-steering";
    * import { workItemFormat } from "./predicates/work-item-format.ts";
    * import type { WorkItemFormatArgs } from "./predicates/work-item-format.ts";
    *
@@ -1592,8 +1592,8 @@ export interface Plugin {
     string,
     Record<
       string,
-      | import("unbash-walker").Modifier<unknown>
-      | readonly import("unbash-walker").Modifier<unknown>[]
+      | import("@cad0p/unbash-walker").Modifier<unknown>
+      | readonly import("@cad0p/unbash-walker").Modifier<unknown>[]
     >
   >;
 }
@@ -1663,7 +1663,7 @@ export interface SteeringConfig {
    * default's `reason` / `pattern`, import `DEFAULT_RULES` directly:
    *
    * ```ts
-   * import { DEFAULT_RULES } from "pi-steering";
+   * import { DEFAULT_RULES } from "@cad0p/pi-steering";
    * // hover DEFAULT_RULES[0] to see the rule body
    * ```
    */
@@ -1684,7 +1684,7 @@ export interface SteeringConfig {
    * shipped default plugin, import `DEFAULT_PLUGINS` directly:
    *
    * ```ts
-   * import { DEFAULT_PLUGINS } from "pi-steering";
+   * import { DEFAULT_PLUGINS } from "@cad0p/pi-steering";
    * // hover DEFAULT_PLUGINS[0] to see the plugin body
    * ```
    */

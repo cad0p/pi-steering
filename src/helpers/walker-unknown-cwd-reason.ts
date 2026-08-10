@@ -49,7 +49,7 @@ import type {
  *
  * @example
  * ```ts
- * import { walkerUnknownCwdReason } from "pi-steering";
+ * import { walkerUnknownCwdReason } from "@cad0p/pi-steering";
  *
  * export const myRule: Rule = {
  *   name: "deploy-requires-clean-tree",

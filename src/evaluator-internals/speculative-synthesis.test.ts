@@ -18,7 +18,7 @@ import {
   expandWrapperCommands,
   extractAllCommandsFromAST,
   parse as parseBash,
-} from "unbash-walker";
+} from "@cad0p/unbash-walker";
 import type { Observer } from "../schema.ts";
 import {
   SPECULATIVE_BASELINE,

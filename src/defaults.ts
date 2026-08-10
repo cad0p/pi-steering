@@ -123,7 +123,7 @@ export const DEFAULT_RULES = [
  * tracker extension must declare it explicitly:
  *
  * ```ts
- * import gitPlugin from "pi-steering/plugins/git";
+ * import gitPlugin from "@cad0p/pi-steering/plugins/git";
  * export default defineConfig({ plugins: [gitPlugin] });
  * ```
  *

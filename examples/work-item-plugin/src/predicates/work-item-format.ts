@@ -32,8 +32,8 @@
  * spuriously block every commit.
  */
 
-import type { Word } from "pi-steering";
-import { definePredicate } from "pi-steering";
+import type { Word } from "@cad0p/pi-steering";
+import { definePredicate } from "@cad0p/pi-steering";
 
 /** Argument shape the `when.workItemFormat` slot accepts. */
 export interface WorkItemFormatArgs {

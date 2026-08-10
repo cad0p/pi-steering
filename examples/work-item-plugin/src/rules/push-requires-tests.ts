@@ -32,7 +32,7 @@
  * inherent-risk action here.
  */
 
-import type { Rule } from "pi-steering";
+import type { Rule } from "@cad0p/pi-steering";
 import { TEST_PASSED_EVENT } from "../observers/npm-test-tracker.ts";
 import { RETEST_REQUIRED_EVENT } from "../observers/retest-required-tracker.ts";
 

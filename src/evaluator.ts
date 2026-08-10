@@ -62,7 +62,7 @@ import {
   type Tracker,
   type Word,
   walk,
-} from "unbash-walker";
+} from "@cad0p/unbash-walker";
 import {
   createAppendEntry,
   createExecCache,

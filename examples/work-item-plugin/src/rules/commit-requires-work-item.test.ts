@@ -11,8 +11,8 @@
  */
 
 import { describe, it } from "node:test";
-import type { Plugin } from "pi-steering";
-import { expectAllows, expectBlocks, loadHarness } from "pi-steering/testing";
+import type { Plugin } from "@cad0p/pi-steering";
+import { expectAllows, expectBlocks, loadHarness } from "@cad0p/pi-steering/testing";
 import { workItemFormat } from "../predicates/work-item-format.ts";
 import { commitRequiresWorkItem } from "./commit-requires-work-item.ts";
 

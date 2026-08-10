@@ -24,8 +24,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { PredicateContext } from "pi-steering";
-import { mockContext } from "pi-steering/testing";
+import type { PredicateContext } from "@cad0p/pi-steering";
+import { mockContext } from "@cad0p/pi-steering/testing";
 import config from "./steering.ts";
 
 /**

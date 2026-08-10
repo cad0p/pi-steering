@@ -5,13 +5,13 @@ description: Author declarative steering rules for pi-steering. Use when the use
 
 # pi-steering
 
-You have `pi-steering` installed. It blocks and allows agent tool calls (bash, write, edit) via declarative rules authored in TypeScript.
+You have `@cad0p/pi-steering` installed. It blocks and allows agent tool calls (bash, write, edit) via declarative rules authored in TypeScript.
 
 ## Where things live
 
 - Rules: `.pi/steering/index.ts` (directory form) or `.pi/steering.ts` (single-file form).
 - Local plugins: `.pi/steering/plugins/*.ts`, imported into `index.ts`.
-- Tests: `.pi/steering/*.test.ts` using `pi-steering/testing`.
+- Tests: `.pi/steering/*.test.ts` using `@cad0p/pi-steering/testing`.
 
 The loader walks up from `cwd` to the nearest `.pi/` dir, falling back to `~/.pi/`. See the README for the full precedence order.
 
@@ -31,12 +31,12 @@ The loader walks up from `cwd` to the nearest `.pi/` dir, falling back to `~/.pi
 | "change the reason on a built-in rule" | Import the original rule from its plugin, spread it with `{ ...original, name: "new-name", reason: "..." }`, and use `disabledRules: ["original-name"]` + add the replacement. Preserves pattern / when / observer. |
 | "test this rule" | Create `steering.test.ts` using `expectBlocks` / `expectAllows` / `loadHarness`. |
 | "convert my JSON config to TypeScript" | Run `pi-steering import-json .pi/steering.json -o .pi/steering.ts`. Plugins, observers, and function predicates don't round-trip — author those directly in TS. |
-| "publish a pi-steering plugin" | Package as `pi-steering-<domain>` (unscoped) with `keywords: ["pi-package", "pi-steering-package"]` in package.json. peerDep on `pi-steering`. |
+| "publish a pi-steering plugin" | Package as `pi-steering-<domain>` (unscoped) with `keywords: ["pi-package", "pi-steering-package"]` in package.json. peerDep on `@cad0p/pi-steering`. |
 
 ## Minimal config
 
 ```ts
-import { defineConfig } from "pi-steering";
+import { defineConfig } from "@cad0p/pi-steering";
 
 export default defineConfig({
   rules: [
@@ -56,8 +56,8 @@ export default defineConfig({
 ## Git plugin (branch / upstream / commits-ahead predicates)
 
 ```ts
-import { defineConfig } from "pi-steering";
-import gitPlugin from "pi-steering/plugins/git";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
   plugins: [gitPlugin],
@@ -79,7 +79,7 @@ export default defineConfig({
 ```ts
 // .pi/steering/steering.test.ts
 import { describe, it } from "node:test";
-import { expectAllows, expectBlocks, loadHarness } from "pi-steering/testing";
+import { expectAllows, expectBlocks, loadHarness } from "@cad0p/pi-steering/testing";
 import config from "./index.ts";
 
 describe("my steering config", () => {

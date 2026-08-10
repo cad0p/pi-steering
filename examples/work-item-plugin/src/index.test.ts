@@ -19,7 +19,7 @@ import {
   expectBlocks,
   loadHarness,
   mockExtensionContext,
-} from "pi-steering/testing";
+} from "@cad0p/pi-steering/testing";
 import workItemPlugin, {
   DESCRIPTION_REVIEWED_EVENT,
   TEST_PASSED_EVENT,

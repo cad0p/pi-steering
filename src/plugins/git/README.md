@@ -23,8 +23,8 @@ the core steering engine.
 
 ```ts
 // .pi/steering.ts
-import { defineConfig } from "pi-steering";
-import gitPlugin from "pi-steering/plugins/git";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
   // The plugin is opt-in: declaring it registers it at runtime AND
@@ -49,8 +49,8 @@ Explicit import still works (e.g. in tests driving `loadHarness`
 with `includeDefaults: false`):
 
 ```ts
-import { defineConfig } from "pi-steering";
-import gitPlugin from "pi-steering/plugins/git";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
   plugins: [gitPlugin],
@@ -69,8 +69,8 @@ undeclared plugin is a compile error.)
 Keep the predicates + tracker, drop the shipped rule:
 
 ```ts
-import { defineConfig } from "pi-steering";
-import gitPlugin from "pi-steering/plugins/git";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
   plugins: [gitPlugin],
@@ -82,8 +82,8 @@ Drop the whole git plugin (no `branch` / `upstream` / ... predicates,
 no tracker, no cwd extensions, no rule):
 
 ```ts
-import { defineConfig } from "pi-steering";
-import gitPlugin from "pi-steering/plugins/git";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
   plugins: [gitPlugin],
@@ -95,7 +95,7 @@ Drop EVERYTHING shipped — `DEFAULT_RULES` (and whatever plugins
 you declared):
 
 ```ts
-import { defineConfig } from "pi-steering";
+import { defineConfig } from "@cad0p/pi-steering";
 
 export default defineConfig({
   disableDefaults: true,
@@ -279,8 +279,8 @@ walker-unknown-cwd interactions you need to handle explicitly).
 //    `no-main-commit` is still active and fires on a github clone
 //    + main; disabling the github specialization makes the engine
 //    emit the generic message instead.
-import { defineConfig } from "pi-steering";
-import gitPlugin from "pi-steering/plugins/git";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
   plugins: [gitPlugin],
@@ -295,9 +295,9 @@ export default defineConfig({
 //    `tool`, `field`, and `noOverride` — only override the field
 //    you actually want to change. No `when:` changes → no
 //    walker-unknown-cwd interactions to reason about.
-import { defineConfig } from "pi-steering";
-import gitPlugin, { noMainCommitGithub } from "pi-steering/plugins/git";
-import type { Rule } from "pi-steering";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin, { noMainCommitGithub } from "@cad0p/pi-steering/plugins/git";
+import type { Rule } from "@cad0p/pi-steering";
 
 const myNoMainCommitGithub = {
   ...noMainCommitGithub,
@@ -323,8 +323,8 @@ export default defineConfig({
 ```ts
 // 3. Disable the entire git plugin (drops all gitPlugin
 //    predicates / rules / trackers / extensions):
-import { defineConfig } from "pi-steering";
-import gitPlugin from "pi-steering/plugins/git";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
   plugins: [gitPlugin],
@@ -373,9 +373,9 @@ user-authored rule.
 Worked example:
 
 ```ts
-import { defineConfig } from "pi-steering";
-import gitPlugin, { noMainCommit } from "pi-steering/plugins/git";
-import type { Pattern, Rule } from "pi-steering";
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin, { noMainCommit } from "@cad0p/pi-steering/plugins/git";
+import type { Pattern, Rule } from "@cad0p/pi-steering";
 
 const VAULT_DIRS: Pattern[] = [
   /\/Goldmine\//,
@@ -481,5 +481,5 @@ import {
   walkerString,
   NO_CHECKOUT_IN_CHAIN,
   GIT_COMMIT_PATTERN,
-} from "pi-steering/plugins/git";
+} from "@cad0p/pi-steering/plugins/git";
 ```

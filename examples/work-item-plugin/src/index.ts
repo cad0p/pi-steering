@@ -40,7 +40,7 @@
  * ## Consuming this plugin
  *
  * ```ts
- * import { defineConfig } from "pi-steering";
+ * import { defineConfig } from "@cad0p/pi-steering";
  * import workItemPlugin from "@examples/work-item-plugin";
  *
  * export default defineConfig({
@@ -49,7 +49,7 @@
  * ```
  */
 
-import type { Plugin, PredicateShape } from "pi-steering";
+import type { Plugin, PredicateShape } from "@cad0p/pi-steering";
 import {
   npmTestTracker,
   TEST_PASSED_EVENT,

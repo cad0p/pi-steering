@@ -31,7 +31,7 @@
  * the result as well for introspection / tests.
  */
 
-import type { Modifier, Tracker } from "unbash-walker";
+import type { Modifier, Tracker } from "@cad0p/unbash-walker";
 import {
   isReservedPredicateKey,
   RESERVED_PREDICATE_KEYS,

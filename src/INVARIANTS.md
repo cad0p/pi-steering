@@ -87,7 +87,9 @@ per `S2`.
 
 **Where:** `internal/session-runtime.ts` (`buildSessionRuntime` →
 `finalizePluginState`); `bin/pi-steering.ts`
-(`runCliMergeWithInfoCapture`).
+(`runCliMergeWithInfoCapture`); `internal/drop-unused-observers.ts`
+(`collectConsumedEvents`); `internal/finalize-plugin-state.ts`
+(exemption-when threading); `testing/index.ts` (`loadHarness`).
 
 **What:** Both surfaces apply `disabledRules` filtering BEFORE
 running `dropUnusedObservers`, so an observer whose only consumers
@@ -95,8 +97,18 @@ are disabled rules surfaces the same `console.info` breadcrumb in
 both paths. A future surface that bypasses this ordering would see
 different observer-drop behavior than the runtime.
 
+**Exemption parity extension:** `collectConsumedEvents` scans
+EXEMPTION clauses' top-level `when.happened` identically to rules
+(threaded through `finalizePluginState` from both config + plugin
+buckets by all three callers). An observer whose writes are consumed
+ONLY by an exemption's `happened` survives the drop — without this,
+the exemption would be silently dead (its observer dropped, its
+event never written).
+
 **Pinned by:** `internal/session-runtime.test.ts` (runtime branch);
-`bin/pi-steering.test.ts` (CLI branch).
+`bin/pi-steering.test.ts` (CLI branch); exemption-consumed-observer
+survival test in `internal/session-runtime.test.ts` / observer-drop
+unit tests.
 
 ### `O2` — single-emission lock for cross-detector tracker-name collisions
 

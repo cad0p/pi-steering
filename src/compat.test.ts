@@ -131,6 +131,7 @@ describe("compat: fromJSON rejections", () => {
     for (const key of [
       "plugins",
       "observers",
+      "exemptions",
       "disablePlugins",
       "disabledPlugins",
       "disabledRules",

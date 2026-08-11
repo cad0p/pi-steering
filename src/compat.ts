@@ -77,6 +77,7 @@ export function fromJSON(json: unknown): SteeringConfig {
   for (const forbidden of [
     "plugins",
     "observers",
+    "exemptions",
     "disablePlugins",
     "disabledPlugins",
     "disabledRules",

@@ -30,6 +30,7 @@ import {
 } from "../internal/session-runtime.ts";
 import { loadConfigs } from "../loader.ts";
 import type {
+  Exemption,
   Observer,
   Rule,
   SteeringConfig,
@@ -404,6 +405,15 @@ function renderListJSON(config: SteeringConfig): unknown {
     plugins,
     userRules: (config.rules ?? []).map((r) => ruleJSON(r, disabledSet)),
     userObservers: (config.observers ?? []).map((o) => observerJSON(o)),
+    // Additive `exemptions` key: flat rows with source labels,
+    // mirroring the text section. Plugin exemptions carry the
+    // plugin's name; config-layer exemptions carry `"config"`.
+    exemptions: [
+      ...(config.plugins ?? []).flatMap((p) =>
+        (p.exemptions ?? []).map((e) => exemptionJSON(e, p.name)),
+      ),
+      ...(config.exemptions ?? []).map((e) => exemptionJSON(e, "config")),
+    ],
     disabled: {
       rules: config.disabledRules ?? [],
       plugins: config.disabledPlugins ?? [],
@@ -418,6 +428,7 @@ function emptyListJSON(): unknown {
     plugins: [],
     userRules: [],
     userObservers: [],
+    exemptions: [],
     disabled: { rules: [], plugins: [] },
     defaultNoOverride: null,
     disableDefaults: null,
@@ -437,6 +448,14 @@ function observerJSON(o: Observer): unknown {
   return {
     name: o.name,
     writes: o.writes ?? [],
+  };
+}
+
+function exemptionJSON(e: Exemption, source: string): unknown {
+  return {
+    rule: e.rule,
+    when: whenSummaryKeys(e.when),
+    source,
   };
 }
 
@@ -501,6 +520,21 @@ function renderListText(config: SteeringConfig): string {
   }
   lines.push("");
 
+  // Exemptions block — rendered ONLY when non-empty so the pinned
+  // empty-case output stays byte-identical. Plugin exemptions carry
+  // the plugin's name as source label; config-layer exemptions carry
+  // `config`. Rows: `no-main-commit ← napkin (when: cwd)`.
+  const exemptionLines: string[] = [];
+  for (const plugin of plugins) {
+    renderExemptionLines(plugin.exemptions ?? [], plugin.name, exemptionLines);
+  }
+  renderExemptionLines(config.exemptions ?? [], "config", exemptionLines);
+  if (exemptionLines.length > 0) {
+    lines.push("Exemptions:");
+    lines.push(...exemptionLines);
+    lines.push("");
+  }
+
   // Disabled block.
   if (disabled.length === 0 && disabledPlugins.length === 0) {
     lines.push("Disabled: (none)");
@@ -543,6 +577,16 @@ function renderObserverLines(
     const writes =
       o.writes && o.writes.length > 0 ? `  writes: ${o.writes.join(", ")}` : "";
     lines.push(`  observer: ${o.name}${writes}`);
+  }
+}
+
+function renderExemptionLines(
+  exemptions: readonly Exemption[],
+  source: string,
+  lines: string[],
+): void {
+  for (const ex of exemptions) {
+    lines.push(`  ${ex.rule} ← ${source} (when: ${whenSummaryKeys(ex.when)})`);
   }
 }
 

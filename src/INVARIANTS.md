@@ -59,6 +59,8 @@ leaf counts as "does not match" → the target guard still fires:
 - An explicit `onUnknown: "block"` inside an exemption clause still
   projects unknown → match (author opt-in to unknown-exempts).
 
+**`unless` disambiguation:** `Rule.unless` is a per-rule, same-rule-scope optional exemption field. The registry is the cross-plugin ACCUMULATION mechanism — exemption-by-name stacks across layers and plugins; `unless` only lives on the rule it exempts.
+
 **Exemption target names** (`exemption.rule`) flow into the same
 user-visible surfaces (orphan diagnostics, `pi-steering list`
 output, evaluator warn logs), so they get the same treatment:

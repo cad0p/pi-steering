@@ -1,10 +1,33 @@
 # Changelog
 
-All notable changes to `@cad0p/pi-steering` are documented in this file.
+All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
-once `v0.1.0` publishes to npm.
+## [0.2.0] - 2026-08-11
+
+<!-- USER-EDITABLE SECTION START -->
+### Breaking
+
+- **Two-layer config resolution** (issue [#21](https://github.com/cad0p/pi-steering/issues/21)): the loader now mirrors pi's own settings model instead of walking up `cwd → $HOME`. Exactly two fixed layers — the project layer at `<cwd>/.pi/steering/` and the global layer at `<agentDir>/steering/` (`~/.pi/agent/steering/`, or `$PI_CODING_AGENT_DIR` when set) — merged project-first (project wins on rule-name collision). Intermediate ancestor layers no longer load, and `~/.pi/steering/` is no longer special (no alias, no deprecation diagnostic): it only works when pi is launched from `$HOME` itself, where the project layer IS that path.
+- **Migration:** `mv ~/.pi/steering ~/.pi/agent/steering`. No fallback is provided — the old path stops being discovered once this version ships.
+<!-- USER-EDITABLE SECTION END -->
+
+### 🚀 Features
+
+- Two-layer config resolution — project `.pi/steering/` + global `agentDir/steering/`, walk-up removed ([#21](https://github.com/cad0p/pi-steering/pull/21)) ([#25](https://github.com/cad0p/pi-steering/pull/25))
+
+### 🐛 Bug Fixes
+
+- Approve peer-graph build scripts (@google/genai, protobufjs) in pnpm-workspace.yaml ([#17](https://github.com/cad0p/pi-steering/pull/17))
+
+### 📚 Documentation
+
+- PUBLISHING.md reflects scoped @cad0p publish + semver-calver-release flow ([#15](https://github.com/cad0p/pi-steering/pull/15))
+- Npm install line for published scoped package ([#20](https://github.com/cad0p/pi-steering/pull/20))
+
+### 🎨 Styling
+
+- Biome format + organizeImports after scoped-rename edits ([#18](https://github.com/cad0p/pi-steering/pull/18))
+
 
 ## [0.1.0] — 2026-08-10
 

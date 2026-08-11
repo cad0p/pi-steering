@@ -670,13 +670,22 @@ interface WhenWalkerState {
  * Read the leaf-level `onUnknown:` modifier from a leaf value. Bare
  * forms (string, RegExp, array, boolean, number, etc.) carry no
  * modifiers; only the spread object form's `onUnknown:` field is
- * consulted. Falls back to `"block"` (fail-CLOSED) when absent.
+ * consulted. Falls back to `onUnknownDefault` (default `"block"` =
+ * fail-CLOSED) when absent.
  *
  * Strict equality on `"allow"` mirrors the engine's typo-defense: any
  * other value (`"Allow"` capitalization typo, `"BLOCK"`, `undefined`,
- * numeric, etc.) collapses to `"block"`.
+ * numeric, etc.) collapses to the default.
+ *
+ * The `onUnknownDefault` parameter is the exemption-evaluation
+ * override: exemption clauses project unknown to "does not match"
+ * (default `"allow"` → guard still fires) so a carve-out can never
+ * silently fail-OPEN its target rule. See {@link evaluateWhen}.
  */
-function readLeafOnUnknown(value: unknown): "allow" | "block" {
+function readLeafOnUnknown(
+  value: unknown,
+  onUnknownDefault: "allow" | "block" = "block",
+): "allow" | "block" {
   if (
     value !== null &&
     typeof value === "object" &&
@@ -685,9 +694,9 @@ function readLeafOnUnknown(value: unknown): "allow" | "block" {
     "onUnknown" in (value as Record<string, unknown>)
   ) {
     const v = (value as { onUnknown?: unknown }).onUnknown;
-    return v === "allow" ? "allow" : "block";
+    return v === "allow" ? "allow" : onUnknownDefault;
   }
-  return "block";
+  return onUnknownDefault;
 }
 
 /**
@@ -810,6 +819,11 @@ function kleeneAnd(verdicts: readonly PredicateVerdict[]): PredicateVerdict {
  *     `onUnknown:` policy projects directly without the flip:
  *       "block" → not-clause = true  (fail-CLOSED — rule fires)
  *       "allow" → not-clause = false (fail-OPEN — rule skips)
+ *
+ * `onUnknownDefault` is the exemption-evaluation override for the
+ * block-level policy when the block omits `onUnknown:` (default
+ * `"block"`; exemption evaluation passes `"allow"` so unknown leaves
+ * inside an exemption's `not:` never exempt — see {@link evaluateWhen}).
  */
 async function evaluateNotBlock(
   block: TopLevelWhenClauseNoRecurse<string>,
@@ -818,12 +832,14 @@ async function evaluateNotBlock(
   predicates: Record<string, PredicateHandler>,
   ruleName: string,
   source: string,
+  onUnknownDefault: "allow" | "block" = "block",
 ): Promise<boolean> {
-  // Read block-level `onUnknown:` modifier. Default fail-CLOSED.
+  // Read block-level `onUnknown:` modifier. Default fail-CLOSED
+  // (or the exemption-evaluation override via `onUnknownDefault`).
   const blockOnUnknown =
     (block as { onUnknown?: unknown }).onUnknown === "allow"
       ? "allow"
-      : "block";
+      : onUnknownDefault;
 
   // Evaluate each leaf to a trinary verdict. Reserved keys (modifiers
   // + the operator field) are skipped; nested `not:` recursion is
@@ -931,6 +947,25 @@ async function evaluateNotBlock(
  * doesn't iterate them as standalone keys; the leaf adapter consumes
  * them inline. A bare `onUnknown:` at the outer level (without a
  * containing leaf) is type-banned but skipped here defensively.
+ *
+ * ## Exemption evaluation: the `onUnknownDefault` parameter
+ *
+ * Rule evaluation passes the default `"block"` (unknown → true →
+ * rule fires; fail-CLOSED). Exemption evaluation passes `"allow"`
+ * (unknown → false → "does not match" → no exemption → the target
+ * guard still fires). Clause-TRUE means exempt, so the stock
+ * rule-side projection would exempt on unknown = FAIL-OPEN; the
+ * parameter inverts the default across all four projection sites:
+ * the `cwd` leaf (`readLeafOnUnknown`), plugin-predicate leaves
+ * (`readLeafOnUnknown`), the `condition:` escape hatch (hard-coded
+ * `"block"` in rule mode), and the `not:` block-level policy
+ * (`evaluateNotBlock`). An exemption author can still write an
+ * explicit `onUnknown: "block"` to opt back into unknown-exempts.
+ *
+ * Escapes `evaluateWhen` does NOT swallow (`UnknownPredicateError`,
+ * `evaluateHappened` shape throws, …) propagate to the caller — the
+ * exemption call site in the evaluator wraps the whole clause in its
+ * own try/catch and treats a throw as "does not match" (S1).
  */
 export async function evaluateWhen(
   when: TopLevelWhenClause<string> | undefined,
@@ -939,6 +974,7 @@ export async function evaluateWhen(
   predicates: Record<string, PredicateHandler>,
   ruleName: string,
   source: string,
+  onUnknownDefault: "allow" | "block" = "block",
 ): Promise<boolean> {
   if (!when) return true;
 
@@ -955,7 +991,7 @@ export async function evaluateWhen(
     // Built-in: cwd. Trinary leaf with leaf-level `onUnknown:` policy.
     if (key === "cwd") {
       const verdict = evaluateCwd(value, state.cwd);
-      const onUnknown = readLeafOnUnknown(value);
+      const onUnknown = readLeafOnUnknown(value, onUnknownDefault);
       if (!projectVerdict(verdict, onUnknown)) return false;
       continue;
     }
@@ -977,6 +1013,7 @@ export async function evaluateWhen(
         predicates,
         ruleName,
         source,
+        onUnknownDefault,
       );
       if (!notFires) return false;
       continue;
@@ -1009,12 +1046,13 @@ export async function evaluateWhen(
         verdict = "unknown";
       }
       // `condition?:` is bare PredicateFn (no spread shape); leaf-level
-      // `onUnknown:` is not reachable from the schema. Hard-code default
-      // `"block"` policy for symmetry with the plugin-handler exception
-      // contract. Authors needing fail-OPEN wrap inside
+      // `onUnknown:` is not reachable from the schema. Rule evaluation
+      // hard-codes the default `"block"` policy; exemption evaluation
+      // passes `onUnknownDefault = "allow"` so a throwing condition
+      // never exempts (S1). Authors needing fail-OPEN wrap inside
       // `not: { condition: fn, onUnknown: "allow" }` (block-level
       // modifier) OR catch the throw inside the callback body.
-      if (!projectVerdict(verdict, "block")) return false;
+      if (!projectVerdict(verdict, onUnknownDefault)) return false;
       continue;
     }
 
@@ -1030,7 +1068,7 @@ export async function evaluateWhen(
       source,
       key,
     );
-    const onUnknown = readLeafOnUnknown(value);
+    const onUnknown = readLeafOnUnknown(value, onUnknownDefault);
     if (!projectVerdict(verdict, onUnknown)) return false;
   }
   return true;

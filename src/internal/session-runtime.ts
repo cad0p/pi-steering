@@ -269,6 +269,8 @@ export async function buildSessionRuntime(
     resolved.rules,
     filteredConfig.observers ?? [],
     resolved.observers,
+    filteredConfig.exemptions ?? [],
+    resolved.exemptions ?? [],
   );
   const filteredResolved = {
     ...resolved,

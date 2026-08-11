@@ -86,11 +86,13 @@ import { refToText } from "./internal/ref-text.ts";
 import type { ResolvedPluginState } from "./plugin-merger.ts";
 import { validateName } from "./plugin-merger.ts";
 import type {
+  Exemption,
   Observer,
   PredicateContext,
   PredicateToolInput,
   Rule,
   SteeringConfig,
+  TopLevelWhenClause,
   WhenWalkerState,
 } from "./schema.ts";
 
@@ -289,6 +291,32 @@ export function buildEvaluator(
     resolved.observers,
   );
 
+  // Build the exemption registry: config-layer exemptions (already
+  // union-merged across layers by the loader) + plugin exemptions
+  // (collected by the plugin merger, disabled-plugin-filtered).
+  // Keyed by target rule name — exemptions attach BY NAME to
+  // whichever rule wins the name after `disabledRules` filtering;
+  // multiple exemptions for one rule OR at evaluation time.
+  //
+  // Cross-bucket note: `config.rules` and `resolved.rules` are never
+  // deduped against each other — a same-named rule can exist in both
+  // buckets and exemption-by-name applies to BOTH (documented; no
+  // winner assumption).
+  const exemptionMap = new Map<string, TopLevelWhenClause<string>[]>();
+  const collectExemptions = (list: readonly Exemption[] | undefined) => {
+    if (list === undefined) return;
+    for (const exemption of list) {
+      const bucket = exemptionMap.get(exemption.rule);
+      if (bucket === undefined) {
+        exemptionMap.set(exemption.rule, [exemption.when]);
+      } else {
+        bucket.push(exemption.when);
+      }
+    }
+  };
+  collectExemptions(config.exemptions);
+  collectExemptions(resolved.exemptions);
+
   return {
     evaluate: (event, ctx, agentLoopIndex) =>
       evaluateEvent(
@@ -302,6 +330,7 @@ export function buildEvaluator(
         defaultNoOverride,
         ruleSources,
         allObservers,
+        exemptionMap,
       ),
   };
 }
@@ -636,6 +665,16 @@ interface SharedEvalContext {
    * unambiguously.
    */
   readonly ruleSources: ReadonlyMap<Rule, string>;
+  /**
+   * Exemption registry: target rule name → its exemption `when`
+   * clauses (config + plugin buckets merged at build time). A
+   * matching clause prevents the rule from firing — see
+   * {@link evaluateCandidate} and {@link evaluateExemptionClause}.
+   */
+  readonly exemptions: ReadonlyMap<
+    string,
+    readonly TopLevelWhenClause<string>[]
+  >;
 }
 
 /**
@@ -802,6 +841,24 @@ async function evaluateCandidate(
   const ctx = await runPredicateChain(rule, cand, shared);
   if (ctx === null) return "no-fire";
 
+  // Registry exemption check. Sits BETWEEN the when-match and the
+  // override-comment check: if any exemption clause for this rule
+  // matches the candidate, the rule does NOT fire — evaluation
+  // continues to the next rule exactly as if the rule had missed.
+  // `onFire` and the `steering-override` audit entry never run. When
+  // an exemption clause AND an override comment are both present,
+  // the exemption wins — no audit entry (the rule never fired).
+  // Override-commented commands on a NON-exempted rule keep today's
+  // behavior byte-identical (audit entry + "overridden").
+  const exemptionClauses = shared.exemptions.get(rule.name);
+  if (exemptionClauses !== undefined) {
+    for (const clause of exemptionClauses) {
+      if (await evaluateExemptionClause(clause, cand, ctx, shared, rule.name)) {
+        return "no-fire";
+      }
+    }
+  }
+
   // Rule fires. Check for override (if allowed) before committing to
   // blocking.
   const noOverride = effectiveNoOverride(rule, shared.defaultNoOverride);
@@ -860,6 +917,52 @@ async function evaluateCandidate(
   };
 }
 
+/**
+ * Evaluate one exemption clause against a candidate whose target rule
+ * already matched its full predicate chain. Returns `true` when the
+ * clause MATCHES — the rule must not fire.
+ *
+ * Exemption evaluation is fail-CLOSED in the direction that protects
+ * the guard (S1):
+ *
+ *   - `evaluateWhen` runs with the `"allow"`-default projection
+ *     (`onUnknownDefault: "allow"`): walker-unknown cwd, throwing
+ *     handlers, and `condition:` throws all project to "does not
+ *     match" → no exemption → the target guard still fires. (The
+ *     stock rule-side default `"block"` would project unknown to
+ *     TRUE — clause-true means exempt, so it would fail-OPEN the
+ *     guard.)
+ *   - Escapes `evaluateWhen` does not swallow (`UnknownPredicateError`,
+ *     `evaluateHappened` shape throws, …) are caught HERE, per
+ *     exemption — a throwing exemption predicate = "does not match"
+ *     = guard fires. Warn logs label the EXEMPTION, not the target
+ *     rule (`Rule "<target>"@<src>` would be misleading).
+ */
+async function evaluateExemptionClause(
+  clause: TopLevelWhenClause<string>,
+  cand: Candidate,
+  ctx: PredicateContext,
+  shared: SharedEvalContext,
+  ruleName: string,
+): Promise<boolean> {
+  try {
+    return await evaluateWhen(
+      clause,
+      { cwd: cand.cwd },
+      ctx,
+      shared.predicates,
+      ruleName,
+      "exemption",
+      "allow",
+    );
+  } catch (err) {
+    console.warn(
+      `[pi-steering] exemption for rule "${ruleName}" threw: ${formatError(err)}`,
+    );
+    return false;
+  }
+}
+
 async function evaluateEvent(
   event: ToolCallEvent,
   ctx: ExtensionContext,
@@ -871,6 +974,7 @@ async function evaluateEvent(
   defaultNoOverride: boolean,
   ruleSources: ReadonlyMap<Rule, string>,
   allObservers: readonly Observer[],
+  exemptions: ReadonlyMap<string, readonly TopLevelWhenClause<string>[]>,
 ): Promise<ToolCallEventResult | void> {
   // Top-level fail-closed wrap (S1). If the engine's own scaffolding
   // throws — parse errors, walker bugs, corrupted session JSONL, etc.
@@ -891,6 +995,7 @@ async function evaluateEvent(
       defaultNoOverride,
       ruleSources,
       allObservers,
+      exemptions,
     );
   } catch (err) {
     console.error(`[pi-steering] steering engine threw: ${formatError(err)}`);
@@ -914,6 +1019,7 @@ async function evaluateEventInner(
   defaultNoOverride: boolean,
   ruleSources: ReadonlyMap<Rule, string>,
   allObservers: readonly Observer[],
+  exemptions: ReadonlyMap<string, readonly TopLevelWhenClause<string>[]>,
 ): Promise<ToolCallEventResult | void> {
   // Shared per-call closures: exec memoized by (cmd, args, cwd);
   // findEntries reads the current session JSONL on demand; appendEntry
@@ -940,6 +1046,7 @@ async function evaluateEventInner(
     host,
     defaultNoOverride,
     ruleSources,
+    exemptions,
   };
 
   // Bash state is lazy: non-bash rules don't pay for parse / walk.

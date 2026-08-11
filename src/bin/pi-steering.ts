@@ -324,6 +324,8 @@ function runCliMergeWithInfoCapture(layers: readonly SteeringConfig[]): {
         resolved.rules,
         userObservers,
         resolved.observers,
+        merged.exemptions ?? [],
+        resolved.exemptions ?? [],
       );
     }
     return { config: merged, diagnostics };

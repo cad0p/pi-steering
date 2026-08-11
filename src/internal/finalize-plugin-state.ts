@@ -9,8 +9,11 @@
  *
  * Drops observers whose declared `writes` are unconsumed across both
  * plugin-merged and user-authored streams, using the union of all
- * rule `happened` references. Emits an `info`-level breadcrumb per
- * dropped observer so plugin authors debugging "why isn't my
+ * rule `happened` references PLUS all exemption-clause top-level
+ * `happened` references (O1 parity extension: an observer whose
+ * writes feed ONLY an exemption's `happened` must survive the drop,
+ * or the carve-out dies silently). Emits an `info`-level breadcrumb
+ * per dropped observer so plugin authors debugging "why isn't my
  * observer firing?" have a trail to follow without it bubbling up as
  * a diagnostic the user has to action.
  *
@@ -18,7 +21,7 @@
  * — see {@link dropUnusedObservers}'s contract.
  */
 
-import type { Observer, Rule } from "../schema.ts";
+import type { Exemption, Observer, Rule } from "../schema.ts";
 import { dropUnusedObservers } from "./drop-unused-observers.ts";
 
 export function finalizePluginState(
@@ -26,13 +29,26 @@ export function finalizePluginState(
   pluginRules: readonly Rule[],
   userObservers: readonly Observer[],
   pluginObservers: readonly Observer[],
+  userExemptions: readonly Exemption[] = [],
+  pluginExemptions: readonly Exemption[] = [],
 ): {
   pluginKept: readonly Observer[];
   userKept: readonly Observer[];
 } {
   const allRules = [...userRules, ...pluginRules];
-  const pluginDrop = dropUnusedObservers(pluginObservers, allRules);
-  const userDrop = dropUnusedObservers(userObservers, allRules);
+  const allExemptionWhens = [...userExemptions, ...pluginExemptions].map(
+    (e) => e.when,
+  );
+  const pluginDrop = dropUnusedObservers(
+    pluginObservers,
+    allRules,
+    allExemptionWhens,
+  );
+  const userDrop = dropUnusedObservers(
+    userObservers,
+    allRules,
+    allExemptionWhens,
+  );
   for (const d of [...pluginDrop.dropped, ...userDrop.dropped]) {
     console.info(
       `[pi-steering] observer '${d.name}' dropped; its writes ` +

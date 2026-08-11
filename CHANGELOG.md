@@ -30,7 +30,6 @@ once `v0.1.0` publishes to npm.
 - `disabledPlugins` / `disabledRules` are now applied BEFORE cross-layer collision detection in `buildConfig`. A user resolving a duplicate-plugin warning by adding the plugin to `disabledPlugins` now sees the warning go away.
 - `loadConfigs(cwd)`, `buildConfig(layers, defaults?)`, `loadSteeringConfig(cwd, defaults?)` return shape changed (now include `diagnostics` field). Internal `buildSessionRuntime` return shape changed. Bridge default factory is now async.
 - `PluginResolveWarning` interface renamed to `SteeringDiagnostic` with extended `kind` union (covers loader-side categories) and required `type: "warning" | "error"` field.
-- Config resolution is now a **two-layer model** mirroring pi's own settings (issue #21): project layer at `<cwd>/.pi/steering/`, global layer at `<agentDir>/steering/` (`~/.pi/agent/steering/`, or `$PI_CODING_AGENT_DIR` when set). The cwd → `$HOME` walk-up (`ancestorChain`) is **removed** — intermediate ancestor layers no longer load, and `~/.pi/steering/` is no longer special (no alias, no deprecation diagnostic). The old global path still works only when pi is launched from `$HOME` itself, where the project layer IS that path. Migration: `mv ~/.pi/steering ~/.pi/agent/steering`.
 
 ### Changed
 

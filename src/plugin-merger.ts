@@ -37,6 +37,7 @@ import {
   RESERVED_PREDICATE_KEYS,
 } from "./evaluator-internals/predicates.ts";
 import type {
+  Exemption,
   Observer,
   OperatorField,
   Plugin,
@@ -216,6 +217,19 @@ export interface ResolvedPluginState {
 
   /** Plugin-shipped rules in registration order, deduped by name. */
   rules: Rule[];
+
+  /**
+   * Plugin-shipped guard-rule carve-outs, in plugin registration
+   * order. Optional: absent when no active plugin ships exemptions
+   * (the evaluator treats `undefined` as an empty bucket).
+   *
+   * `disabledPlugins` filters are applied BEFORE collection — a
+   * disabled plugin contributes NOTHING, including its exemptions.
+   * Config-layer exemptions are NOT here; they live on
+   * `SteeringConfig.exemptions` and are unioned with this bucket at
+   * evaluator build time (see `buildEvaluator`).
+   */
+  exemptions?: readonly Exemption[];
 
   /**
    * Rule-name → plugin-name mapping for every rule surviving in
@@ -585,6 +599,17 @@ export function resolvePlugins(
     }
   }
 
+  // --- exemptions ---------------------------------------------------------
+  // Plugin-shipped carve-outs accumulate with the rest of the plugin;
+  // `disabledPlugins` (applied above to build `activePlugins`) drops
+  // them with everything else. No name dedup / collision concept —
+  // duplicates are idempotent at evaluation time.
+  const exemptions: Exemption[] = [];
+  for (const plugin of activePlugins) {
+    if (!plugin.exemptions) continue;
+    exemptions.push(...plugin.exemptions);
+  }
+
   return {
     predicates,
     observers,
@@ -593,6 +618,7 @@ export function resolvePlugins(
     composedTrackers,
     rules,
     rulePluginOwners: Object.fromEntries(ruleOwner),
+    ...(exemptions.length > 0 ? { exemptions } : {}),
     diagnostics,
   };
 }

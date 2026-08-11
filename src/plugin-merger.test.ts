@@ -63,6 +63,9 @@ describe("resolvePlugins: empty input", () => {
     assert.deepEqual(state.trackerModifiers, {});
     assert.deepEqual(state.composedTrackers, {});
     assert.deepEqual(state.rules, []);
+    // Optional field: absent (undefined) when no plugin ships
+    // exemptions — the evaluator treats it as an empty bucket.
+    assert.equal(state.exemptions, undefined);
     assert.deepEqual(state.diagnostics, []);
   });
 });

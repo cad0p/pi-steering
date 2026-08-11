@@ -141,7 +141,7 @@ export { AGENT_LOOP_INDEX_KEY } from "./evaluator-internals/context.ts";
 // `if (ctx.walkerState?.cwd === "unknown") return "unknown";`,
 // then the engine projects via `onUnknown:` policy).
 export { walkerUnknownCwdReason } from "./helpers/walker-unknown-cwd-reason.ts";
-// Loader — walk-up config discovery + merge.
+// Loader — two-layer config discovery + merge.
 export { buildConfig, loadConfigs, loadSteeringConfig } from "./loader.ts";
 // Schema types — the public authoring surface.
 export type {

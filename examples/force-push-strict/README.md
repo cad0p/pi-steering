@@ -33,7 +33,7 @@ Two equivalent forms. Pick whichever matches your setup.
 
 ### TypeScript form (canonical)
 
-Copy [`steering.ts`](./steering.ts) to `~/.pi/steering.ts` (or
+Copy [`steering.ts`](./steering.ts) to `~/.pi/agent/steering.ts` (or
 `<project-root>/.pi/steering.ts`) for a repo-scoped policy. The
 TypeScript form participates in compile-time checking via
 `defineConfig`. The loader accepts TypeScript only.

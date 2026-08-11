@@ -1631,8 +1631,8 @@ export interface SteeringConfig {
    * specify its own. Defaults to `true` (fail-closed - overrides
    * must be explicit opt-in per rule).
    *
-   * Walk-up merge: inner layer wins when specified; missing layer
-   * leaves the running value alone.
+   * Layer merge: inner (project) layer wins when specified; missing
+   * layer leaves the running value alone.
    *
    * `buildConfig` preserves `undefined` in the merged output so
    * downstream evaluators can distinguish "user didn't specify" from
@@ -1698,7 +1698,7 @@ export interface SteeringConfig {
    * to distinguish shape at a glance from the past-participle
    * {@link disabledRules} / {@link disabledPlugins} lists.
    *
-   * Walk-up merge: inner layer wins when specified.
+   * Layer merge: inner (project) layer wins when specified.
    */
   disableDefaults?: boolean;
 
@@ -1714,7 +1714,7 @@ export interface SteeringConfig {
    * (e.g. tracker name collision, reserved name violation) — the
    * engine cannot operate safely with those issues present.
    *
-   * Walk-up merge: inner layer wins when specified, identical to
+   * Layer merge: inner (project) layer wins when specified, identical to
    * {@link disableDefaults}.
    *
    * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.

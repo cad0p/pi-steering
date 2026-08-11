@@ -2,15 +2,17 @@
 // Part of pi-steering.
 
 /**
- * TS config loader. Walk up cwd → `$HOME`, find `.pi/steering/index.ts`
- * or `.pi/steering.ts` per layer, dynamic-import each, merge
- * inner-first. Per-symbol JSDoc carries the contract; see also the
- * {@link SteeringDiagnostic} / {@link SteeringDiagnosticKind} JSDoc
- * for the diagnostic stream.
+ * TS config loader. Two fixed layers: the project layer at
+ * `<cwd>/.pi/steering/` (or `.pi/steering.ts`) and the global layer
+ * at `<agentDir>/steering/`, dynamic-import each, merge inner-first
+ * (project layer wins on name-keyed collisions). Per-symbol JSDoc
+ * carries the contract; see also the {@link SteeringDiagnostic} /
+ * {@link SteeringDiagnosticKind} JSDoc for the diagnostic stream.
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
 import { runMergerPipeline } from "./internal/session-runtime.ts";
@@ -53,25 +55,25 @@ function assertNodeVersion(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Candidate file paths for a given directory's `.pi/steering/...` slot,
- * in priority order. First existing file wins.
+ * Candidate file paths for a given directory's `slot` (default
+ * `.pi/steering`), in priority order. First existing file wins.
  *
  * Exported for tests — not part of the library's public API.
  */
-export function configCandidates(dir: string): string[] {
-  return [
-    join(dir, ".pi", "steering", "index.ts"),
-    join(dir, ".pi", "steering.ts"),
-  ];
+export function configCandidates(dir: string, slot = ".pi/steering"): string[] {
+  return [join(dir, slot, "index.ts"), join(dir, `${slot}.ts`)];
 }
 
 /**
- * Return the non-`.ts` files that exist under `<dir>/.pi/steering/` so
+ * Return the non-`.ts` files that exist under `<dir>/<slot>` so
  * callers can warn about them. Uses a best-effort fs read: a missing
  * directory returns an empty list.
  */
-function unexpectedFilesUnderSteering(dir: string): string[] {
-  const steeringDir = join(dir, ".pi", "steering");
+function unexpectedFilesUnderSteering(
+  dir: string,
+  slot = ".pi/steering",
+): string[] {
+  const steeringDir = join(dir, slot);
   if (!existsSync(steeringDir)) return [];
   try {
     const entries = readdirSync(steeringDir);
@@ -95,42 +97,40 @@ function unexpectedFilesUnderSteering(dir: string): string[] {
 }
 
 /**
- * Walk up from `cwd` to `$HOME` (inclusive, or to the filesystem root
- * if HOME is unset / outside the cwd's ancestry), returning the list
- * of directories INNER-FIRST — so `[cwd, cwd/parent, ..., HOME]`.
+ * Resolve the pi agent directory: `$PI_CODING_AGENT_DIR` when set
+ * (tilde-expanded: `"~"` → home, `"~/x"` → `<home>/x`, anything else
+ * as-is), else `<home>/.pi/agent`. Mirrors pi's `getAgentDir()` in
+ * @earendil-works/pi-coding-agent.
  *
  * Exported for tests.
  */
-export function ancestorChain(cwd: string): string[] {
-  const home = process.env["HOME"] ?? "";
-  const out: string[] = [];
-  const seen = new Set<string>();
-  let current = resolve(cwd);
-  while (true) {
-    if (seen.has(current)) break; // symlink-loop guard
-    seen.add(current);
-    out.push(current);
-    if (current === home || current === "/") break;
-    const parent = dirname(current);
-    if (parent === current) break; // filesystem root
-    current = parent;
+export function resolveAgentDir(): string {
+  const envDir = process.env["PI_CODING_AGENT_DIR"];
+  if (envDir !== undefined && envDir !== "") {
+    // mirror pi's expandTildePath: "~" -> homedir, "~/x" -> homedir/x, else as-is
+    if (envDir === "~") return homedir();
+    if (envDir.startsWith("~/")) return join(homedir(), envDir.slice(2));
+    return envDir;
   }
-  return out;
+  return join(homedir(), ".pi", "agent");
 }
 
 /**
  * Find the config file (if any) for a single layer. Returns the
  * resolved file path and a `layer-form-coexistence` diagnostic when
- * both `.pi/steering/index.ts` and `.pi/steering.ts` coexist in the
- * same directory (the directory form wins).
+ * both `<slot>/index.ts` and `<slot>.ts` coexist in the same
+ * directory (the directory form wins).
  *
  * Exported for tests.
  */
-export function findConfigFile(dir: string): {
+export function findConfigFile(
+  dir: string,
+  slot = ".pi/steering",
+): {
   file: string | null;
   diagnostic: SteeringDiagnostic | null;
 } {
-  const [indexForm, flatForm] = configCandidates(dir);
+  const [indexForm, flatForm] = configCandidates(dir, slot);
   const indexExists = indexForm !== undefined && existsSync(indexForm);
   const flatExists = flatForm !== undefined && existsSync(flatForm);
   let diagnostic: SteeringDiagnostic | null = null;
@@ -144,8 +144,8 @@ export function findConfigFile(dir: string): {
       kind: "layer-form-coexistence",
       path: dir,
       message:
-        "both .pi/steering.ts and .pi/steering/index.ts exist; using " +
-        "directory form. Delete .pi/steering.ts to remove this warning.",
+        `both ${slot}.ts and ${slot}/index.ts exist; using ` +
+        `directory form. Delete ${slot}.ts to remove this warning.`,
     };
   }
   if (indexExists) return { file: indexForm ?? null, diagnostic };
@@ -223,12 +223,15 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
 }
 
 /**
- * Walk up from `cwd` collecting config layers. Returns INNER-FIRST
- * (caller passes to {@link buildConfig}, which expects inner-first so
- * early entries take precedence on collisions).
+ * Load the two fixed config layers for `cwd`: the project layer at
+ * `<cwd>/.pi/steering/` (or `.pi/steering.ts`) and the global layer
+ * at `<agentDir>/steering/` (see {@link resolveAgentDir}). Returns
+ * the layers INNER-FIRST (project first, then global; caller passes
+ * to {@link buildConfig}, which expects inner-first so early entries
+ * take precedence on collisions).
  *
  * Issues encountered along the way (per-layer import failure, dual
- * form coexistence, stray non-`.ts` file under `.pi/steering/`)
+ * form coexistence, stray non-`.ts` file under the layer directory)
  * surface as structured {@link SteeringDiagnostic} entries on the
  * returned object. The loader does not log to `console.warn` directly
  * — the bridge runtime owns the policy decision (throw vs. log) once
@@ -242,46 +245,59 @@ export async function loadConfigs(cwd: string): Promise<{
 }> {
   assertNodeVersion();
 
-  const dirs = ancestorChain(cwd);
   const layers: SteeringConfig[] = [];
   const diagnostics: SteeringDiagnostic[] = [];
-  for (const dir of dirs) {
-    const { file, diagnostic } = findConfigFile(dir);
-    if (diagnostic !== null) diagnostics.push(diagnostic);
-    if (file === null) {
-      // Surface stray files under `.pi/steering/` that the loader
-      // won't pick up. Only check when the directory exists but has
-      // no `index.ts` — otherwise a project without any steering
-      // directory would emit noise.
-      const steeringDir = join(dir, ".pi", "steering");
-      if (existsSync(steeringDir)) {
-        for (const stray of unexpectedFilesUnderSteering(dir)) {
-          diagnostics.push({
-            type: "warning",
-            kind: "layer-stray-file",
-            path: stray,
-            message: "ignoring non-.ts file under .pi/steering/",
-          });
-        }
-      }
-      continue;
-    }
-    try {
-      layers.push(await importConfigFile(file));
-    } catch (err) {
-      // Use err.message to drop the `Error: ` class prefix; native
-      // runtime errors (jiti syntax errors) may embed their path inside
-      // the message and we accept that duplication.
-      const body = err instanceof Error ? err.message : String(err);
-      diagnostics.push({
-        type: "warning",
-        kind: "layer-import-failed",
-        path: file,
-        message: `failed to import: ${body}`,
-      });
-    }
-  }
+  await loadLayer(cwd, ".pi/steering", layers, diagnostics);
+  await loadLayer(resolveAgentDir(), "steering", layers, diagnostics);
   return { layers, diagnostics };
+}
+
+/**
+ * Load a single layer: `slot` under `dir` (candidate file discovery,
+ * coexistence diagnostic, stray-file scan, dynamic import). Shared by
+ * the project layer (`cwd` + `.pi/steering`) and the global layer
+ * (`agentDir` + `steering`).
+ */
+async function loadLayer(
+  dir: string,
+  slot: string,
+  layers: SteeringConfig[],
+  diagnostics: SteeringDiagnostic[],
+): Promise<void> {
+  const { file, diagnostic } = findConfigFile(dir, slot);
+  if (diagnostic !== null) diagnostics.push(diagnostic);
+  if (file === null) {
+    // Surface stray files under `<slot>/` that the loader won't pick
+    // up. Only check when the directory exists but has no `index.ts`
+    // — otherwise a project without any steering directory would
+    // emit noise.
+    const slotDir = join(dir, slot);
+    if (existsSync(slotDir)) {
+      for (const stray of unexpectedFilesUnderSteering(dir, slot)) {
+        diagnostics.push({
+          type: "warning",
+          kind: "layer-stray-file",
+          path: stray,
+          message: `ignoring non-.ts file under ${slot}/`,
+        });
+      }
+    }
+    return;
+  }
+  try {
+    layers.push(await importConfigFile(file));
+  } catch (err) {
+    // Use err.message to drop the `Error: ` class prefix; native
+    // runtime errors (jiti syntax errors) may embed their path inside
+    // the message and we accept that duplication.
+    const body = err instanceof Error ? err.message : String(err);
+    diagnostics.push({
+      type: "warning",
+      kind: "layer-import-failed",
+      path: file,
+      message: `failed to import: ${body}`,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -428,10 +444,11 @@ function mergeStringUnion(
 }
 
 /**
- * Inner-wins boolean merge over walked-up layers. Walks left-to-right
- * (inner-first); returns the first explicit boolean or `undefined`.
- * Used by `buildConfig` and the session runtime for the inner-wins
- * boolean fields. Internal — not in the package's `exports` surface.
+ * Inner-wins boolean merge over the inner-first layers. Walks
+ * left-to-right (inner-first); returns the first explicit boolean or
+ * `undefined`. Used by `buildConfig` and the session runtime for the
+ * inner-wins boolean fields. Internal — not in the package's
+ * `exports` surface.
  */
 export function mergeBool(
   layers: readonly SteeringConfig[],

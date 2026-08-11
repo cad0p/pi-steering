@@ -14,8 +14,8 @@
  *   - the audit-log side effect for accepted overrides,
  *   - the observer-dispatcher side effect on matching tool_result
  *     events,
- *   - the walk-up TS-config loader: {@link buildSessionRuntime} reads
- *     `.pi/steering.ts` from an isolated `$HOME`.
+ *   - the two-layer TS-config loader: {@link buildSessionRuntime}
+ *     reads `.pi/steering.ts` from an isolated `$HOME`.
  *
  * The bridge factory's lifecycle wiring + config-loading glue isn't
  * covered by the unit suites; this file is the only end-to-end check.
@@ -180,8 +180,8 @@ let tmpHome: string;
  * Bind a fresh `$HOME` per test AND chdir into it via the shared
  * {@link useScratchHome} helper. The bridge factory eagerly loads
  * from `process.cwd()` at register time, so tests must launch from
- * the scratch home for the loader walk-up to find the per-test
- * config.
+ * the scratch home for the loader's project + global layers to find
+ * the per-test config.
  */
 function useRegisterScratchHome(): void {
   useScratchHome("pi-steering-register-", (t) => {

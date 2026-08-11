@@ -50,8 +50,8 @@ interface RunResult {
  * non-zero exit codes — the caller asserts on `code`.
  *
  * Accepts an optional `cwd` so tests for the `list` subcommand can
- * point the walk-up loader at a scratch directory without polluting
- * the project.
+ * point the loader's project layer at a scratch directory and isolate
+ * HOME so no real global config leaks, without polluting the project.
  */
 function runCli(...args: string[]): Promise<RunResult>;
 function runCli(opts: { cwd?: string }, ...args: string[]): Promise<RunResult>;
@@ -67,6 +67,12 @@ function runCli(
   } else {
     args = first === undefined ? [...rest] : [first, ...rest];
   }
+  // The child CLI reads the global layer from `$HOME`; without
+  // isolation the developer's real `~/.pi/agent/steering/` would
+  // leak into the tests. `PI_CODING_AGENT_DIR` must be removed (an
+  // empty string still overrides the default agent dir).
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: scratch };
+  delete env.PI_CODING_AGENT_DIR;
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(
       process.execPath,
@@ -74,6 +80,7 @@ function runCli(
       {
         stdio: ["ignore", "pipe", "pipe"],
         ...(cwd !== undefined ? { cwd } : {}),
+        env,
       },
     );
     let stdout = "";
@@ -348,7 +355,7 @@ describe("pi-steering list", () => {
     assert.match(r.stdout, /Resolved config: 1 plugin, 2 rules, 0 observers\./);
     assert.match(r.stdout, /git\s+\[pi-steering\/plugins\/git\]/);
     assert.match(r.stdout, /no-main-commit\s+bash\s+when: branch/);
-    assert.match(r.stdout, /User \(\.pi\/steering\/index\.ts\):/);
+    assert.match(r.stdout, /User \(project \+ global\):/);
     assert.match(r.stdout, /my-rule\s+bash/);
     assert.match(r.stdout, /Disabled rules: some-disabled-rule/);
   });

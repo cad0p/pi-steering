@@ -2,7 +2,7 @@
 
 A rule pack that blocks `git commit --amend`.
 
-> **TypeScript form (canonical):** see [`steering.ts`](./steering.ts) — drop in at `~/.pi/steering.ts` or `<project-root>/.pi/steering.ts`. The loader accepts TypeScript only. The [`steering.json`](./steering.json) form is provided for reference + `pi-steering import-json` migration; the loader does NOT pick up JSON files. See [examples/README.md#json](../README.md#json) for migration steps.
+> **TypeScript form (canonical):** see [`steering.ts`](./steering.ts) — drop in at `~/.pi/agent/steering.ts` or `<project-root>/.pi/steering.ts`. The loader accepts TypeScript only. The [`steering.json`](./steering.json) form is provided for reference + `pi-steering import-json` migration; the loader does NOT pick up JSON files. See [examples/README.md#json](../README.md#json) for migration steps.
 
 ## What it enforces
 
@@ -49,4 +49,4 @@ If you want to apply the rule only to specific directory trees (e.g. a monorepo 
 
 ## Install
 
-Copy [`steering.ts`](./steering.ts) to `~/.pi/steering.ts` (global) or to `<project-root>/.pi/steering.ts` (scoped via walk-up loader). For the cwd-scoped variant, adapt the `when.cwd` regex inline. The loader accepts TypeScript only; the `steering.cwd-scoped.json` reference can be migrated via `pi-steering import-json` — see [examples/README.md#json](../README.md#json).
+Copy [`steering.ts`](./steering.ts) to `~/.pi/agent/steering.ts` (global) or to `<project-root>/.pi/steering.ts` (project layer). For the cwd-scoped variant, adapt the `when.cwd` regex inline. The loader accepts TypeScript only; the `steering.cwd-scoped.json` reference can be migrated via `pi-steering import-json` — see [examples/README.md#json](../README.md#json).

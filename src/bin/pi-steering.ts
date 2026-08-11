@@ -9,7 +9,8 @@
  *     Convert a v1 JSON config to the v2 TS config shape.
  *
  *   pi-steering list [--format=text|json]
- *     Resolve the walk-up config from the CWD and print the
+ *     Resolve the two-layer config (project `<cwd>/.pi/steering/` +
+ *     global `<agentDir>/steering/`) from the CWD and print the
  *     effective plugins / rules / observers / disables.
  *
  * Exit codes:
@@ -75,10 +76,12 @@ SUBCOMMANDS
       the JSON-to-TS conversion surface and rejected features.
 
   list [--format=text|json]
-      Load the effective config for the current directory (walk-up
-      from cwd) and print the resolved plugins, rules, and observers,
-      grouped by source. Useful for answering "which rules are
-      active here?" without reading the config files by hand.
+      Load the effective config for the current directory (project
+      layer at <cwd>/.pi/steering/ + global layer at
+      <agentDir>/steering/) and print the resolved plugins, rules,
+      and observers, grouped by source. Useful for answering "which
+      rules are active here?" without reading the config files by
+      hand.
 
 OPTIONS
   -h, --help    Show this help.
@@ -214,8 +217,9 @@ async function runList(args: string[]): Promise<number> {
     }
   }
 
-  // Walk up from cwd and merge. CLI deliberately omits
-  // DEFAULT_PLUGINS / DEFAULT_RULES; runtime injects them.
+  // Load project layer (cwd) + global layer (agent dir) and merge.
+  // CLI deliberately omits DEFAULT_PLUGINS / DEFAULT_RULES; runtime
+  // injects them.
   let layers: readonly SteeringConfig[];
   let loaderDiagnostics: readonly SteeringDiagnostic[] = [];
   try {
@@ -280,10 +284,11 @@ async function runList(args: string[]): Promise<number> {
 /**
  * CLI variant of the merge pipeline. Redirects `console.info`
  * breadcrumbs (disabled-plugin / disabled-rule / dropped-observer)
- * onto stderr so stdout stays clean for `--format=json`. After
- * {@link runMergerPipeline}, mirrors {@link buildSessionRuntime}'s
- * `disabledRules` filter + `finalizePluginState` so `pi-steering
- * list` reports the same observer-drop set production sees.
+ * onto stderr so stdout stays clean for `--format=json`. Loads the
+ * project + global layers and merges them inner-first (project wins),
+ * then mirrors {@link buildSessionRuntime}'s `disabledRules` filter +
+ * `finalizePluginState` so `pi-steering list` reports the same
+ * observer-drop set production sees.
  */
 function runCliMergeWithInfoCapture(layers: readonly SteeringConfig[]): {
   config: SteeringConfig;
@@ -333,9 +338,10 @@ function printListHelp(): void {
 USAGE
   pi-steering list [--format=text|json]
 
-Walks up from the current directory looking for .pi/steering/index.ts
-(or .pi/steering.ts) at each ancestor. Merges the layers inner-first
-and prints the effective plugins, rules, and observers.
+Loads the project layer (<cwd>/.pi/steering/) and the global layer
+(~/.pi/agent/steering/, or $PI_CODING_AGENT_DIR/steering) and prints
+the effective plugins, rules, and observers. Project layer wins on
+rule-name collision.
 
 FLAGS
   --format=text   (default) human-readable grouped output
@@ -443,7 +449,7 @@ function observerJSON(o: Observer): unknown {
  *     no-main-commit     bash  when: branch
  *     ...
  *
- *   User (.pi/steering/index.ts):
+ *   User (project + global):
  *     (none)
  *
  *   Disabled: (none)
@@ -484,7 +490,7 @@ function renderListText(config: SteeringConfig): string {
   }
 
   // User block.
-  lines.push("User (.pi/steering/index.ts):");
+  lines.push("User (project + global):");
   if (userRules.length === 0 && userObservers.length === 0) {
     lines.push("  (none)");
   } else {

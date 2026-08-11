@@ -12,9 +12,9 @@
  *
  *   - {@link loadHarness}         — build an evaluator + dispatcher
  *                                    pair from a static
- *                                    {@link SteeringConfig}. No walk-up
- *                                    loading — tests pass explicit
- *                                    config.
+ *                                    {@link SteeringConfig}. No
+ *                                    filesystem discovery — tests
+ *                                    pass explicit config.
  *   - {@link mockContext}         — build a {@link PredicateContext}
  *                                    for unit-testing predicate
  *                                    handlers in isolation.
@@ -246,16 +246,16 @@ export interface LoadHarnessOptions {
 /**
  * Build an evaluator + observer dispatcher pair from a static
  * {@link SteeringConfig}. Tests drive rules through the same pipeline
- * production uses, without needing a pi runtime stub or walk-up
- * loading.
+ * production uses, without filesystem discovery.
  */
 export function loadHarness(options: LoadHarnessOptions): Harness {
   const inputConfig = options.config;
   const includeDefaults = options.includeDefaults ?? false;
 
   // Run the same merge that production does (single layer here, since
-  // loadHarness operates on an in-memory config rather than a walk-up
-  // chain). The shared helper short-circuits between buildConfig and
+  // loadHarness operates on an in-memory config rather than a
+  // filesystem discovery chain). The shared helper short-circuits
+  // between buildConfig and
   // resolvePlugins on error-class merge diagnostics so a
   // `tracker-name-collision` flagged by `buildConfig` is not also
   // re-flagged by `resolvePlugins`. The diagnostics surface within-

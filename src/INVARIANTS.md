@@ -25,7 +25,8 @@ try/catch; `evaluateExemptionClause` per-exemption try/catch),
 `evaluator-internals/predicates.ts` (per-predicate
 try/catch in `runPredicateChain`; `onUnknownDefault` projection
 parameter in `evaluateWhen` / `evaluateNotBlock` /
-`readLeafOnUnknown`).
+`readLeafOnUnknown`; the `ignoreExplicitModifiers` strict flag;
+`validateExemptionWhenClauseShape`).
 
 A predicate that throws — built-in or plugin-supplied, sync or async
 — is treated as "rule does not fire", logged via `console.warn` with
@@ -48,6 +49,18 @@ leaf counts as "does not match" → the target guard still fires:
   `onUnknownDefault: "allow"` (unknown → false → no exemption)
   across all four projection sites: the `cwd` leaf, plugin-predicate
   leaves, `condition:`, and the `not:` block-level policy.
+- STRICT fail-closed — NO escape hatch: exemption evaluation also
+  passes `ignoreExplicitModifiers: true`, so ANY explicit
+  `onUnknown:` modifier present in an exemption clause is IGNORED
+  (the projection is hard "allow" at all four sites). Even an
+  `as any`-smuggled `onUnknown: "block"` never exempts on unknown.
+  Unknown-handling is a policy of the PRIMARY gate (the rule); a
+  carve-out shipped by a third-party plugin can never weaken it.
+  Enforced at three levels: type-level (`ExemptionWhenClause` in
+  schema.ts — writing `onUnknown` in an exemption is a compile
+  error), load-time (`validateExemptionWhenClauseShape` rejects a
+  smuggled `onUnknown` — clause top level, not-block top level, and
+  leaf object forms), and evaluation (this flag — defense-in-depth).
 - Escapes `evaluateWhen` doesn't swallow
   (`UnknownPredicateError`, `evaluateHappened` shape throws) are
   caught per-exemption in `evaluateExemptionClause` — a throwing
@@ -56,8 +69,6 @@ leaf counts as "does not match" → the target guard still fires:
   `exemption for rule "…" threw`, and throws swallowed INSIDE
   `evaluateWhen` (handler / `condition:` catches) carry the source
   tag `@exemption` instead of a rule source like `@git` / `@user`.
-- An explicit `onUnknown: "block"` inside an exemption clause still
-  projects unknown → match (author opt-in to unknown-exempts).
 
 **`unless` disambiguation:** `Rule.unless` is a per-rule, same-rule-scope optional exemption field. The registry is the cross-plugin ACCUMULATION mechanism — exemption-by-name stacks across layers and plugins; `unless` only lives on the rule it exempts.
 
@@ -69,9 +80,11 @@ output, evaluator warn logs), so they get the same treatment:
 (plugin exemptions; a malformed exemption drops the whole plugin,
 mirroring the rule/observer skip), plus the `buildEvaluator`
 defense-in-depth throw for direct-caller paths. Exemption `when:`
-clauses also pass `validateWhenClauseShape` at `buildEvaluator`
-time — an empty clause (`when: {}`) would be vacuous-true and
-silently exempt its target rule, opening the guard.
+clauses also pass `validateExemptionWhenClauseShape` at
+`buildEvaluator` time — an empty clause (`when: {}`) would be
+vacuous-true and silently exempt its target rule, opening the
+guard, and a smuggled `onUnknown` would weaken the rule's
+fail-closed posture.
 
 ### `S2` — write-through-read consistency
 

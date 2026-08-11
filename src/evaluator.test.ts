@@ -32,6 +32,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { makeCtx, makeTrackedHost as makeHost } from "./__test-helpers__.ts";
 import { buildEvaluator, type EvaluatorHost } from "./evaluator.ts";
+import { evaluateWhen } from "./evaluator-internals/predicates.ts";
 import type { ResolvedPluginState } from "./plugin-merger.ts";
 import { resolvePlugins } from "./plugin-merger.ts";
 import type {
@@ -6402,29 +6403,117 @@ describe("buildEvaluator: exemption registry", () => {
     assert.match((res as { reason: string }).reason, /no-main-commit/);
   });
 
-  it("explicit onUnknown:'block' inside an exemption clause opts back into unknown-exempts", async () => {
-    const evaluator = buildEvaluator(
-      {
-        rules: [COMMIT_RULE],
-        exemptions: [
-          {
-            rule: "no-main-commit",
-            when: { cwd: { pattern: "/vault/", onUnknown: "block" } },
-          },
-        ],
-      },
-      resolve(),
-      makeHost(),
-    );
-    const res = await evaluator.evaluate(
-      bashEvent("cd $(pwd) && git commit -m x"),
-      makeCtx("/repo"),
-      0,
-    );
+  it("explicit onUnknown:'block' smuggled into an exemption clause is IGNORED (strict — unknown never exempts)", async () => {
+    // STRICT fail-closed (design review: NO escape hatch). The
+    // exemption evaluation path passes `ignoreExplicitModifiers: true`
+    // so even an `as any`-smuggled `onUnknown: "block"` projects
+    // unknown to "does not match" — the guard still fires.
+    //
+    // Pinned here directly against `evaluateWhen` (not end-to-end)
+    // because `validateExemptionWhenClauseShape` rejects the smuggled
+    // clause at load time — this is the defense-in-depth level 3
+    // (evaluation ignores explicit modifiers regardless).
+    const clause = {
+      cwd: { pattern: "/vault/", onUnknown: "block" },
+    } as unknown as TopLevelWhenClause<string>;
+    // Exemption flags: "allow"-default projection + explicit
+    // modifiers ignored → unknown must NOT match.
     assert.equal(
-      res,
-      undefined,
-      "explicit block projection: unknown counts as match -> exempt",
+      await evaluateWhen(
+        clause,
+        { cwd: "unknown" },
+        {} as unknown as PredicateContext,
+        {},
+        "no-main-commit",
+        "exemption",
+        "allow",
+        true,
+      ),
+      false,
+      "explicit onUnknown:'block' must NOT turn unknown into a match under exemption evaluation (hard allow projection)",
+    );
+    // Rule path unchanged: the SAME clause with rule-side defaults
+    // ("block" default + explicit modifiers honored) still projects
+    // unknown to match — rules keep today's onUnknown semantics
+    // byte-identical; the strict flag only affects exemption eval.
+    assert.equal(
+      await evaluateWhen(
+        clause,
+        { cwd: "unknown" },
+        {} as unknown as PredicateContext,
+        {},
+        "no-main-commit",
+        "user",
+      ),
+      true,
+      "rule-path onUnknown:'block' must still project unknown to match (rule behavior unchanged)",
+    );
+  });
+
+  it("exemption when with a top-level onUnknown is REJECTED at load (as any)", () => {
+    assert.throws(
+      () =>
+        buildEvaluator(
+          {
+            rules: [COMMIT_RULE],
+            exemptions: [
+              {
+                rule: "no-main-commit",
+                when: {
+                  cwd: "/vault/",
+                  onUnknown: "block",
+                } as unknown as TopLevelWhenClause<string>,
+              },
+            ],
+          },
+          resolve(),
+          makeHost(),
+        ),
+      /exemption for rule "no-main-commit".*onUnknown/,
+    );
+  });
+
+  it("exemption when with onUnknown inside not: is REJECTED at load (as any)", () => {
+    assert.throws(
+      () =>
+        buildEvaluator(
+          {
+            rules: [COMMIT_RULE],
+            exemptions: [
+              {
+                rule: "no-main-commit",
+                when: {
+                  not: { cwd: "/vault/", onUnknown: "block" },
+                } as unknown as TopLevelWhenClause<string>,
+              },
+            ],
+          },
+          resolve(),
+          makeHost(),
+        ),
+      /exemption for rule "no-main-commit".*onUnknown/,
+    );
+  });
+
+  it("exemption when with onUnknown in a leaf object form (cwd { pattern, onUnknown }) is REJECTED at load (as any)", () => {
+    assert.throws(
+      () =>
+        buildEvaluator(
+          {
+            rules: [COMMIT_RULE],
+            exemptions: [
+              {
+                rule: "no-main-commit",
+                when: {
+                  cwd: { pattern: "/vault/", onUnknown: "block" },
+                } as unknown as TopLevelWhenClause<string>,
+              },
+            ],
+          },
+          resolve(),
+          makeHost(),
+        ),
+      /exemption for rule "no-main-commit".*onUnknown/,
     );
   });
 

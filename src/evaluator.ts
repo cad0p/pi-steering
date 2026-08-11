@@ -75,6 +75,7 @@ import {
   evaluateWhen,
   matchesPattern,
   matchesPatternOrFn,
+  validateExemptionWhenClauseShape,
   validateWhenClauseShape,
 } from "./evaluator-internals/predicates.ts";
 import {
@@ -206,20 +207,28 @@ export function buildEvaluator(
   // leaves) would otherwise produce a vacuous-true clause that
   // EXEMPTS the rule unconditionally, silently opening its guard.
   // Config and plugin buckets go through the same checks.
+  //
+  // STRICT fail-closed (no escape hatch): `validateExemptionWhenClauseShape`
+  // additionally rejects any `onUnknown` key anywhere in the clause
+  // (top level, not-block level, leaf object forms) — the runtime
+  // guard for `as any` / plain-JS authors who bypass the type-level
+  // ban via {@link ExemptionWhenClause}. A carve-out can never opt
+  // back into unknown-exempts; the target rule's own `onUnknown:`
+  // policy decides.
   for (const exemption of config.exemptions ?? []) {
     const d = validateName("rule", exemption.rule, "exemption");
     if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);
-    validateWhenClauseShape(
+    validateExemptionWhenClauseShape(
       exemption.when,
-      `exemption for rule "${exemption.rule}".when`,
+      `exemption for rule "${exemption.rule}"`,
     );
   }
   for (const exemption of resolved.exemptions ?? []) {
     const d = validateName("rule", exemption.rule, "exemption");
     if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);
-    validateWhenClauseShape(
+    validateExemptionWhenClauseShape(
       exemption.when,
-      `exemption for rule "${exemption.rule}".when`,
+      `exemption for rule "${exemption.rule}"`,
     );
   }
 
@@ -932,6 +941,12 @@ async function evaluateCandidate(
  *     stock rule-side default `"block"` would project unknown to
  *     TRUE — clause-true means exempt, so it would fail-OPEN the
  *     guard.)
+ *   - STRICT: explicit `onUnknown:` modifiers inside the clause are
+ *     IGNORED (`ignoreExplicitModifiers: true` — the projection is
+ *     hard "allow" at all four sites). Even an `as any`-smuggled
+ *     `onUnknown: "block"` never exempts on unknown; the type-level
+ *     ban (`ExemptionWhenClause`) and the load-time rejection
+ *     (`validateExemptionWhenClauseShape`) are the other two layers.
  *   - Escapes `evaluateWhen` does not swallow (`UnknownPredicateError`,
  *     `evaluateHappened` shape throws, …) are caught HERE, per
  *     exemption — a throwing exemption predicate = "does not match"
@@ -954,6 +969,7 @@ async function evaluateExemptionClause(
       ruleName,
       "exemption",
       "allow",
+      true, // ignoreExplicitModifiers — strict fail-closed (S1)
     );
   } catch (err) {
     console.warn(

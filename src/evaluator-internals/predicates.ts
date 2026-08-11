@@ -123,10 +123,18 @@ export function isReservedPredicateKey(
  *
  * `path` describes the call site for error messages, e.g.
  * `'rule "no-main-commit".when'` or `'rule "no-git-worktree".when.not'`.
+ *
+ * `options.rejectOnUnknown` switches the validator into STRICT
+ * exemption mode (used via {@link validateExemptionWhenClauseShape}):
+ * any `onUnknown` key found — at the clause top level, at the
+ * not-block top level (recursion), or in a leaf object form
+ * (`{ pattern, onUnknown }` / `{ value, onUnknown }`) — throws
+ * instead of being stripped as a modifier.
  */
 export function validateWhenClauseShape(
   block: TopLevelWhenClause<string> | undefined,
   path: string,
+  options: { rejectOnUnknown?: boolean } = {},
 ): void {
   if (block === undefined) return;
   let leafKeys = 0;
@@ -136,7 +144,31 @@ export function validateWhenClauseShape(
     // Strip modifier keys only — the operator field `not:` produces a
     // verdict via Kleene composition of the inner not-block, so it
     // counts as a leaf for the outer level's leaf-count.
-    if (isModifierKey(key)) continue;
+    if (isModifierKey(key)) {
+      if (options.rejectOnUnknown) {
+        throw new Error(
+          `[pi-steering] ${path} contains a forbidden 'onUnknown:' modifier. ` +
+            `Exemptions are strictly fail-closed: unknown walker values never ` +
+            `exempt, and 'onUnknown:' cannot be written anywhere inside an ` +
+            `exemption clause — the target rule's own 'onUnknown:' policy ` +
+            `decides. Remove the modifier.`,
+        );
+      }
+      continue;
+    }
+    // Leaf object forms can smuggle `onUnknown` as a sibling of
+    // `pattern` / `value` (e.g. `cwd: { pattern, onUnknown }`, or a
+    // plugin predicate's `{ value, onUnknown }` spread). Reject those
+    // in strict mode too.
+    if (options.rejectOnUnknown && leafObjectCarriesOnUnknown(v)) {
+      throw new Error(
+        `[pi-steering] ${path}.${key} carries a forbidden 'onUnknown:' modifier ` +
+          `in its leaf object form. Exemptions are strictly fail-closed: unknown ` +
+          `walker values never exempt, and 'onUnknown:' cannot be written anywhere ` +
+          `inside an exemption clause — the target rule's own 'onUnknown:' policy ` +
+          `decides. Remove the modifier.`,
+      );
+    }
     leafKeys += 1;
   }
   if (leafKeys === 0) {
@@ -179,8 +211,67 @@ export function validateWhenClauseShape(
     validateWhenClauseShape(
       notBlock as TopLevelWhenClause<string>,
       `${path}.not`,
+      options,
     );
   }
+}
+
+/**
+ * Load-time guard for the type-level `onUnknown` ban on exemption
+ * clauses (see {@link ExemptionWhenClause} in schema.ts). Runs the
+ * same empty-clause foot-gun check as {@link validateWhenClauseShape}
+ * PLUS rejects any `onUnknown` key smuggled in via `as any` / plain
+ * JS, at three placements:
+ *
+ *   - the clause top level (`when: { cwd: /x/, onUnknown: ... }`),
+ *   - the not-block top level (`when: { not: { cwd: /x/, onUnknown:
+ *     ... } }` — the recursion below), and
+ *   - leaf object forms carrying `pattern` / `value` keys
+ *     (`cwd: { pattern: /x/, onUnknown: ... }`, plugin spread forms
+ *     `{ value: ..., onUnknown: ... }`).
+ *
+ * `condition` (function) and `happened` (`{ event, in, since?,
+ * notIn? }`) values are skipped — they cannot carry `onUnknown`.
+ *
+ * This is the runtime half of the strict fail-closed enforcement
+ * (defense-in-depth for `as any` / plain-JS authors who bypass the
+ * type-level ban); the evaluation half — explicit modifiers IGNORED
+ * regardless — lives in {@link evaluateWhen}'s
+ * `ignoreExplicitModifiers` flag.
+ *
+ * `label` names the exemption in error messages, e.g.
+ * `exemption for rule "no-main-commit"`.
+ */
+export function validateExemptionWhenClauseShape(
+  when: TopLevelWhenClause<string> | undefined,
+  label: string,
+): void {
+  validateWhenClauseShape(when, label, { rejectOnUnknown: true });
+}
+
+/**
+ * Does this leaf value carry a `{ pattern | value, onUnknown }`
+ * object form — i.e. a spread-form leaf that smuggles an `onUnknown`
+ * modifier as a sibling of its payload key? Used by
+ * {@link validateWhenClauseShape} in strict (`rejectOnUnknown`)
+ * mode to reject the leaf-object-form placement of `onUnknown` in
+ * exemption clauses.
+ *
+ * Functions (`condition`) and `happened` shapes (`{ event, in, ... }`
+ * — no `pattern` / `value` key) are not object-form leaves and are
+ * skipped.
+ */
+function leafObjectCarriesOnUnknown(value: unknown): boolean {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    value instanceof RegExp
+  ) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return ("pattern" in record || "value" in record) && "onUnknown" in record;
 }
 
 /**
@@ -681,11 +772,21 @@ interface WhenWalkerState {
  * override: exemption clauses project unknown to "does not match"
  * (default `"allow"` → guard still fires) so a carve-out can never
  * silently fail-OPEN its target rule. See {@link evaluateWhen}.
+ *
+ * `ignoreExplicitModifiers` is the STRICT exemption-evaluation flag:
+ * when set, the explicit-modifier branch is skipped ENTIRELY and the
+ * default is returned unconditionally — even an `as any`-smuggled
+ * `onUnknown: "block"` never exempts on unknown (defense-in-depth
+ * behind the type-level ban + load-time validation). Rule
+ * evaluation leaves it `false` — explicit modifiers stay honored as
+ * today (byte-identical rule-path behavior).
  */
 function readLeafOnUnknown(
   value: unknown,
   onUnknownDefault: "allow" | "block" = "block",
+  ignoreExplicitModifiers = false,
 ): "allow" | "block" {
+  if (ignoreExplicitModifiers) return onUnknownDefault;
   if (
     value !== null &&
     typeof value === "object" &&
@@ -827,6 +928,13 @@ function kleeneAnd(verdicts: readonly PredicateVerdict[]): PredicateVerdict {
  * block-level policy when the block omits `onUnknown:` (default
  * `"block"`; exemption evaluation passes `"allow"` so unknown leaves
  * inside an exemption's `not:` never exempt — see {@link evaluateWhen}).
+ *
+ * `ignoreExplicitModifiers` is the STRICT exemption-evaluation flag:
+ * when set, an explicit block-level `onUnknown:` is ignored and the
+ * default applies unconditionally (hard "allow" projection under
+ * exemption evaluation — defense-in-depth behind the type-level ban
+ * + load-time validation). Rule evaluation leaves it `false` — the
+ * block-level modifier stays honored as today.
  */
 async function evaluateNotBlock(
   block: TopLevelWhenClauseNoRecurse<string>,
@@ -836,10 +944,14 @@ async function evaluateNotBlock(
   ruleName: string,
   source: string,
   onUnknownDefault: "allow" | "block" = "block",
+  ignoreExplicitModifiers = false,
 ): Promise<boolean> {
   // Read block-level `onUnknown:` modifier. Default fail-CLOSED
   // (or the exemption-evaluation override via `onUnknownDefault`).
+  // STRICT exemption evaluation ignores the explicit modifier
+  // entirely — the projection is hard "allow".
   const blockOnUnknown =
+    !ignoreExplicitModifiers &&
     (block as { onUnknown?: unknown }).onUnknown === "allow"
       ? "allow"
       : onUnknownDefault;
@@ -962,8 +1074,21 @@ async function evaluateNotBlock(
  * the `cwd` leaf (`readLeafOnUnknown`), plugin-predicate leaves
  * (`readLeafOnUnknown`), the `condition:` escape hatch (hard-coded
  * `"block"` in rule mode), and the `not:` block-level policy
- * (`evaluateNotBlock`). An exemption author can still write an
- * explicit `onUnknown: "block"` to opt back into unknown-exempts.
+ * (`evaluateNotBlock`).
+ *
+ * ## Strict fail-closed: the `ignoreExplicitModifiers` flag
+ *
+ * Exemption evaluation ALSO passes `ignoreExplicitModifiers: true`:
+ * any explicit `onUnknown:` modifier present in the clause is
+ * IGNORED — the projection is hard "allow" at all four sites, so
+ * even an `as any`-smuggled `onUnknown: "block"` never exempts on
+ * unknown. This is the evaluation-level half of the three-level
+ * enforcement (type-level ban via `ExemptionWhenClause` in
+ * schema.ts, load-time rejection via
+ * `validateExemptionWhenClauseShape`, and this hard projection as
+ * defense-in-depth). Rule evaluation leaves the flag `false` —
+ * explicit modifiers stay honored exactly as before (rule-path
+ * behavior is byte-identical).
  *
  * Escapes `evaluateWhen` does NOT swallow (`UnknownPredicateError`,
  * `evaluateHappened` shape throws, …) propagate to the caller — the
@@ -978,6 +1103,7 @@ export async function evaluateWhen(
   ruleName: string,
   source: string,
   onUnknownDefault: "allow" | "block" = "block",
+  ignoreExplicitModifiers = false,
 ): Promise<boolean> {
   if (!when) return true;
 
@@ -994,7 +1120,11 @@ export async function evaluateWhen(
     // Built-in: cwd. Trinary leaf with leaf-level `onUnknown:` policy.
     if (key === "cwd") {
       const verdict = evaluateCwd(value, state.cwd);
-      const onUnknown = readLeafOnUnknown(value, onUnknownDefault);
+      const onUnknown = readLeafOnUnknown(
+        value,
+        onUnknownDefault,
+        ignoreExplicitModifiers,
+      );
       if (!projectVerdict(verdict, onUnknown)) return false;
       continue;
     }
@@ -1017,6 +1147,7 @@ export async function evaluateWhen(
         ruleName,
         source,
         onUnknownDefault,
+        ignoreExplicitModifiers,
       );
       if (!notFires) return false;
       continue;
@@ -1071,7 +1202,11 @@ export async function evaluateWhen(
       source,
       key,
     );
-    const onUnknown = readLeafOnUnknown(value, onUnknownDefault);
+    const onUnknown = readLeafOnUnknown(
+      value,
+      onUnknownDefault,
+      ignoreExplicitModifiers,
+    );
     if (!projectVerdict(verdict, onUnknown)) return false;
   }
   return true;

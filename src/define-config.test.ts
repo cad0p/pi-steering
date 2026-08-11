@@ -1009,4 +1009,74 @@ describe("defineConfig: exemption typing + runtime copy", () => {
     });
     assert.equal(cfg.exemptions?.length, 2);
   });
+
+  it("exemptions[].when rejects onUnknown anywhere (type-level ban via ExemptionWhenClause)", () => {
+    const cfg = defineConfig({
+      rules: [
+        {
+          name: "no-force-push",
+          tool: "bash",
+          field: "command",
+          pattern: /^git/,
+          reason: "r",
+        },
+      ],
+      exemptions: [
+        {
+          rule: "no-force-push",
+          when: {
+            cwd: {
+              pattern: /x/,
+              // @ts-expect-error — onUnknown is forbidden in exemption clauses (strict fail-closed; leaf spread forms lose the modifier).
+              onUnknown: "block",
+            },
+          },
+        },
+        {
+          rule: "no-force-push",
+          when: {
+            not: {
+              cwd: /x/,
+              // @ts-expect-error — onUnknown is forbidden in exemption clauses (strict fail-closed; not-block modifier stripped).
+              onUnknown: "block",
+            },
+          },
+        },
+      ],
+    });
+    assert.equal(cfg.exemptions?.length, 2);
+  });
+
+  it("exemptions[].when accepts every modifier-free form (bare, array, pattern, condition, happened, not:)", () => {
+    const cfg = defineConfig({
+      rules: [
+        {
+          name: "no-force-push",
+          tool: "bash",
+          field: "command",
+          pattern: /^git/,
+          reason: "r",
+          writes: ["sync-done"],
+        },
+      ],
+      exemptions: [
+        // Bare shorthand.
+        { rule: "no-force-push", when: { cwd: /x/ } },
+        // Array shorthand (OR-of-patterns).
+        { rule: "no-force-push", when: { cwd: [/x/, /y/] } },
+        // Pattern object WITHOUT onUnknown.
+        { rule: "no-force-push", when: { cwd: { pattern: /x/ } } },
+        // condition function leaf.
+        { rule: "no-force-push", when: { condition: () => true } },
+        // happened leaf (writes-narrowed event).
+        {
+          rule: "no-force-push",
+          when: { happened: { event: "sync-done", in: "session" } },
+        },
+        // not: block without onUnknown.
+        { rule: "no-force-push", when: { not: { cwd: /x/ } } },
+      ],
+    });
+    assert.equal(cfg.exemptions?.length, 6);
+  });
 });

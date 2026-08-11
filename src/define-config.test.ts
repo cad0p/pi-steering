@@ -886,3 +886,127 @@ describe("Rule discriminated union: tool gates field", () => {
     assert.equal(cfg.rules?.length, 1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Exemption registry typing (issue #26)
+// ---------------------------------------------------------------------------
+
+describe("defineConfig: exemption typing + runtime copy", () => {
+  it("exemptions survive the runtime copy (reference-preserving when clauses)", () => {
+    const condition = () => true;
+    const cfg = defineConfig({
+      rules: [
+        {
+          name: "no-force-push",
+          tool: "bash",
+          field: "command",
+          pattern: /^git/,
+          reason: "r",
+        },
+      ],
+      exemptions: [
+        { rule: "no-force-push", when: { cwd: "/vault/" } },
+        {
+          rule: "no-force-push",
+          when: { condition },
+        },
+      ],
+    });
+    assert.equal(cfg.exemptions?.length, 2);
+    assert.deepEqual(cfg.exemptions?.[0]?.when, { cwd: "/vault/" });
+    // Function-typed leaves survive by reference (same object) —
+    // mirrors the rules/observers copy semantics.
+    assert.equal(cfg.exemptions?.[1]?.when?.condition, condition);
+  });
+
+  it("omits exemptions when the caller passed none", () => {
+    const cfg = defineConfig({});
+    assert.equal(cfg.exemptions, undefined);
+  });
+
+  it("exemptions[].rule accepts registered rule names (plugin + user + default)", () => {
+    const plugin = {
+      name: "p",
+      rules: [
+        {
+          name: "plugin-rule",
+          tool: "bash",
+          field: "command",
+          pattern: /./,
+          reason: "r",
+        },
+      ],
+    } as const satisfies Plugin;
+    const cfg = defineConfig({
+      plugins: [plugin],
+      rules: [
+        {
+          name: "user-rule",
+          tool: "bash",
+          field: "command",
+          pattern: /./,
+          reason: "r",
+        },
+      ],
+      exemptions: [
+        { rule: "plugin-rule", when: { cwd: "/v/" } },
+        { rule: "user-rule", when: { cwd: "/v/" } },
+        // Default rule names are part of the union too.
+        { rule: "no-force-push", when: { cwd: "/v/" } },
+      ],
+    });
+    assert.equal(cfg.exemptions?.length, 3);
+  });
+
+  it("exemptions[].rule rejects unknown rule names at type-check", () => {
+    const plugin = {
+      name: "p",
+      rules: [
+        {
+          name: "known-rule",
+          tool: "bash",
+          field: "command",
+          pattern: /./,
+          reason: "r",
+        },
+      ],
+    } as const satisfies Plugin;
+    const cfg = defineConfig({
+      plugins: [plugin],
+      exemptions: [
+        // @ts-expect-error — "unknown-rule" is not a registered rule name.
+        { rule: "unknown-rule", when: { cwd: "/v/" } },
+      ],
+    });
+    assert.equal(cfg.exemptions?.length, 1);
+  });
+
+  it("exemptions[].when.happened.event narrows against the writes union", () => {
+    const cfg = defineConfig({
+      rules: [
+        {
+          name: "consumer",
+          tool: "bash",
+          field: "command",
+          pattern: /./,
+          reason: "r",
+          writes: ["sync-done"],
+        },
+      ],
+      exemptions: [
+        {
+          rule: "consumer",
+          when: { happened: { event: "sync-done", in: "session" } },
+        },
+        {
+          rule: "consumer",
+          when: {
+            // @ts-expect-error — "forbidden-type" not in writes union.
+            happened: { event: "forbidden-type", in: "session" },
+          },
+        },
+      ],
+    });
+    assert.equal(cfg.exemptions?.length, 2);
+  });
+});

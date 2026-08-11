@@ -1025,6 +1025,41 @@ describe("loader: buildConfig", () => {
     assert.equal(merged.rules?.length, 1);
     assert.equal(merged.rules?.[0]?.reason, "user");
   });
+
+  it("unions exemptions across layers — ACCUMULATION, no inner-wins", () => {
+    const inner: SteeringConfig = {
+      exemptions: [{ rule: "no-force-push", when: { cwd: "/a/" } }],
+    };
+    const outer: SteeringConfig = {
+      exemptions: [{ rule: "no-force-push", when: { cwd: "/b/" } }],
+    };
+    const { config: merged, diagnostics } = buildConfig([inner, outer]);
+    // BOTH layers' exemptions survive — unlike rules, there is no
+    // inner-wins override for the same target.
+    assert.equal(merged.exemptions?.length, 2);
+    assert.deepEqual(
+      merged.exemptions?.map((e) => e.when),
+      [{ cwd: "/a/" }, { cwd: "/b/" }],
+    );
+    assert.deepEqual(diagnostics, []);
+  });
+
+  it("omits the exemptions key entirely when no layer ships exemptions", () => {
+    const { config: merged } = buildConfig([
+      { rules: [] },
+      { disabledRules: ["x"] },
+    ]);
+    assert.equal(merged.exemptions, undefined);
+  });
+
+  it("merges exemptions from the defaults layer too (outermost position)", () => {
+    const defaults: SteeringConfig = {
+      exemptions: [{ rule: "no-force-push", when: { cwd: "/d/" } }],
+    };
+    const { config: merged } = buildConfig([], defaults);
+    assert.equal(merged.exemptions?.length, 1);
+    assert.deepEqual(merged.exemptions?.[0]?.when, { cwd: "/d/" });
+  });
 });
 
 // ---------------------------------------------------------------------------

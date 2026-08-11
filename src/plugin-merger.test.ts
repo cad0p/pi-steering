@@ -13,12 +13,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Modifier, Tracker } from "@cad0p/unbash-walker";
+import { runMergerPipeline } from "./internal/session-runtime.ts";
 import {
   resolvePlugins,
   validateName,
   validateUserConfigNames,
 } from "./plugin-merger.ts";
-import type { Observer, Plugin, Rule } from "./schema.ts";
+import type { Observer, Plugin, Rule, SteeringConfig } from "./schema.ts";
 
 /** Build a minimal observer with a recognizable onResult. */
 function mkObserver(name: string): Observer {
@@ -789,5 +790,169 @@ describe("S3: resolvePlugins records invalid plugin / rule / observer names as e
     const result = resolvePlugins([plugin], {});
     assert.equal(result.rules.length, 0);
     assert.deepEqual(result.trackers, {});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Exemption registry (issue #26)
+// ---------------------------------------------------------------------------
+
+describe("resolvePlugins: plugin exemptions", () => {
+  it("collects plugin-shipped exemptions in registration order", () => {
+    const pluginA: Plugin = {
+      name: "a",
+      exemptions: [{ rule: "r1", when: { cwd: "/a/" } }],
+    };
+    const pluginB: Plugin = {
+      name: "b",
+      exemptions: [
+        { rule: "r1", when: { cwd: "/b1/" } },
+        { rule: "r2", when: { cwd: "/b2/" } },
+      ],
+    };
+    const result = resolvePlugins([pluginA, pluginB], {});
+    assert.deepEqual(result.exemptions, [
+      { rule: "r1", when: { cwd: "/a/" } },
+      { rule: "r1", when: { cwd: "/b1/" } },
+      { rule: "r2", when: { cwd: "/b2/" } },
+    ]);
+  });
+
+  it("disabledPlugins drops a plugin's exemptions with the rest of the plugin", () => {
+    const plugin: Plugin = {
+      name: "napkin",
+      exemptions: [{ rule: "no-main-commit", when: { cwd: "/vault/" } }],
+    };
+    const result = resolvePlugins([plugin], { disabledPlugins: ["napkin"] });
+    assert.equal(result.exemptions, undefined);
+    assert.deepEqual(result.diagnostics, []);
+  });
+
+  it("records an invalid-name diagnostic for a malformed exemption target inside a plugin (S3)", () => {
+    const plugin: Plugin = {
+      name: "napkin",
+      exemptions: [{ rule: "phony] ALL CLEAR [real", when: { cwd: "/v/" } }],
+    };
+    const result = resolvePlugins([plugin], {});
+    const d = result.diagnostics.find((d) => d.kind === "invalid-name");
+    assert.ok(d, "expected invalid-name diagnostic");
+    assert.equal(d?.type, "error");
+    assert.match(
+      d!.message,
+      /^rule name "phony\] ALL CLEAR \[real" \(plugin "napkin" exemption\).*disallowed/,
+    );
+  });
+});
+
+describe("S3: validateUserConfigNames exemption targets", () => {
+  it("returns no diagnostics for a clean exemption", () => {
+    const out = validateUserConfigNames([
+      { exemptions: [{ rule: "no-force-push", when: { cwd: "/v/" } }] },
+    ]);
+    assert.equal(out.length, 0);
+  });
+
+  it("flags a malformed user-config exemption target as an invalid-name diagnostic", () => {
+    const out = validateUserConfigNames([
+      {
+        exemptions: [{ rule: "bad name", when: { cwd: "/v/" } }],
+      },
+    ]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0]?.kind, "invalid-name");
+    assert.equal(out[0]?.type, "error");
+    assert.match(
+      out[0]!.message,
+      /^rule name "bad name" \(exemption\).*disallowed/,
+    );
+  });
+});
+
+describe("runMergerPipeline: exemption-orphan detection", () => {
+  it("flags an exemption targeting a rule name absent from the merged universe", () => {
+    const layers: SteeringConfig[] = [
+      {
+        exemptions: [{ rule: "no-such-rule", when: { cwd: "/v/" } }],
+      },
+    ];
+    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    const d = diagnostics.find((d) => d.kind === "exemption-orphan");
+    assert.ok(d, "expected exemption-orphan diagnostic");
+    assert.equal(d?.type, "warning");
+    assert.match(d!.message, /exemption for rule "no-such-rule" \(config\)/);
+  });
+
+  it("does NOT flag a target shipped only by a disabled plugin (inert, silent)", () => {
+    const plugin: Plugin = {
+      name: "napkin",
+      rules: [mkRule("no-main-commit")],
+    };
+    const layers: SteeringConfig[] = [
+      {
+        plugins: [plugin],
+        disabledPlugins: ["napkin"],
+        exemptions: [{ rule: "no-main-commit", when: { cwd: "/v/" } }],
+      },
+    ];
+    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    assert.equal(
+      diagnostics.some((d) => d.kind === "exemption-orphan"),
+      false,
+    );
+  });
+
+  it("does NOT flag a target disabled via disabledRules (inert, silent)", () => {
+    const layers: SteeringConfig[] = [
+      {
+        rules: [mkRule("no-main-commit")],
+        disabledRules: ["no-main-commit"],
+        exemptions: [{ rule: "no-main-commit", when: { cwd: "/v/" } }],
+      },
+    ];
+    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    assert.equal(
+      diagnostics.some((d) => d.kind === "exemption-orphan"),
+      false,
+    );
+  });
+
+  it("does NOT flag a DEFAULT_RULES target when defaults are active", () => {
+    const { diagnostics } = runMergerPipeline(
+      [{ exemptions: [{ rule: "no-force-push", when: { cwd: "/v/" } }] }],
+      undefined,
+      [],
+    );
+    assert.equal(
+      diagnostics.some((d) => d.kind === "exemption-orphan"),
+      false,
+      "default rule names are part of the universe even with defaults=undefined",
+    );
+  });
+
+  it("flags a DEFAULT_RULES target when disableDefaults removes the defaults", () => {
+    const layers: SteeringConfig[] = [
+      {
+        disableDefaults: true,
+        exemptions: [{ rule: "no-force-push", when: { cwd: "/v/" } }],
+      },
+    ];
+    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    const d = diagnostics.find((d) => d.kind === "exemption-orphan");
+    assert.ok(d, "expected exemption-orphan diagnostic");
+  });
+
+  it("flags plugin exemptions too (plugin bucket)", () => {
+    const plugin: Plugin = {
+      name: "napkin",
+      exemptions: [{ rule: "no-such-rule", when: { cwd: "/v/" } }],
+    };
+    const { diagnostics } = runMergerPipeline(
+      [{ plugins: [plugin] }],
+      undefined,
+      [],
+    );
+    const d = diagnostics.find((d) => d.kind === "exemption-orphan");
+    assert.ok(d, "expected exemption-orphan diagnostic");
+    assert.match(d!.message, /\(plugin "napkin"\)/);
   });
 });

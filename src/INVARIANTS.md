@@ -21,8 +21,11 @@ failing OPEN the gate.
 ### `S1` — fail-closed isolation
 
 **Where:** `evaluator.ts` (`evaluateEvent` top-level wrap; per-rule
-try/catch), `evaluator-internals/predicates.ts` (per-predicate
-try/catch in `runPredicateChain`).
+try/catch; `evaluateExemptionClause` per-exemption try/catch),
+`evaluator-internals/predicates.ts` (per-predicate
+try/catch in `runPredicateChain`; `onUnknownDefault` projection
+parameter in `evaluateWhen` / `evaluateNotBlock` /
+`readLeafOnUnknown`).
 
 A predicate that throws — built-in or plugin-supplied, sync or async
 — is treated as "rule does not fire", logged via `console.warn` with
@@ -36,6 +39,37 @@ engine, not from a rule.
 The same pattern applies to observers in `observer-dispatcher.ts` —
 a throwing observer is isolated to its own dispatch and never
 escalates.
+
+**Exemption evaluation (registry carve-outs) is fail-closed in the
+OPPOSITE projection** — a throwing exemption predicate or an unknown
+leaf counts as "does not match" → the target guard still fires:
+
+- `evaluateExemptionClause` runs `evaluateWhen` with
+  `onUnknownDefault: "allow"` (unknown → false → no exemption)
+  across all four projection sites: the `cwd` leaf, plugin-predicate
+  leaves, `condition:`, and the `not:` block-level policy.
+- Escapes `evaluateWhen` doesn't swallow
+  (`UnknownPredicateError`, `evaluateHappened` shape throws) are
+  caught per-exemption in `evaluateExemptionClause` — a throwing
+  exemption predicate = "does not match" = guard fires. Warn logs
+  label the EXEMPTION, not the target rule: the outer catch emits
+  `exemption for rule "…" threw`, and throws swallowed INSIDE
+  `evaluateWhen` (handler / `condition:` catches) carry the source
+  tag `@exemption` instead of a rule source like `@git` / `@user`.
+- An explicit `onUnknown: "block"` inside an exemption clause still
+  projects unknown → match (author opt-in to unknown-exempts).
+
+**Exemption target names** (`exemption.rule`) flow into the same
+user-visible surfaces (orphan diagnostics, `pi-steering list`
+output, evaluator warn logs), so they get the same treatment:
+`validateName("rule", exemption.rule, "exemption")` inside
+`validateUserConfigNames` (config exemptions) and `resolvePlugins`
+(plugin exemptions; a malformed exemption drops the whole plugin,
+mirroring the rule/observer skip), plus the `buildEvaluator`
+defense-in-depth throw for direct-caller paths. Exemption `when:`
+clauses also pass `validateWhenClauseShape` at `buildEvaluator`
+time — an empty clause (`when: {}`) would be vacuous-true and
+silently exempt its target rule, opening the guard.
 
 ### `S2` — write-through-read consistency
 

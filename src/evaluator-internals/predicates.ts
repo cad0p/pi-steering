@@ -693,8 +693,11 @@ function readLeafOnUnknown(
     !(value instanceof RegExp) &&
     "onUnknown" in (value as Record<string, unknown>)
   ) {
+    // Explicit modifier present: honor it strictly (typo-defense —
+    // any non-"allow" explicit value is "block"). The default only
+    // applies when the modifier is ABSENT.
     const v = (value as { onUnknown?: unknown }).onUnknown;
-    return v === "allow" ? "allow" : onUnknownDefault;
+    return v === "allow" ? "allow" : "block";
   }
   return onUnknownDefault;
 }

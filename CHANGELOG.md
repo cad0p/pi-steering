@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 <!-- Add your curated release notes here. -->
 <!-- USER-EDITABLE SECTION END -->
 
+### 🚀 Features
+
+- Two-layer config resolution — project `.pi/steering/` + global `agentDir/steering/`, walk-up removed ([#21](https://github.com/cad0p/pi-steering/pull/21)) ([#25](https://github.com/cad0p/pi-steering/pull/25))
+
 ### 🐛 Bug Fixes
 
 - Approve peer-graph build scripts (@google/genai, protobufjs) in pnpm-workspace.yaml ([#17](https://github.com/cad0p/pi-steering/pull/17))
@@ -15,6 +19,7 @@ All notable changes to this project will be documented in this file.
 ### 📚 Documentation
 
 - PUBLISHING.md reflects scoped @cad0p publish + semver-calver-release flow ([#15](https://github.com/cad0p/pi-steering/pull/15))
+- Npm install line for published scoped package ([#20](https://github.com/cad0p/pi-steering/pull/20))
 
 ### 🎨 Styling
 

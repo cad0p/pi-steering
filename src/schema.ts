@@ -1527,6 +1527,71 @@ export interface PredicateContext {
 }
 
 // ---------------------------------------------------------------------------
+// Exemption
+// ---------------------------------------------------------------------------
+
+/**
+ * A carve-out for a guard rule: when the given `when` clause MATCHES,
+ * the target rule does NOT fire — evaluation continues to the next
+ * rule exactly as if the target had missed.
+ *
+ * Exemptions are the name-keyed registry mechanism for narrowing
+ * guard rules (e.g. the git plugin's `no-main-commit`) WITHOUT
+ * copying or replacing them:
+ *
+ *   - **Accumulation, not replacement.** Exemptions attach by target
+ *     name to whichever rule wins that name after `disabledRules`
+ *     filtering — the winning rule's body doesn't matter, only its
+ *     name. Config-layer exemptions union across layers (no
+ *     inner-wins), and plugin-shipped exemptions stack with config
+ *     exemptions. Multiple exemptions for the same rule are OR-ed:
+ *     ANY matching clause prevents the rule from firing.
+ *   - **Duplicates are idempotent.** There is no collision concept;
+ *     the same carve-out declared twice is harmless.
+ *   - **Fail-closed by default.** Exemption clauses evaluate with an
+ *     "allow"-default projection — a predicate that can't resolve
+ *     (walker-unknown cwd, throwing handler, unregistered predicate
+ *     key) counts as "does not match", so the guard still fires.
+ *     This is the OPPOSITE default from rule `when:` clauses, which
+ *     project unknown to "match" (fail-closed for rules = fire); see
+ *     the evaluator's exemption path and `S1` in INVARIANTS.md.
+ *
+ * Distinct from {@link Rule.unless} (a per-rule, same-rule-scope
+ * optional exemption field) and from {@link Rule.when.not} (boolean
+ * negation of a sub-clause): the registry is the cross-plugin
+ * ACCUMULATION mechanism. See the README "Exemptions" section.
+ *
+ * `Writes` is the union of session-entry event literals the clause's
+ * `when.happened.event` is allowed to reference — threaded through by
+ * {@link defineConfig} identically to {@link Rule.when}.
+ * `RuleName` is the compile-time rule-name union the target is
+ * typo-checked against inside {@link defineConfig}; both default to
+ * `string` outside it (no check skipped at the schema level).
+ */
+export interface Exemption<
+  Writes extends string = string,
+  RuleName extends string = string,
+> {
+  /**
+   * Target rule name — the rule this exemption carves out. Typo-
+   * checked against the `AllRuleNames` union inside
+   * {@link defineConfig}; plain `string` at schema level. An
+   * exemption targeting a rule name that doesn't exist in the final
+   * merged rule universe surfaces an `exemption-orphan` warning
+   * (strict mode throws); a target that exists but is disabled is
+   * inert, silent, and NOT orphaned.
+   */
+  rule: RuleName;
+
+  /**
+   * Clause that, when it MATCHES, prevents the target rule from
+   * firing. Evaluated with the fail-closed "allow"-default
+   * projection (unknown → does not match → guard still fires).
+   */
+  when: TopLevelWhenClause<Writes>;
+}
+
+// ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
 
@@ -1562,6 +1627,21 @@ export interface Plugin {
 
   /** Observers the plugin ships. Referenced by name from rules. */
   observers?: readonly Observer[];
+
+  /**
+   * Guard-rule carve-outs this plugin ships — see {@link Exemption}.
+   *
+   * Plugin exemptions accumulate with the rest of the plugin:
+   * `disabledPlugins` drops them with everything else (a disabled
+   * plugin contributes NOTHING), and they stack with config-layer
+   * exemptions targeting the same rule (OR-ed at evaluation).
+   *
+   * Use-case: a plugin that wants to narrow ANOTHER plugin's (or a
+   * default rule's) guard for its own domain — e.g. a vault plugin
+   * exempting `no-main-commit` when `cwd` is inside a vault tree —
+   * without copying or replacing the rule body.
+   */
+  exemptions?: readonly Exemption[];
 
   /**
    * NEW trackers the plugin introduces. Keys are tracker names (e.g.
@@ -1729,6 +1809,30 @@ export interface SteeringConfig {
 
   /** Inline observers (rules reference by name). */
   observers?: readonly Observer[];
+
+  /**
+   * Guard-rule carve-outs — see {@link Exemption}. Name-keyed
+   * clauses that, when they match, prevent the target rule from
+   * firing.
+   *
+   * ACCUMULATION, not replacement: config-layer exemptions UNION
+   * across layers (project + global both apply — no inner-wins), and
+   * plugin-shipped exemptions stack on top. Multiple exemptions for
+   * the same rule are OR-ed — ANY matching clause exempts. An
+   * exemption targeting a rule name that doesn't exist in the final
+   * merged rule universe surfaces an `exemption-orphan` warning
+   * (strict mode throws at factory time); a target that exists but
+   * is disabled (via {@link disabledRules} or a disabled plugin) is
+   * inert and silent.
+   *
+   * Inside {@link defineConfig}, `rule` is typo-checked against the
+   * `AllRuleNames` union (same machinery as {@link disabledRules})
+   * and `when.happened.event` narrows against the config's `writes`
+   * union. See the README "Exemptions" section for the fail-closed
+   * semantics (unknown predicate state counts as "does not match",
+   * so a carve-out can never silently open a guard).
+   */
+  exemptions?: readonly Exemption[];
 }
 
 // ---------------------------------------------------------------------------

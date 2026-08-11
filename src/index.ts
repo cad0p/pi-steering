@@ -155,6 +155,7 @@ export type {
   EditRule,
   ExecOpts,
   ExecResult,
+  Exemption,
   InnerValue,
   Observer,
   ObserverContext,

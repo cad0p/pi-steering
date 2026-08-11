@@ -192,6 +192,35 @@ export function buildEvaluator(
     validateWhenClauseShape(rule.when, `rule "${rule.name}".when`);
   }
 
+  // S3 defense-in-depth for exemption target names (direct-caller
+  // paths — unit tests, SDK embedders — bypass
+  // `runMergerPipeline`'s diagnostic stream; this throw mirrors the
+  // rule-name throw above). Exemption names flow into orphan
+  // diagnostics, list output, and warn logs, so a malformed name
+  // must not leak into those strings.
+  //
+  // Also validate every exemption's `when:` clause shape — the
+  // empty-clause foot-gun (`when: {}`, or `not:` blocks with zero
+  // leaves) would otherwise produce a vacuous-true clause that
+  // EXEMPTS the rule unconditionally, silently opening its guard.
+  // Config and plugin buckets go through the same checks.
+  for (const exemption of config.exemptions ?? []) {
+    const d = validateName("rule", exemption.rule, "exemption");
+    if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);
+    validateWhenClauseShape(
+      exemption.when,
+      `exemption for rule "${exemption.rule}".when`,
+    );
+  }
+  for (const exemption of resolved.exemptions ?? []) {
+    const d = validateName("rule", exemption.rule, "exemption");
+    if (d !== undefined) throw new Error(`[pi-steering] ${d.message}`);
+    validateWhenClauseShape(
+      exemption.when,
+      `exemption for rule "${exemption.rule}".when`,
+    );
+  }
+
   // Default the fail-closed override policy per ADR "Override default".
   const defaultNoOverride = config.defaultNoOverride ?? true;
 

@@ -1949,6 +1949,17 @@ export type SteeringDiagnosticKind =
    */
   | "extension-orphan"
   /**
+   * An exemption targets a rule name that doesn't exist in the final
+   * merged rule universe (merged rules + plugin-shipped rules +
+   * defaults, honoring `disableDefaults`). The carve-out can never
+   * match anything and is dropped. Warning-class: strict mode throws
+   * at factory time, like `extension-orphan`. A target that exists
+   * but is disabled (via `disabledRules` or a disabled plugin) is
+   * inert, silent, and NOT flagged — by-design disable, consistent
+   * with the disabled-rule `console.info` breadcrumb.
+   */
+  | "exemption-orphan"
+  /**
    * A plugin attempts to register a tracker under a reserved name
    * (e.g. `events`). Always an error — reserved names are owned by
    * the engine. Rename the tracker.

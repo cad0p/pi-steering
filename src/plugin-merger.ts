@@ -177,6 +177,13 @@ export function validateUserConfigNames(
       const d = validateName("observer", observer.name, "user config");
       if (d !== undefined) diagnostics.push(d);
     }
+    // S3: exemption target names flow into user-visible strings
+    // (orphan diagnostics, list output, evaluator warn logs) —
+    // validate them like rule names.
+    for (const exemption of layer.exemptions ?? []) {
+      const d = validateName("rule", exemption.rule, "exemption");
+      if (d !== undefined) diagnostics.push(d);
+    }
   }
   return diagnostics;
 }
@@ -372,6 +379,22 @@ export function resolvePlugins(
     }
     for (const obs of plugin.observers ?? []) {
       const d = validateName("observer", obs.name, `plugin "${plugin.name}"`);
+      if (d !== undefined) {
+        diagnostics.push(d);
+        pluginValid = false;
+      }
+    }
+    // S3: exemption target names flow into user-visible strings
+    // (orphan diagnostics, list output, evaluator warn logs) —
+    // validate them like rule names, with the same all-or-nothing
+    // plugin skip so a malformed exemption can't leak a forged
+    // name into downstream strings.
+    for (const exemption of plugin.exemptions ?? []) {
+      const d = validateName(
+        "rule",
+        exemption.rule,
+        `plugin "${plugin.name}" exemption`,
+      );
       if (d !== undefined) {
         diagnostics.push(d);
         pluginValid = false;

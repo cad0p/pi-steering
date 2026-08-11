@@ -2,13 +2,15 @@
 // Part of pi-steering.
 
 /**
- * Walk-up discovery + merge tests for {@link loadConfigs},
+ * Two-layer discovery + merge tests for {@link loadConfigs},
  * {@link buildConfig}, and {@link loadSteeringConfig}.
  *
  * Uses the same scratch-HOME + `mkdtempSync` pattern as the v1 JSON
  * loader tests (`../loader.test.ts`) to keep global config leakage
- * out of the test run. Fixtures are written fresh per test so runs
- * are reproducible without repo-committed scratch files.
+ * out of the test run — the isolated `$HOME` also points the global
+ * layer at a scratch `<tmp>/.pi/agent/steering/`. Fixtures are
+ * written fresh per test so runs are reproducible without
+ * repo-committed scratch files.
  */
 
 import assert from "node:assert/strict";
@@ -18,7 +20,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { useIsolatedHome } from "./__test-helpers__.ts";
 import {
-  ancestorChain,
   buildConfig,
   configCandidates,
   findConfigFile,
@@ -57,64 +58,11 @@ describe("loader: configCandidates", () => {
     assert.equal(a, "/tmp/x/.pi/steering/index.ts");
     assert.equal(b, "/tmp/x/.pi/steering.ts");
   });
-});
 
-describe("loader: ancestorChain", () => {
-  it("returns innermost first", () => {
-    const prior = process.env["HOME"];
-    process.env["HOME"] = "/home/user";
-    try {
-      const chain = ancestorChain("/home/user/projects/foo/bar");
-      assert.deepEqual(chain, [
-        "/home/user/projects/foo/bar",
-        "/home/user/projects/foo",
-        "/home/user/projects",
-        "/home/user",
-      ]);
-    } finally {
-      if (prior === undefined) delete process.env["HOME"];
-      else process.env["HOME"] = prior;
-    }
-  });
-
-  it("stops at filesystem root if $HOME is unset", () => {
-    const prior = process.env["HOME"];
-    delete process.env["HOME"];
-    try {
-      const chain = ancestorChain("/a/b");
-      assert.deepEqual(chain, ["/a/b", "/a", "/"]);
-    } finally {
-      if (prior !== undefined) process.env["HOME"] = prior;
-    }
-  });
-
-  it("cwd === $HOME returns [$HOME] only", () => {
-    const prior = process.env["HOME"];
-    const home = mkdtempSync(join(tmpdir(), "pi-steering-v2-chain-home-"));
-    process.env["HOME"] = home;
-    try {
-      const chain = ancestorChain(home);
-      assert.deepEqual(chain, [home]);
-    } finally {
-      if (prior === undefined) delete process.env["HOME"];
-      else process.env["HOME"] = prior;
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
-
-  it("cwd OUTSIDE $HOME tree walks to filesystem root", () => {
-    const prior = process.env["HOME"];
-    process.env["HOME"] = "/home/user";
-    try {
-      // cwd is in /other/path — no shared prefix with $HOME, so the
-      // walk should run to filesystem root rather than terminating
-      // at the (never-reached) $HOME sentinel.
-      const chain = ancestorChain("/other/path");
-      assert.deepEqual(chain, ["/other/path", "/other", "/"]);
-    } finally {
-      if (prior === undefined) delete process.env["HOME"];
-      else process.env["HOME"] = prior;
-    }
+  it("honors a custom slot", () => {
+    const [a, b] = configCandidates("/tmp/x", "steering");
+    assert.equal(a, "/tmp/x/steering/index.ts");
+    assert.equal(b, "/tmp/x/steering.ts");
   });
 });
 
@@ -165,10 +113,23 @@ describe("loader: findConfigFile", () => {
       /both .pi\/steering.ts and .pi\/steering\/index.ts/,
     );
   });
+
+  it("finds the global slot (steering) under the agent dir", () => {
+    writeConfig(join(tmp, "steering.ts"), configModule("{}"));
+    writeConfig(join(tmp, "steering", "index.ts"), configModule("{}"));
+    const { file, diagnostic } = findConfigFile(tmp, "steering");
+    assert.equal(file, join(tmp, "steering", "index.ts"));
+    assert.ok(
+      diagnostic,
+      "expected a coexistence diagnostic for the global slot",
+    );
+    assert.match(diagnostic.message, /steering\.ts and steering\/index\.ts/);
+  });
 });
 
 // ---------------------------------------------------------------------------
-// loadConfigs — walk-up, stray-file diagnostic, bad layer handling
+// loadConfigs — two-layer discovery, stray-file diagnostic, bad layer
+// handling
 // ---------------------------------------------------------------------------
 
 describe("loader: loadConfigs", () => {
@@ -185,24 +146,108 @@ describe("loader: loadConfigs", () => {
     assert.deepEqual(diagnostics, []);
   });
 
-  it("collects ancestor configs inner-first", async () => {
-    const outer = join(tmp, "a");
-    const inner = join(tmp, "a", "b");
-    mkdirSync(inner, { recursive: true });
+  it("loads the project layer first, then the global layer", async () => {
+    const proj = join(tmp, "proj");
+    mkdirSync(proj, { recursive: true });
     writeConfig(
-      join(outer, ".pi", "steering.ts"),
-      configModule("{ disabledRules: ['outer-only'] }"),
+      join(proj, ".pi", "steering.ts"),
+      configModule("{ disabledRules: ['project'] }"),
     );
     writeConfig(
-      join(inner, ".pi", "steering.ts"),
-      configModule("{ disabledRules: ['inner-only'] }"),
+      join(tmp, ".pi", "agent", "steering", "index.ts"),
+      configModule("{ disabledRules: ['global'] }"),
     );
-    const { layers } = await loadConfigs(inner);
-    // Inner (b) → outer (a) order.
+    const { layers } = await loadConfigs(proj);
+    // Project (inner) → global (outer) order.
     assert.deepEqual(
       layers.map((l) => l.disabledRules?.[0]),
-      ["inner-only", "outer-only"],
+      ["project", "global"],
     );
+  });
+
+  it("does not collect intermediate ancestor layers (walk-up removed)", async () => {
+    // Pins the breaking change: a config in an ancestor directory
+    // between cwd and HOME is no longer discovered — only the cwd
+    // project layer and the agent-dir global layer load.
+    const cwd = join(tmp, "a", "b");
+    mkdirSync(cwd, { recursive: true });
+    writeConfig(
+      join(tmp, "a", ".pi", "steering.ts"),
+      configModule("{ disabledRules: ['ancestor'] }"),
+    );
+    const { layers, diagnostics } = await loadConfigs(cwd);
+    assert.deepEqual(layers, []);
+    assert.deepEqual(diagnostics, []);
+  });
+
+  it("loads legacy ~/.pi/steering/ only when cwd is home", async () => {
+    // The old global location still works in exactly one situation:
+    // launching from $HOME itself, where the project layer
+    // `<cwd>/.pi/steering/` IS the legacy `~/.pi/steering/` path.
+    const sub = join(tmp, "sub");
+    mkdirSync(sub, { recursive: true });
+    writeConfig(
+      join(tmp, ".pi", "steering.ts"),
+      configModule("{ disabledRules: ['legacy'] }"),
+    );
+    writeConfig(
+      join(tmp, ".pi", "agent", "steering", "index.ts"),
+      configModule("{ disabledRules: ['global'] }"),
+    );
+    const fromSub = await loadConfigs(sub);
+    assert.deepEqual(
+      fromSub.layers.map((l) => l.disabledRules?.[0]),
+      ["global"],
+      "legacy ~/.pi/steering/ must NOT load below home",
+    );
+    const fromHome = await loadConfigs(tmp);
+    assert.deepEqual(
+      fromHome.layers.map((l) => l.disabledRules?.[0]),
+      ["legacy", "global"],
+      "at cwd === home the project layer is the legacy path",
+    );
+  });
+
+  it("honors PI_CODING_AGENT_DIR for the global layer", async () => {
+    const prior = process.env["PI_CODING_AGENT_DIR"];
+    process.env["PI_CODING_AGENT_DIR"] = join(tmp, "custom-agent");
+    try {
+      const proj = join(tmp, "proj");
+      mkdirSync(proj, { recursive: true });
+      writeConfig(
+        join(tmp, "custom-agent", "steering", "index.ts"),
+        configModule("{ disabledRules: ['custom'] }"),
+      );
+      const { layers } = await loadConfigs(proj);
+      assert.deepEqual(
+        layers.map((l) => l.disabledRules?.[0]),
+        ["custom"],
+      );
+    } finally {
+      if (prior === undefined) delete process.env["PI_CODING_AGENT_DIR"];
+      else process.env["PI_CODING_AGENT_DIR"] = prior;
+    }
+  });
+
+  it("tilde-expands a ~/… PI_CODING_AGENT_DIR under HOME", async () => {
+    const prior = process.env["PI_CODING_AGENT_DIR"];
+    process.env["PI_CODING_AGENT_DIR"] = "~/my-agent";
+    try {
+      const proj = join(tmp, "proj");
+      mkdirSync(proj, { recursive: true });
+      writeConfig(
+        join(tmp, "my-agent", "steering", "index.ts"),
+        configModule("{ disabledRules: ['tilde'] }"),
+      );
+      const { layers } = await loadConfigs(proj);
+      assert.deepEqual(
+        layers.map((l) => l.disabledRules?.[0]),
+        ["tilde"],
+      );
+    } finally {
+      if (prior === undefined) delete process.env["PI_CODING_AGENT_DIR"];
+      else process.env["PI_CODING_AGENT_DIR"] = prior;
+    }
   });
 
   it("prefers index.ts over steering.ts at the same layer", async () => {
@@ -403,28 +448,50 @@ describe("loader: loadConfigs", () => {
     );
   });
 
-  it("handles heterogeneous config forms across layers (inner flat + outer dir)", async () => {
-    // Inner (session cwd) uses the single-file form .pi/steering.ts;
-    // outer ancestor uses the directory form .pi/steering/index.ts.
-    // Both layers should be collected inner-first without the
-    // loader tripping on the form mismatch.
-    const outer = join(tmp, "a");
-    const inner = join(tmp, "a", "b");
-    mkdirSync(inner, { recursive: true });
+  it("handles heterogeneous forms across the two layers (project flat + global dir)", async () => {
+    // Project (session cwd) uses the single-file form
+    // .pi/steering.ts; global layer uses the directory form
+    // <agentDir>/steering/index.ts. Both layers should be collected
+    // project-first without the loader tripping on the form mismatch.
+    const proj = join(tmp, "proj");
+    mkdirSync(proj, { recursive: true });
     writeConfig(
-      join(inner, ".pi", "steering.ts"),
-      configModule("{ disabledRules: ['inner-flat'] }"),
+      join(proj, ".pi", "steering.ts"),
+      configModule("{ disabledRules: ['project-flat'] }"),
     );
     writeConfig(
-      join(outer, ".pi", "steering", "index.ts"),
-      configModule("{ disabledRules: ['outer-dir'] }"),
+      join(tmp, ".pi", "agent", "steering", "index.ts"),
+      configModule("{ disabledRules: ['global-dir'] }"),
     );
-    const { layers } = await loadConfigs(inner);
+    const { layers } = await loadConfigs(proj);
     assert.deepEqual(
       layers.map((l) => l.disabledRules?.[0]),
-      ["inner-flat", "outer-dir"],
-      "expected inner-first ordering regardless of per-layer form",
+      ["project-flat", "global-dir"],
+      "expected project-first ordering regardless of per-layer form",
     );
+  });
+
+  it("emits global-layer stray-file diagnostics with paths under the agent dir", async () => {
+    const cwd = join(tmp, "proj");
+    mkdirSync(cwd, { recursive: true });
+    // Stray non-.ts file in the GLOBAL layer's steering/ dir, with no
+    // index.ts — the stray-file scan must run for both layers, not
+    // just the project one.
+    mkdirSync(join(tmp, ".pi", "agent", "steering"), { recursive: true });
+    writeFileSync(
+      join(tmp, ".pi", "agent", "steering", "rules.mjs"),
+      "// not ts",
+      "utf8",
+    );
+    const { diagnostics } = await loadConfigs(cwd);
+    const stray = diagnostics.filter((d) => d.kind === "layer-stray-file");
+    assert.equal(stray.length, 1);
+    assert.equal(
+      stray[0]?.path,
+      join(tmp, ".pi", "agent", "steering", "rules.mjs"),
+    );
+    assert.equal(stray[0]?.type, "warning");
+    assert.match(stray[0]?.message ?? "", /under steering\//);
   });
 
   it("re-imports config when file content changes between calls", async () => {
@@ -951,6 +1018,31 @@ describe("loader: loadSteeringConfig", () => {
     });
     assert.equal(merged.defaultNoOverride, true);
     assert.equal(merged.rules?.[0]?.name, "built-in");
+    assert.deepEqual(diagnostics, []);
+  });
+
+  it("project rule overrides global rule by name", async () => {
+    // End-to-end: the project layer's rule shadows the global layer's
+    // same-named rule (project wins on name-keyed merge), with no
+    // collision diagnostic — cross-layer override is the documented
+    // customization path.
+    const cwd = join(tmp, "proj");
+    mkdirSync(cwd, { recursive: true });
+    writeConfig(
+      join(cwd, ".pi", "steering.ts"),
+      configModule(
+        `{ rules: [{ name: "dup", tool: "bash", field: "command", pattern: /^PROJECT/, reason: "project" }] }`,
+      ),
+    );
+    writeConfig(
+      join(tmp, ".pi", "agent", "steering", "index.ts"),
+      configModule(
+        `{ rules: [{ name: "dup", tool: "bash", field: "command", pattern: /^GLOBAL/, reason: "global" }] }`,
+      ),
+    );
+    const { config: merged, diagnostics } = await loadSteeringConfig(cwd);
+    assert.equal(merged.rules?.length, 1);
+    assert.equal(merged.rules?.[0]?.reason, "project");
     assert.deepEqual(diagnostics, []);
   });
 

@@ -61,6 +61,20 @@ What `/reload` still does **not** pick up:
 
 **Recommendation for plugin authors:** ship `.ts` source as the package entry to enable hot-reload during plugin development. The migration is small: switch `package.json#main` to `./src/index.ts`, drop the `tsc` build step (or keep it as `tsc --noEmit` for typecheck), set `allowImportingTsExtensions: true` and `noEmit: true` in `tsconfig.json`, optionally add `erasableSyntaxOnly: true` to reject non-strippable TS features (`enum`, namespaces, parameter properties) at compile time. Consumers must run Node ≥ 22.6 for native type-stripping.
 
+## Config layers
+
+pi-steering resolves exactly two layers, mirroring pi's own settings model:
+
+- **Project** — `<cwd>/.pi/steering/` (or the `.pi/steering.ts` single-file form), loaded from the directory pi was launched in.
+- **Global** — `<agentDir>/steering/`, where `agentDir` is `$PI_CODING_AGENT_DIR` (tilde-expanded) or `~/.pi/agent` by default. Applies to every project.
+
+The project layer is merged INNERMOST: on rule/plugin/observer-name collision the project entry wins, so a project can override or soften a global rule by declaring the same name. There is no walk-up discovery — intermediate directories contribute nothing, and nothing below `~/.pi/agent/` is special-cased.
+
+**Breaking change (v0.2.0): the old global location `~/.pi/steering/` is no longer loaded** — no alias, no deprecation diagnostic. The only situation where it still works is launching pi from `$HOME` itself, where `<cwd>/.pi/steering/` happens to be `~/.pi/steering/`. Migrate with:
+
+```bash
+mv ~/.pi/steering ~/.pi/agent/steering
+```
 
 ## Quick start
 
@@ -228,7 +242,7 @@ The important bits worth stressing:
 - **One parse, many rules.** The AST walk happens once per tool call; every rule sees the same extracted refs and walker state. Adding rules is cheap.
 - **Per-ref evaluation.** `cd /tmp && git log` evaluates the `git log` rule AT cwd `/tmp`, not at `/original`. Walker trackers (cwd by default; branch via the git plugin) update state as refs flow through the command chain.
 - **Source-tagged reasons.** Block reasons carry `[steering:<rule>@<source>]` where source is `user` or the shipping plugin name. The agent can see both what fired and where to look it up.
-- **First match wins.** Rule order matters within a layer, and inner config layers beat outer ones on rule-name collision.
+- **First match wins.** Rule order matters within a layer, and the project layer beats the global layer on rule-name collision.
 
 ## Authoring rules
 
@@ -781,7 +795,7 @@ The `examples/work-item-plugin` tests use exactly this pattern.
 
 ### `pi-steering list`
 
-Walk up from cwd, load every `.pi/steering/index.ts` / `.pi/steering.ts` layer, and print the resolved state:
+Load the project layer (`<cwd>/.pi/steering/`) and the global layer (`~/.pi/agent/steering/`), merge them project-first, and print the resolved state:
 
 ```bash
 $ pi-steering list
@@ -790,7 +804,7 @@ Resolved config: 1 plugin, 2 rules, 0 observers.
 git  [pi-steering/plugins/git]
   no-main-commit            bash  when: branch
 
-User (.pi/steering/index.ts):
+User (project + global):
   no-force-push             bash
 
 Disabled: (none)
@@ -832,9 +846,9 @@ pi-steering is a guardrail layer, not a sandbox. Several parts of the system exe
 
 ### Config execution
 
-`.pi/steering/index.ts` (and the `.pi/steering.ts` shorthand) is **arbitrary TypeScript executed at extension factory time with your full user privileges**. The loader walks from the launch cwd up to `$HOME`, importing every `.pi/steering/` directory it finds along the way, and merges them inner-first. The bridge factory awaits the load before pi continues startup, so any throw from your config (or from a colliding plugin set) lands in pi's `[Extension issues]` diagnostic block at startup.
+`.pi/steering/index.ts` (and the `.pi/steering.ts` shorthand) is **arbitrary TypeScript executed at extension factory time with your full user privileges**. The loader reads exactly two layers — the project layer at `<launch-cwd>/.pi/steering/` and the global layer at `<agentDir>/steering/` — and merges them project-first (the project layer wins on name collisions). The bridge factory awaits the load before pi continues startup, so any throw from your config (or from a colliding plugin set) lands in pi's `[Extension issues]` diagnostic block at startup.
 
-Implication: running pi inside a directory hierarchy whose steering configs you don't trust is equivalent to running `node -e '…'` with that same file. Symlinks in the walk-up chain are followed — a symlinked `.pi/steering/` landing in an unexpected directory executes as if it had been placed there directly.
+Implication: running pi inside a directory hierarchy whose steering configs you don't trust is equivalent to running `node -e '…'` with that same file. Symlinked config directories are followed — a symlinked `.pi/steering/` landing in an unexpected directory executes as if it had been placed there directly.
 
 Only run pi in directory hierarchies whose steering configs you trust.
 

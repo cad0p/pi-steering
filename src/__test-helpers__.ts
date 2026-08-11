@@ -53,9 +53,10 @@ import type { EvaluatorHost } from "./evaluator-internals/context.ts";
  *   - restore `process.env["HOME"]` and recursively remove the temp
  *     dir on teardown.
  *
- * Used by every test surface that exercises the loader walk-up
- * (`index.test.ts`, `loader.test.ts`, `internal/session-runtime.test.ts`)
- * so the per-file scratch-HOME boilerplate stays in one place.
+ * Used by every test surface that exercises the loader's two-layer
+ * discovery (`index.test.ts`, `loader.test.ts`,
+ * `internal/session-runtime.test.ts`) so the per-file scratch-HOME
+ * boilerplate stays in one place.
  *
  * The temp dir path is exposed via the optional `onReady` callback,
  * fired inside `beforeEach`; tests typically stash it in a
@@ -81,7 +82,7 @@ export function useIsolatedHome(
 }
 
 /**
- * Like {@link useIsolatedHome} but also chdirs into the scratch dir, so factory-time tests find the per-test config via the loader walk-up. macOS tmpdir is a symlink; canonicalized via `realpathSync` so cwd-mismatch tests don't see false-divergence.
+ * Like {@link useIsolatedHome} but also chdirs into the scratch dir, so factory-time tests find the per-test config via the loader's project layer. macOS tmpdir is a symlink; canonicalized via `realpathSync` so cwd-mismatch tests don't see false-divergence.
  */
 export function useScratchHome(
   prefix: string,

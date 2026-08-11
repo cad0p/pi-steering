@@ -23,8 +23,8 @@ every wrapper form) lives in the engine's own test suite.
 ### TypeScript (canonical)
 
 1. **Copy** `steering.ts` from an example directory into one of:
-   - `~/.pi/steering.ts` (or `~/.pi/steering/index.ts`) — applies globally.
-   - `<your-project>/.pi/steering.ts` — applies to this project tree (walk-up loader).
+   - `~/.pi/agent/steering.ts` (or `~/.pi/agent/steering/index.ts`) — applies globally.
+   - `<your-project>/.pi/steering.ts` — applies to this project only (project layer).
 2. **Tweak** as needed — the exported default is a plain
    [`SteeringConfig`](../src/schema.ts), so you can add rules,
    merge with other packs by spreading, or import a plugin.
@@ -57,7 +57,7 @@ JSON config:
 Each example ships a `steering.json` for reference / migration
 testing — they're authored against the v0 PoC shape so
 `pi-steering import-json` round-trips them cleanly. They do **not**
-participate in the loader's `.pi/` walk-up; only the `.ts` form does.
+participate in the loader's project-layer discovery; only the `.ts` form does.
 
 JSON is a deliberate **subset** of the TypeScript schema: pattern-string
 rules, `requires` / `unless`, `when.cwd` (string pattern only), and

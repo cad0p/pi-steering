@@ -13,8 +13,8 @@
  *   - the aggregated error message follows the rule-based spec
  *     (header + bullets, errors first, optional path prefix).
  *
- * Uses a tmp `$HOME` so the walk-up loader's `$HOME` ceiling is
- * scoped to the test directory.
+ * Uses a tmp `$HOME` so the loader's global layer is scoped to the
+ * test directory.
  */
 
 import assert from "node:assert/strict";

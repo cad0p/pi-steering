@@ -26,7 +26,7 @@
  *   - aggregated render snapshot pins the multi-line format.
  *
  * The bridge factory is async; tests `chdir` into a fresh scratch
- * `$HOME` so the loader walk-up reads the per-test config.
+ * `$HOME` so the loader's global layer reads the per-test config.
  */
 
 import assert from "node:assert/strict";
@@ -224,24 +224,27 @@ describe("register(): factory throws on diagnostics", () => {
   });
 
   it("throws on plugin-name-collision (warning-class, failOnWarnings default)", async () => {
-    // Two layers ship the same plugin name. The collision is
-    // warning-class but escalates under the default
+    // Project and global layers ship the same plugin name. The
+    // collision is warning-class but escalates under the default
     // `failOnWarnings: true`.
-    mkdirSync(join(tmpHome, "inner"), { recursive: true });
+    const inner = join(tmpHome, "inner");
+    mkdirSync(inner, { recursive: true });
     writeSteeringSingleFileConfig(
-      tmpHome,
+      inner,
+      `export default {
+				plugins: [{ name: "shared" }],
+			};`,
+    );
+    mkdirSync(join(tmpHome, ".pi", "agent"), { recursive: true });
+    writeFileSync(
+      join(tmpHome, ".pi", "agent", "steering.ts"),
       `export default {
 				disableDefaults: true,
 				plugins: [{ name: "shared" }],
 			};`,
+      "utf8",
     );
-    writeSteeringSingleFileConfig(
-      join(tmpHome, "inner"),
-      `export default {
-				plugins: [{ name: "shared" }],
-			};`,
-    );
-    process.chdir(join(tmpHome, "inner"));
+    process.chdir(inner);
     await expectRegisterThrow([/\[warning\]/, /plugin "shared"/]);
   });
 
@@ -385,26 +388,29 @@ describe("register(): factory does NOT throw", () => {
   });
 
   it("disabledPlugins resolves plugin-name-collision before the check runs", async () => {
-    // The outer layer's `disabledPlugins: ["shared"]` removes
+    // The global layer's `disabledPlugins: ["shared"]` removes
     // the would-be collision before cross-layer detection,
     // matching the disable-then-detect ordering. No throw, no
     // warn.
-    mkdirSync(join(tmpHome, "inner"), { recursive: true });
+    const inner = join(tmpHome, "inner");
+    mkdirSync(inner, { recursive: true });
     writeSteeringSingleFileConfig(
-      tmpHome,
+      inner,
+      `export default {
+				plugins: [{ name: "shared" }],
+			};`,
+    );
+    mkdirSync(join(tmpHome, ".pi", "agent"), { recursive: true });
+    writeFileSync(
+      join(tmpHome, ".pi", "agent", "steering.ts"),
       `export default {
 				disableDefaults: true,
 				disabledPlugins: ["shared"],
 				plugins: [{ name: "shared" }],
 			};`,
+      "utf8",
     );
-    writeSteeringSingleFileConfig(
-      join(tmpHome, "inner"),
-      `export default {
-				plugins: [{ name: "shared" }],
-			};`,
-    );
-    process.chdir(join(tmpHome, "inner"));
+    process.chdir(inner);
     const mock = makeMockPi();
     await register(mock.api as ExtensionAPI);
     const collisionWarn = capturedWarns.find((m) => /plugin "shared"/i.test(m));
@@ -448,7 +454,7 @@ describe("register(): cwd-mismatch session_start warn", () => {
 
   it("emits console.warn when ctx.cwd !== launchCwd; engine continues evaluating", async () => {
     // A user-defined rule lives in the launch-cwd config (tmpHome) but
-    // not in foreignCwd's walk-up; if it still fires after the
+    // not in foreignCwd's project layer; if it still fires after the
     // cwd-mismatch warn, launch-cwd config remained in force.
     writeSteeringSingleFileConfig(
       tmpHome,

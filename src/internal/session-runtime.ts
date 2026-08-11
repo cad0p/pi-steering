@@ -5,8 +5,9 @@
  * Internal module — not part of the package's public API.
  *
  * This module holds the wiring that the bridge factory in `index.ts`
- * uses to spin up an evaluator + observer dispatcher from a walk-up
- * steering config. It is intentionally NOT re-exported from
+ * uses to spin up an evaluator + observer dispatcher from the
+ * two-layer config (project layer at `cwd`, global layer at the
+ * agent dir). It is intentionally NOT re-exported from
  * `index.ts` or any other public entry point; consumers building
  * their own extensions should go through `loadHarness` (subpath
  * `@cad0p/pi-steering/testing`) or call `buildEvaluator` /

@@ -15,7 +15,7 @@
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { useIsolatedHome } from "./__test-helpers__.ts";
@@ -25,6 +25,7 @@ import {
   findConfigFile,
   loadConfigs,
   loadSteeringConfig,
+  resolveAgentDir,
 } from "./loader.ts";
 import type { Plugin, SteeringConfig } from "./schema.ts";
 
@@ -63,6 +64,42 @@ describe("loader: configCandidates", () => {
     const [a, b] = configCandidates("/tmp/x", "steering");
     assert.equal(a, "/tmp/x/steering/index.ts");
     assert.equal(b, "/tmp/x/steering.ts");
+  });
+});
+
+describe("loader: resolveAgentDir", () => {
+  useIsolatedHome("pi-steering-v2-agentdir-");
+
+  it("falls back to ~/.pi/agent when PI_CODING_AGENT_DIR is unset", () => {
+    const prior = process.env["PI_CODING_AGENT_DIR"];
+    delete process.env["PI_CODING_AGENT_DIR"];
+    try {
+      assert.equal(resolveAgentDir(), join(homedir(), ".pi", "agent"));
+    } finally {
+      if (prior !== undefined) process.env["PI_CODING_AGENT_DIR"] = prior;
+    }
+  });
+
+  it("treats an empty-string PI_CODING_AGENT_DIR as unset", () => {
+    const prior = process.env["PI_CODING_AGENT_DIR"];
+    process.env["PI_CODING_AGENT_DIR"] = "";
+    try {
+      assert.equal(resolveAgentDir(), join(homedir(), ".pi", "agent"));
+    } finally {
+      if (prior === undefined) delete process.env["PI_CODING_AGENT_DIR"];
+      else process.env["PI_CODING_AGENT_DIR"] = prior;
+    }
+  });
+
+  it("expands a bare ~ PI_CODING_AGENT_DIR to homedir", () => {
+    const prior = process.env["PI_CODING_AGENT_DIR"];
+    process.env["PI_CODING_AGENT_DIR"] = "~";
+    try {
+      assert.equal(resolveAgentDir(), homedir());
+    } finally {
+      if (prior === undefined) delete process.env["PI_CODING_AGENT_DIR"];
+      else process.env["PI_CODING_AGENT_DIR"] = prior;
+    }
   });
 });
 
@@ -248,6 +285,29 @@ describe("loader: loadConfigs", () => {
       if (prior === undefined) delete process.env["PI_CODING_AGENT_DIR"];
       else process.env["PI_CODING_AGENT_DIR"] = prior;
     }
+  });
+
+  it("records a layer-import-failed diagnostic for the GLOBAL layer under the agent dir", async () => {
+    // Mirrors the project-layer import-failed pin: the shared
+    // loadLayer path must surface the same diagnostic shape when the
+    // failing module lives at `<agentDir>/steering.ts` (default agent
+    // dir under the isolated HOME).
+    const proj = join(tmp, "proj");
+    mkdirSync(proj, { recursive: true });
+    writeConfig(
+      join(tmp, ".pi", "agent", "steering.ts"),
+      "export default { rules: {{ not valid ts }} };",
+    );
+    const { layers, diagnostics } = await loadConfigs(proj);
+    assert.deepEqual(layers, []);
+    const hit = diagnostics.find((d) => d.kind === "layer-import-failed");
+    assert.ok(
+      hit,
+      `expected a layer-import-failed diagnostic; got: ${JSON.stringify(diagnostics)}`,
+    );
+    assert.equal(hit.type, "warning");
+    assert.equal(hit.path, join(tmp, ".pi", "agent", "steering.ts"));
+    assert.match(hit.message, /failed to import/);
   });
 
   it("prefers index.ts over steering.ts at the same layer", async () => {

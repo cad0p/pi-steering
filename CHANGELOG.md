@@ -5,7 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [0.2.0] - 2026-08-11
 
 <!-- USER-EDITABLE SECTION START -->
-<!-- Add your curated release notes here. -->
+### Breaking
+
+- **Two-layer config resolution** (issue [#21](https://github.com/cad0p/pi-steering/issues/21)): the loader now mirrors pi's own settings model instead of walking up `cwd → $HOME`. Exactly two fixed layers — the project layer at `<cwd>/.pi/steering/` and the global layer at `<agentDir>/steering/` (`~/.pi/agent/steering/`, or `$PI_CODING_AGENT_DIR` when set) — merged project-first (project wins on rule-name collision). Intermediate ancestor layers no longer load, and `~/.pi/steering/` is no longer special (no alias, no deprecation diagnostic): it only works when pi is launched from `$HOME` itself, where the project layer IS that path.
+- **Migration:** `mv ~/.pi/steering ~/.pi/agent/steering`. No fallback is provided — the old path stops being discovered once this version ships.
 <!-- USER-EDITABLE SECTION END -->
 
 ### 🚀 Features

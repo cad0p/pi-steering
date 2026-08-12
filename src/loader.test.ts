@@ -621,8 +621,9 @@ describe("loader: loadConfigs", () => {
     // `evalModule` routes every transitive import through its own
     // loader with `moduleCache: false` (fresh instance per call), so
     // the sibling is re-read from disk on every load. The `.ts`
-    // extension in the import specifier is REQUIRED — jiti and Node
-    // type-stripping both resolve explicit extensions only.
+    // extension in the import specifier is REQUIRED — Node
+    // type-stripping only resolves explicit extensions, and jiti
+    // resolves them without extension-resolution heuristics.
     const dir = join(tmp, "transitive");
     mkdirSync(dir, { recursive: true });
     const sibling = join(dir, ".pi", "steering", "rules", "a.ts");

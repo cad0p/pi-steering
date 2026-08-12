@@ -171,7 +171,8 @@ export function findConfigFile(
  * The only reliable signal is the own-property descriptor probe
  * below (`Object.getOwnPropertyDescriptor`): it bypasses the proxy's
  * traps, sees the raw exports object, and yields `value: undefined`
- * exactly when the source default is nullish.
+ * exactly when the source default is `undefined` (`export default
+ * null` throws inside evalModule before this guard runs).
  */
 async function importConfigFile(path: string): Promise<SteeringConfig> {
   // Fresh instance per load: per-instance parentCache is empty, and

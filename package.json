@@ -80,7 +80,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.14",
-		"@types/node": "^20.19.39",
+		"@types/node": "^22.15.0",
 		"typescript": "^5.4.5"
 	},
 	"publishConfig": {

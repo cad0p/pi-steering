@@ -18,7 +18,7 @@ Use it when:
 pi install npm:@cad0p/pi-steering
 ```
 
-Requires **Node `^18.19.0` or `>=20.6.0`** (see `package.json#engines`). Configs are loaded and transpiled by the bundled [jiti](https://github.com/unjs/jiti) runtime — no `tsx` / `ts-node`, no native type-stripping requirement.
+Requires **Node `>=22.19.0`** (see `package.json#engines`; the same floor as pi itself). Configs are loaded and transpiled by the bundled [jiti](https://github.com/unjs/jiti) runtime — no `tsx` / `ts-node` needed.
 
 ### Local install (during the PoC)
 

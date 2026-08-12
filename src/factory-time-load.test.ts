@@ -257,13 +257,14 @@ describe("register(): factory throws on diagnostics", () => {
     );
     // Narrow on the actual parse-failure detail so a future loader
     // change that swallows the underlying error message (and leaves
-    // only "failed to import") trips this assertion. Node's TS
-    // stripper emits `Expected '...', got '...'` for syntax errors;
-    // older jiti-style strippers emit `SyntaxError` or `Unexpected`.
+    // only "failed to import") trips this assertion. The loader now
+    // evaluates configs via jiti, which emits `ParseError: …` with a
+    // code frame for syntax errors; accept `Expected`, `SyntaxError`,
+    // or `Unexpected` too.
     await expectRegisterThrow([
       /\[warning\]/,
       /failed to import/i,
-      /Expected|SyntaxError|Unexpected/i,
+      /Expected|SyntaxError|Unexpected|ParseError/i,
     ]);
   });
 

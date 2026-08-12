@@ -18,7 +18,7 @@ Use it when:
 pi install npm:@cad0p/pi-steering
 ```
 
-Requires **Node ≥ 22** — the loader reads `.pi/steering.ts` files via native type-stripping (no `tsx` / `ts-node` runtime). On older Node the loader throws with an upgrade message at startup.
+Requires **Node `>=22.19.0`** (see `package.json#engines`; the same floor as pi itself). Configs are loaded and transpiled by the bundled [jiti](https://github.com/unjs/jiti) runtime — no `tsx` / `ts-node` needed.
 
 ### Local install (during the PoC)
 
@@ -50,16 +50,22 @@ Why both steps matter:
 
 ### Hot-reload of the user config
 
-`/reload` **does** pick up edits to your `.pi/steering/index.ts` (or `.pi/steering.ts`) without a pi restart. The loader cache-busts the dynamic import (`?t=<hrtime-bigint>`) so Node's ESM module map can't serve a stale copy of your config across reloads, and an initial-load failure (broken syntax, missing value import) doesn't poison subsequent loads after you fix the file.
+`/reload` **does** pick up edits to your `.pi/steering/index.ts` (or `.pi/steering.ts`) without a pi restart. On every load the loader re-reads the file from disk and evaluates it fresh via jiti — nothing is cached by URL — and an initial-load failure (broken syntax, a runtime throw, a missing default export) doesn't poison subsequent loads after you fix the file.
 
-It also picks up edits to **plugin source code** — if the plugin ships its `.ts` source as the package entry (Node 22+ native type-stripping; `"main": "./src/index.ts"`, `allowImportingTsExtensions: true`, `noEmit: true`). Pi loads the bridge via jiti with `moduleCache: false`, so static + dynamic imports inside the user config re-route through jiti's loader on every reload, and `.ts` modules get re-read from disk and re-evaluated.
+It also picks up edits to **everything the config imports**. Each load creates a fresh jiti instance (`moduleCache: false`), so transitive imports route through jiti's loader and get re-read from disk and re-evaluated on every reload:
+
+- **Sibling files** — `.ts` modules next to the config (e.g. `./rules/*.ts`), or `.js` in CommonJS scope (below).
+- **`.ts`-shipped plugin sources under `node_modules`** — a plugin whose package entry points at `.ts` source (e.g. `@cad0p/pi-napkin/steering`). This was previously broken outright: Node's native type-stripping hard-refused `.ts` under `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), dropping the config with `layer-import-failed`. jiti has no such restriction — the plugin loads, and edits to its source hot-reload.
+- **`.js` files in CommonJS scope** — a package without `"type": "module"` in its `package.json`.
+
+Top-level `await` and dynamic `import()` inside the config work as well.
 
 What `/reload` still does **not** pick up:
 
-- Edits to a plugin's **compiled** `dist/index.js` (or other `dist/*.js` files reached through it). Compiled-JS modules in `node_modules` end up cached for the process lifetime; only `.ts` source goes through jiti's re-evaluation path.
-- Edits to pi-steering's own `dist/`. Same reason — the bridge entry (`src/index.ts`) is re-evaluated each reload, but transitively-imported compiled-JS modules from `dist/` are cached.
+- Edits to a plugin's **compiled ESM `dist/`** — typically `dist/index.js` from npm in a `"type": "module"` package. Such modules go through jiti's native-import fast path into Node's ESM module map, which caches them by URL for the process lifetime; a full pi restart is needed.
+- Edits to pi-steering's own `dist/`. Same reason — the bridge entry is re-evaluated each reload, but transitively-imported compiled ESM modules from `dist/` sit in Node's native ESM cache.
 
-**Recommendation for plugin authors:** ship `.ts` source as the package entry to enable hot-reload during plugin development. The migration is small: switch `package.json#main` to `./src/index.ts`, drop the `tsc` build step (or keep it as `tsc --noEmit` for typecheck), set `allowImportingTsExtensions: true` and `noEmit: true` in `tsconfig.json`, optionally add `erasableSyntaxOnly: true` to reject non-strippable TS features (`enum`, namespaces, parameter properties) at compile time. Consumers must run Node ≥ 22.6 for native type-stripping.
+**Recommendation for plugin authors:** ship `.ts` source as the package entry — the case is now stronger than ever: `.ts` under `node_modules` is fully supported (the loader transpiles it itself, on any supported Node — no native type-stripping requirement), and shipping source means plugin edits hot-reload during development, while a compiled ESM `dist` entry never does. The migration is small: switch `package.json#main` to `./src/index.ts`, drop the `tsc` build step (or keep it as `tsc --noEmit` for typecheck), set `allowImportingTsExtensions: true` and `noEmit: true` in `tsconfig.json`, optionally add `erasableSyntaxOnly: true` to reject non-erasable TS features (`enum`, namespaces, parameter properties) at compile time — jiti can transpile those, but keeping the shipped source erasable keeps it consumable by editors and type-stripping tooling.
 
 ## Config layers
 

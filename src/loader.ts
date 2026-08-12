@@ -10,10 +10,10 @@
  * {@link SteeringDiagnosticKind} JSDoc for the diagnostic stream.
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { createJiti } from "jiti";
 import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
 import { runMergerPipeline } from "./internal/session-runtime.ts";
 import { formatTrackerNameCollisionMessage } from "./plugin-merger.ts";
@@ -25,31 +25,6 @@ import type {
   SteeringConfig,
   SteeringDiagnostic,
 } from "./schema.ts";
-
-/**
- * Minimum Node version that supports native `.ts` import via type
- * stripping (without a `--experimental-strip-types` flag). Shipped
- * stable in Node 22.6+. We require 22.x outright to keep the error
- * message simple.
- */
-const MIN_NODE_MAJOR = 22;
-
-/**
- * Runtime check: throws when Node is older than the minimum required
- * for native `.ts` import. See README §Install for the supported
- * Node range.
- */
-function assertNodeVersion(): void {
-  const raw = process.versions.node;
-  const major = Number.parseInt(raw.split(".")[0] ?? "0", 10);
-  if (Number.isNaN(major) || major < MIN_NODE_MAJOR) {
-    throw new Error(
-      `pi-steering requires Node >= ${MIN_NODE_MAJOR} ` +
-        `for native .ts loading (found ${raw}). ` +
-        `Upgrade Node, or stay on v1 JSON configs (\`.pi/steering.json\`).`,
-    );
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Discovery
@@ -159,47 +134,78 @@ export function findConfigFile(
 // ---------------------------------------------------------------------------
 
 /**
- * Dynamic-import a single config file and return its default export.
- * The module MUST `export default` a {@link SteeringConfig} object —
- * the loader does not accept module-namespace imports as a fallback,
- * to keep the authoring contract unambiguous.
+ * Load a single config file (via jiti `evalModule`) and return its
+ * default export. The module MUST `export default` a
+ * {@link SteeringConfig} object — the loader does not accept
+ * module-namespace imports as a fallback, to keep the authoring
+ * contract unambiguous.
  *
  * Throws a scoped error when the import fails, when the module has no
  * default export, or when the default export isn't a plain object —
  * the caller surfaces these per-layer without bringing the whole
  * session down (a single bad layer shouldn't nuke the engine).
  *
- * Each call appends a unique `?t=<timestamp>` query string to the
- * import URL. Node's ESM module map is keyed on URL and persists for
- * the lifetime of the process, so a plain `await import(url)` returns
- * the cached module forever — even after `/reload` and even after
- * the file's content has changed (or, worse, after a previous load
- * threw, since failed loads are also cached). The cache-bust forces
- * Node to re-fetch and re-evaluate the file each call. See the
- * "Hot-reload" section in the README for the limits of this approach
- * (it does NOT bust transitively-imported plugin packages, which the
- * user config reaches via static `import` of bare specifiers like
- * `"pi-steering"` — those still require a full pi restart).
+ * Reload contract: a FRESH jiti instance is created per call (the
+ * per-instance parent cache starts empty, so nothing leaks between
+ * loads), and `moduleCache: false` keeps jiti from registering
+ * anything in `require.cache` — every load re-reads and re-evaluates
+ * the file from disk, INCLUDING everything the config transitively
+ * imports (sibling `.ts` / `.js` files, `node_modules` plugins).
+ * `fsCache: true` is a source-level cache only (transformed output,
+ * keyed by content hash) — it never affects reload semantics. The
+ * source string is evaluated fresh each call, so a failed load never
+ * poisons subsequent loads.
+ *
+ * `async: true` is passed explicitly to `evalModule`: it wraps the
+ * module in an async function, so top-level `await` and dynamic
+ * `import()` inside configs work, and `evalModule` returns a Promise
+ * (hence the `await` below).
+ *
+ * jiti's default `interopDefault: true` wraps the module namespace in
+ * an interop Proxy, so NEITHER `"default" in mod` NOR `mod.default`
+ * reliably detects a real default export. The proxy's `get` trap
+ * falls back to the namespace (or a `{ default: … }` wrapper)
+ * whenever the real default is nullish, so `mod.default` is never
+ * `undefined`; and `in` falls through to the raw exports object,
+ * which OWNS a `default` key even for `export default undefined`.
+ * The only reliable signal is the own-property descriptor probe
+ * below (`Object.getOwnPropertyDescriptor`): it bypasses the proxy's
+ * traps, sees the raw exports object, and yields `value: undefined`
+ * exactly when the source default is `undefined` (`export default
+ * null` throws inside evalModule before this guard runs).
  */
 async function importConfigFile(path: string): Promise<SteeringConfig> {
-  const url = pathToFileURL(path).href;
-  /**
-   * Cache-bust query string. `process.hrtime.bigint()` returns
-   * monotonic nanoseconds since an arbitrary process-relative
-   * origin — each call returns a strictly greater value, even
-   * back-to-back within the same millisecond, so no two
-   * `importConfigFile` invocations ever share a URL. If a future
-   * Node version changes the cache-bust contract (e.g. ignores
-   * query strings on `file:` URLs), this will silently revert to
-   * the cached-forever behavior, and the integration tests in
-   * `loader.test.ts` will fail.
-   */
-  const bust = `${url.includes("?") ? "&" : "?"}t=${process.hrtime.bigint()}`;
-  const mod = (await import(url + bust)) as {
+  // Fresh instance per load: per-instance parentCache is empty, and
+  // moduleCache: false keeps jiti from registering anything in
+  // require.cache — every load re-reads + re-evaluates from disk,
+  // including everything the config transitively imports.
+  const jiti = createJiti(import.meta.url, {
+    moduleCache: false,
+    fsCache: true,
+  });
+  const source = readFileSync(path, "utf8");
+  // async: true → async wrapper: top-level await + dynamic import()
+  // inside configs work; evalModule returns a Promise<module namespace>.
+  const mod = (await jiti.evalModule(source, {
+    filename: path,
+    async: true,
+  })) as {
     default?: unknown;
   } & Record<string, unknown>;
 
-  if (mod.default === undefined) {
+  // Probe the own property descriptor instead of `"default" in mod`
+  // or `mod.default`: jiti's interop wrapper (interopDefault: true)
+  // is a Proxy whose `get` trap fabricates a non-`undefined` value
+  // for nullish real defaults — `export default undefined` yields an
+  // object and a named-exports-only module yields the namespace, so
+  // the bare checks would never fire and the module would silently
+  // load as a config. `in` is no better: it falls through to the raw
+  // exports object, which DOES own a `default` key for `export
+  // default undefined`. The descriptor (which bypasses the proxy's
+  // traps) is the only signal that sees the raw exports object AND
+  // the true value of its `default` key.
+  const defaultDesc = Object.getOwnPropertyDescriptor(mod, "default");
+  if (defaultDesc === undefined || defaultDesc.value === undefined) {
     // Path is intentionally omitted from the message; the caller wraps
     // this throw in a `layer-import-failed` diagnostic whose own `path`
     // field is the single source of truth for the file location.
@@ -209,7 +215,7 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
         "`export default defineConfig({ ... })`.",
     );
   }
-  const candidate = mod.default;
+  const candidate = defaultDesc.value;
   if (
     candidate === null ||
     typeof candidate !== "object" ||
@@ -237,15 +243,11 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
  * returned object. The loader does not log to `console.warn` directly
  * — the bridge runtime owns the policy decision (throw vs. log) once
  * it has collected diagnostics from every source.
- *
- * @throws when Node is older than {@link MIN_NODE_MAJOR}.
  */
 export async function loadConfigs(cwd: string): Promise<{
   layers: SteeringConfig[];
   diagnostics: SteeringDiagnostic[];
 }> {
-  assertNodeVersion();
-
   const layers: SteeringConfig[] = [];
   const diagnostics: SteeringDiagnostic[] = [];
   await loadLayer(cwd, ".pi/steering", layers, diagnostics);
@@ -602,9 +604,6 @@ export function buildConfig(
  * diagnostics; embedders apply their own throw + warning policy.
  * See `failOnWarnings` on {@link SteeringConfig} for production-
  * faithful pre-flight semantics.
- *
- * @throws when Node < {@link MIN_NODE_MAJOR} (propagated from
- * `loadConfigs`).
  */
 export async function loadSteeringConfig(
   cwd: string,

@@ -18,6 +18,7 @@ import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
 import { runMergerPipeline } from "./internal/session-runtime.ts";
 import { formatTrackerNameCollisionMessage } from "./plugin-merger.ts";
 import type {
+  Exemption,
   Observer,
   Plugin,
   Rule,
@@ -444,6 +445,28 @@ function mergeStringUnion(
 }
 
 /**
+ * Merge config-layer exemptions as a UNION across layers — no
+ * inner-wins (unlike rules / plugins / observers, which override by
+ * name). Every layer's carve-outs apply; per-rule OR-ing happens at
+ * evaluation time.
+ *
+ * Declaration order is preserved (inner-first, then outer) for
+ * deterministic output in tests. Duplicates are intentionally NOT
+ * deduped: the registry has no collision concept, and evaluation is
+ * idempotent under duplicates.
+ */
+function mergeExemptions(
+  layers: readonly SteeringConfig[],
+): Exemption[] | undefined {
+  const out: Exemption[] = [];
+  for (const layer of layers) {
+    if (!layer.exemptions) continue;
+    out.push(...layer.exemptions);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
  * Inner-wins boolean merge over the inner-first layers. Walks
  * left-to-right (inner-first); returns the first explicit boolean or
  * `undefined`. Used by `buildConfig` and the session runtime for the
@@ -536,11 +559,13 @@ export function buildConfig(
 
   const rules = mergeRules(effective, disabledRulesSet, diagnostics);
   const observers = mergeObservers(effective, diagnostics);
+  const exemptions = mergeExemptions(effective);
 
   const out: SteeringConfig = {};
   if (plugins.length > 0) out.plugins = plugins;
   if (rules.length > 0) out.rules = rules;
   if (observers.length > 0) out.observers = observers;
+  if (exemptions !== undefined) out.exemptions = exemptions;
 
   if (disabledRulesList !== undefined) out.disabledRules = disabledRulesList;
   if (disabledPluginsList !== undefined) {

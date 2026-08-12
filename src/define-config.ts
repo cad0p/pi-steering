@@ -37,6 +37,7 @@
 import type { DEFAULT_PLUGINS, DEFAULT_RULES } from "./defaults.ts";
 import type {
   BuiltInWhenLeavesOuter,
+  Exemption,
   Observer,
   Plugin,
   Rule,
@@ -232,9 +233,12 @@ export type AllWrites<
  * Generic constraints:
  *   - `disabledRules` / `disabledPlugins` typed against the rule / plugin
  *     name unions — typos rejected at compile time.
+ *   - `exemptions[].rule` typed against the same rule-name union as
+ *     `disabledRules` — a carve-out targeting a typo'd rule name is
+ *     rejected at compile time.
  *   - `rules[].when.happened.event` and `rules[].when.happened.since`
  *     are both typed against `AllWrites` — typos rejected at compile
- *     time.
+ *     time. `exemptions[].when.happened.*` narrows the same way.
  */
 export interface DefineConfigInput<
   P extends readonly Plugin[],
@@ -246,6 +250,17 @@ export interface DefineConfigInput<
 > extends SteeringConfig {
   disabledRules?: readonly AllRuleNames<P, R>[];
   disabledPlugins?: readonly AllPluginNames<P>[];
+  /**
+   * Guard-rule carve-outs, typed so `rule` must name a real rule
+   * (default rules, plugin rules, or inline rules — same union as
+   * {@link disabledRules}) and `when.happened.event` narrows against
+   * the config's `writes` union. See {@link Exemption} for the
+   * accumulation + fail-closed semantics.
+   */
+  exemptions?: readonly Exemption<
+    AllWrites<P, R, Inline>,
+    AllRuleNames<P, R>
+  >[];
   plugins?: P;
   rules?: R;
   observers?: Inline;
@@ -370,6 +385,12 @@ export function defineConfig<
   }
   if (config.observers !== undefined) {
     out.observers = [...config.observers];
+  }
+  if (config.exemptions !== undefined) {
+    // Shallow copy like the other array slots — the exemption `when`
+    // clauses carry function-typed leaves (`condition:`) that must
+    // survive the copy by reference; only the outer array is fresh.
+    out.exemptions = [...config.exemptions];
   }
   return out;
 }

@@ -32,6 +32,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { makeCtx, makeTrackedHost as makeHost } from "./__test-helpers__.ts";
 import { buildEvaluator, type EvaluatorHost } from "./evaluator.ts";
+import { evaluateWhen } from "./evaluator-internals/predicates.ts";
 import type { ResolvedPluginState } from "./plugin-merger.ts";
 import { resolvePlugins } from "./plugin-merger.ts";
 import type {
@@ -41,6 +42,7 @@ import type {
   PredicateHandler,
   Rule,
   SteeringConfig,
+  TopLevelWhenClause,
 } from "./schema.ts";
 
 // ---------------------------------------------------------------------------
@@ -6294,3 +6296,594 @@ void _obsTypeKeepalive;
 // import linting stays green even if test helpers are slimmed.
 const _eventTypeKeepalive = null as unknown as ToolCallEvent | null;
 void _eventTypeKeepalive;
+
+// ---------------------------------------------------------------------------
+// Exemption registry (issue #26)
+// ---------------------------------------------------------------------------
+
+describe("buildEvaluator: exemption registry", () => {
+  const COMMIT_RULE: Rule = {
+    name: "no-main-commit",
+    tool: "bash",
+    field: "command",
+    pattern: "^git\\s+commit\\b",
+    reason: "no commit",
+  };
+
+  it("exempted rule does not fire; evaluation continues to the next rule", async () => {
+    const pushRule: Rule = {
+      name: "no-push",
+      tool: "bash",
+      field: "command",
+      pattern: "^git\\s+push\\b",
+      reason: "no push",
+    };
+    const evaluator = buildEvaluator(
+      {
+        rules: [COMMIT_RULE, pushRule],
+        exemptions: [{ rule: "no-main-commit", when: { cwd: "/vault/" } }],
+      },
+      resolve(),
+      makeHost(),
+    );
+    // Exempt cwd: the commit rule does not fire — and evaluation
+    // continues, so the push rule can still block its own commands.
+    const exempt = await evaluator.evaluate(
+      bashEvent("cd /vault/notes && git commit -m x"),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.equal(exempt, undefined);
+    const nextRuleBlocks = await evaluator.evaluate(
+      bashEvent("git push origin main"),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.ok(nextRuleBlocks && nextRuleBlocks.block === true);
+    assert.match((nextRuleBlocks as { reason: string }).reason, /no-push/);
+    // Non-exempt cwd: the rule still blocks.
+    const stillBlocks = await evaluator.evaluate(
+      bashEvent("cd /work && git commit -m x"),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.ok(stillBlocks && stillBlocks.block === true);
+    assert.match((stillBlocks as { reason: string }).reason, /no-main-commit/);
+  });
+
+  it("multiple exemptions for the same rule are OR-ed (any match exempts)", async () => {
+    const evaluator = buildEvaluator(
+      {
+        rules: [COMMIT_RULE],
+        exemptions: [
+          { rule: "no-main-commit", when: { cwd: "/a/" } },
+          { rule: "no-main-commit", when: { cwd: "/b/" } },
+        ],
+      },
+      resolve(),
+      makeHost(),
+    );
+    assert.equal(
+      await evaluator.evaluate(
+        bashEvent("cd /b/x && git commit -m x"),
+        makeCtx("/repo"),
+        0,
+      ),
+      undefined,
+      "second exemption clause matches -> exempt",
+    );
+    const blocks = await evaluator.evaluate(
+      bashEvent("cd /c/x && git commit -m x"),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.ok(blocks, "neither clause matches -> still blocks");
+  });
+
+  it("walker-unknown cwd does NOT exempt (fail-closed allow-default projection)", async () => {
+    const evaluator = buildEvaluator(
+      {
+        rules: [COMMIT_RULE],
+        exemptions: [{ rule: "no-main-commit", when: { cwd: "/vault/" } }],
+      },
+      resolve(),
+      makeHost(),
+    );
+    // `cd $(pwd)` is statically intractable — the walker emits the
+    // cwdTracker's `unknown` sentinel. The exemption clause projects
+    // unknown via the "allow"-default (unknown -> false -> no match),
+    // so the guard still fires. With the stock rule-side "block"
+    // default this would silently fail-OPEN the guard.
+    const res = await evaluator.evaluate(
+      bashEvent("cd $(pwd) && git commit -m x"),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.ok(res && res.block === true);
+    assert.match((res as { reason: string }).reason, /no-main-commit/);
+  });
+
+  it("explicit onUnknown:'block' smuggled into an exemption clause is IGNORED (strict — unknown never exempts)", async () => {
+    // STRICT fail-closed (design review: NO escape hatch). The
+    // exemption evaluation path passes `ignoreExplicitModifiers: true`
+    // so even an `as any`-smuggled `onUnknown: "block"` projects
+    // unknown to "does not match" — the guard still fires.
+    //
+    // Pinned here directly against `evaluateWhen` (not end-to-end)
+    // because `validateExemptionWhenClauseShape` rejects the smuggled
+    // clause at load time — this is the defense-in-depth level 3
+    // (evaluation ignores explicit modifiers regardless).
+    const clause = {
+      cwd: { pattern: "/vault/", onUnknown: "block" },
+    } as unknown as TopLevelWhenClause<string>;
+    // Exemption flags: "allow"-default projection + explicit
+    // modifiers ignored → unknown must NOT match.
+    assert.equal(
+      await evaluateWhen(
+        clause,
+        { cwd: "unknown" },
+        {} as unknown as PredicateContext,
+        {},
+        "no-main-commit",
+        "exemption",
+        "allow",
+        true,
+      ),
+      false,
+      "explicit onUnknown:'block' must NOT turn unknown into a match under exemption evaluation (hard allow projection)",
+    );
+    // Rule path unchanged: the SAME clause with rule-side defaults
+    // ("block" default + explicit modifiers honored) still projects
+    // unknown to match — rules keep today's onUnknown semantics
+    // byte-identical; the strict flag only affects exemption eval.
+    assert.equal(
+      await evaluateWhen(
+        clause,
+        { cwd: "unknown" },
+        {} as unknown as PredicateContext,
+        {},
+        "no-main-commit",
+        "user",
+      ),
+      true,
+      "rule-path onUnknown:'block' must still project unknown to match (rule behavior unchanged)",
+    );
+  });
+
+  it("exemption when with a top-level onUnknown is REJECTED at load (as any)", () => {
+    assert.throws(
+      () =>
+        buildEvaluator(
+          {
+            rules: [COMMIT_RULE],
+            exemptions: [
+              {
+                rule: "no-main-commit",
+                when: {
+                  cwd: "/vault/",
+                  onUnknown: "block",
+                } as unknown as TopLevelWhenClause<string>,
+              },
+            ],
+          },
+          resolve(),
+          makeHost(),
+        ),
+      /exemption for rule "no-main-commit".*onUnknown/,
+    );
+  });
+
+  it("exemption when with onUnknown inside not: is REJECTED at load (as any)", () => {
+    assert.throws(
+      () =>
+        buildEvaluator(
+          {
+            rules: [COMMIT_RULE],
+            exemptions: [
+              {
+                rule: "no-main-commit",
+                when: {
+                  not: { cwd: "/vault/", onUnknown: "block" },
+                } as unknown as TopLevelWhenClause<string>,
+              },
+            ],
+          },
+          resolve(),
+          makeHost(),
+        ),
+      /exemption for rule "no-main-commit".*onUnknown/,
+    );
+  });
+
+  it("exemption when with onUnknown in a leaf object form (cwd { pattern, onUnknown }) is REJECTED at load (as any)", () => {
+    assert.throws(
+      () =>
+        buildEvaluator(
+          {
+            rules: [COMMIT_RULE],
+            exemptions: [
+              {
+                rule: "no-main-commit",
+                when: {
+                  cwd: { pattern: "/vault/", onUnknown: "block" },
+                } as unknown as TopLevelWhenClause<string>,
+              },
+            ],
+          },
+          resolve(),
+          makeHost(),
+        ),
+      /exemption for rule "no-main-commit".*onUnknown/,
+    );
+  });
+
+  it("a throwing exemption condition does not exempt (S1); warn labels the exemption", async () => {
+    const warnings = captureWarnings();
+    try {
+      const evaluator = buildEvaluator(
+        {
+          rules: [COMMIT_RULE],
+          exemptions: [
+            {
+              rule: "no-main-commit",
+              when: {
+                condition: () => {
+                  throw new Error("boom");
+                },
+              },
+            },
+          ],
+        },
+        resolve(),
+        makeHost(),
+      );
+      const res = await evaluator.evaluate(
+        bashEvent("git commit -m x"),
+        makeCtx("/repo"),
+        0,
+      );
+      assert.ok(res && res.block === true, "guard still fires");
+      // `condition:` throws are swallowed INSIDE evaluateWhen with
+      // the source tag set to "exemption" — the warn labels the
+      // exemption context, not a rule source like `@git` / `@user`.
+      assert.ok(
+        warnings.some((w) => /@exemption: when\.condition threw/.test(w)),
+        `expected a warn log labelling the exemption, got: ${JSON.stringify(warnings)}`,
+      );
+    } finally {
+      warnings.restore();
+    }
+  });
+
+  it("an unknown predicate key inside an exemption does not exempt (per-exemption catch)", async () => {
+    const warnings = captureWarnings();
+    try {
+      const evaluator = buildEvaluator(
+        {
+          rules: [COMMIT_RULE],
+          exemptions: [
+            {
+              rule: "no-main-commit",
+              when: {
+                noSuchPredicate: true,
+              } as unknown as TopLevelWhenClause<string>,
+            },
+          ],
+        },
+        resolve(),
+        makeHost(),
+      );
+      const res = await evaluator.evaluate(
+        bashEvent("git commit -m x"),
+        makeCtx("/repo"),
+        0,
+      );
+      assert.ok(res && res.block === true, "guard still fires");
+      assert.ok(
+        warnings.some((w) =>
+          /exemption for rule "no-main-commit" threw/.test(w),
+        ),
+        `expected a warn log labelling the exemption, got: ${JSON.stringify(warnings)}`,
+      );
+    } finally {
+      warnings.restore();
+    }
+  });
+
+  it("plugin-registered predicate exemptions work (isNapkinVault style)", async () => {
+    const plugin: Plugin = {
+      name: "napkin",
+      predicates: {
+        isNapkinVault: (args: unknown, ctx: PredicateContext) =>
+          typeof args === "boolean" && args === true
+            ? ctx.cwd.startsWith("/vault")
+            : false,
+      },
+      exemptions: [
+        {
+          rule: "no-main-commit",
+          when: {
+            isNapkinVault: true,
+          } as unknown as TopLevelWhenClause<string>,
+        },
+      ],
+    };
+    const evaluator = buildEvaluator(
+      { plugins: [plugin], rules: [COMMIT_RULE] },
+      resolve([plugin]),
+      makeHost(),
+    );
+    assert.equal(
+      await evaluator.evaluate(
+        bashEvent("cd /vault/goldmine && git commit -m x"),
+        makeCtx("/repo"),
+        0,
+      ),
+      undefined,
+      "plugin predicate matches -> exempt",
+    );
+    const blocks = await evaluator.evaluate(
+      bashEvent("git commit -m x"),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.ok(blocks, "predicate does not match -> still blocks");
+  });
+
+  it("config + plugin exemptions stack (accumulation across buckets)", async () => {
+    const plugin: Plugin = {
+      name: "napkin",
+      predicates: {
+        isNapkinVault: (_args: unknown, ctx: PredicateContext) =>
+          ctx.cwd.startsWith("/vault"),
+      },
+      exemptions: [
+        {
+          rule: "no-main-commit",
+          when: {
+            isNapkinVault: true,
+          } as unknown as TopLevelWhenClause<string>,
+        },
+      ],
+    };
+    const evaluator = buildEvaluator(
+      {
+        plugins: [plugin],
+        rules: [COMMIT_RULE],
+        exemptions: [{ rule: "no-main-commit", when: { cwd: "/scratch/" } }],
+      },
+      resolve([plugin]),
+      makeHost(),
+    );
+    // Plugin bucket matches.
+    assert.equal(
+      await evaluator.evaluate(
+        bashEvent("cd /vault/goldmine && git commit -m x"),
+        makeCtx("/repo"),
+        0,
+      ),
+      undefined,
+    );
+    // Config bucket matches.
+    assert.equal(
+      await evaluator.evaluate(
+        bashEvent("cd /scratch/tmp && git commit -m x"),
+        makeCtx("/repo"),
+        0,
+      ),
+      undefined,
+    );
+    // Neither matches -> blocks.
+    const blocks = await evaluator.evaluate(
+      bashEvent("git commit -m x"),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.ok(blocks);
+  });
+
+  it("exemption wins over an override comment: no block, no audit entry, no onFire", async () => {
+    const host = makeHost();
+    let onFireRan = false;
+    const rule: Rule = {
+      ...COMMIT_RULE,
+      onFire: () => {
+        onFireRan = true;
+      },
+    };
+    const evaluator = buildEvaluator(
+      {
+        defaultNoOverride: false,
+        rules: [rule],
+        exemptions: [{ rule: "no-main-commit", when: { cwd: "/vault/" } }],
+      },
+      resolve(),
+      host,
+    );
+    const res = await evaluator.evaluate(
+      bashEvent(
+        "cd /vault/x && git commit -m x # steering-override: no-main-commit \u2014 I know",
+      ),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.equal(res, undefined);
+    assert.equal(host.appended.length, 0, "no steering-override audit entry");
+    assert.equal(onFireRan, false, "onFire must not run for an exempted rule");
+    // Same command OUTSIDE the exempt cwd keeps today's behavior:
+    // override accepted, audit entry written, no block.
+    const res2 = await evaluator.evaluate(
+      bashEvent(
+        "git commit -m x # steering-override: no-main-commit \u2014 I know",
+      ),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.equal(res2, undefined);
+    assert.equal(host.appended.length, 1);
+    assert.equal(host.appended[0]!.type, "steering-override");
+    assert.equal(onFireRan, false);
+  });
+
+  it("happened-leaf exemption: matches when the event has NOT happened (built-in inversion)", async () => {
+    const prior = [
+      {
+        type: "custom" as const,
+        customType: "vault-ready",
+        data: { _agentLoopIndex: 0 },
+        timestamp: "2026-01-01T00:00:00.000Z",
+        id: "e1",
+        parentId: null,
+      },
+    ];
+    const evaluator = buildEvaluator(
+      {
+        rules: [COMMIT_RULE],
+        exemptions: [
+          {
+            rule: "no-main-commit",
+            when: { happened: { event: "vault-ready", in: "session" } },
+          },
+        ],
+      },
+      resolve(),
+      makeHost(),
+    );
+    // No prior entry: `happened` is true (event has NOT happened) ->
+    // exemption matches -> no block.
+    assert.equal(
+      await evaluator.evaluate(
+        bashEvent("git commit -m x"),
+        makeCtx("/repo"),
+        0,
+      ),
+      undefined,
+    );
+    // Prior entry present: `happened` is false -> exemption does not
+    // match -> rule blocks.
+    const blocks = await evaluator.evaluate(
+      bashEvent("git commit -m x"),
+      makeCtx("/repo", prior),
+      0,
+    );
+    assert.ok(blocks && blocks.block === true);
+  });
+
+  it("cross-bucket same-name rule: exemption-by-name applies to BOTH buckets", async () => {
+    // `config.rules` and `resolved.rules` are never deduped against
+    // each other — a same-named rule can exist in both buckets and
+    // exemption-by-name applies to both (documented; no winner
+    // assumption).
+    const plugin: Plugin = {
+      name: "p",
+      rules: [
+        {
+          name: "dup",
+          tool: "bash",
+          field: "command",
+          pattern: "^rm\\b",
+          reason: "plugin dup",
+        },
+      ],
+    };
+    const evaluator = buildEvaluator(
+      {
+        plugins: [plugin],
+        rules: [
+          {
+            name: "dup",
+            tool: "bash",
+            field: "command",
+            pattern: "^git\\s+commit\\b",
+            reason: "user dup",
+          },
+        ],
+        exemptions: [{ rule: "dup", when: { cwd: "/vault/" } }],
+      },
+      resolve([plugin]),
+      makeHost(),
+    );
+    assert.equal(
+      await evaluator.evaluate(
+        bashEvent("cd /vault/x && git commit -m x"),
+        makeCtx("/repo"),
+        0,
+      ),
+      undefined,
+      "user-bucket dup exempted",
+    );
+    assert.equal(
+      await evaluator.evaluate(
+        bashEvent("cd /vault/x && rm foo"),
+        makeCtx("/repo"),
+        0,
+      ),
+      undefined,
+      "plugin-bucket dup exempted",
+    );
+    const blocks = await evaluator.evaluate(
+      bashEvent("git commit -m x"),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.ok(blocks);
+  });
+
+  it("empty exemption when clause is rejected at build time (validateWhenClauseShape)", async () => {
+    assert.throws(
+      () =>
+        buildEvaluator(
+          {
+            rules: [COMMIT_RULE],
+            exemptions: [
+              {
+                rule: "no-main-commit",
+                when: {} as TopLevelWhenClause<string>,
+              },
+            ],
+          },
+          resolve(),
+          makeHost(),
+        ),
+      /no predicate leaves/,
+    );
+  });
+
+  it("exemption target names pass S3 name validation at build time", async () => {
+    assert.throws(
+      () =>
+        buildEvaluator(
+          {
+            rules: [COMMIT_RULE],
+            exemptions: [{ rule: "no main commit", when: { cwd: "/vault/" } }],
+          },
+          resolve(),
+          makeHost(),
+        ),
+      /contains disallowed characters/,
+    );
+  });
+
+  it("exemptions are inert when the target rule never fires (disabled-target case)", async () => {
+    // An exemption targeting a rule that exists but is disabled is
+    // inert and silent: the rule never fires, the exemption never
+    // needs to match. No error, no diagnostic — just no block for
+    // the disabled rule's commands.
+    const host = makeHost();
+    const evaluator = buildEvaluator(
+      {
+        disabledRules: ["no-main-commit"],
+        rules: [COMMIT_RULE],
+        exemptions: [{ rule: "no-main-commit", when: { cwd: "/vault/" } }],
+      },
+      resolve(),
+      host,
+    );
+    const res = await evaluator.evaluate(
+      bashEvent("cd /vault/x && git commit -m x"),
+      makeCtx("/repo"),
+      0,
+    );
+    assert.equal(res, undefined);
+  });
+});

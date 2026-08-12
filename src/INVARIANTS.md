@@ -21,8 +21,12 @@ failing OPEN the gate.
 ### `S1` — fail-closed isolation
 
 **Where:** `evaluator.ts` (`evaluateEvent` top-level wrap; per-rule
-try/catch), `evaluator-internals/predicates.ts` (per-predicate
-try/catch in `runPredicateChain`).
+try/catch; `evaluateExemptionClause` per-exemption try/catch),
+`evaluator-internals/predicates.ts` (per-predicate
+try/catch in `runPredicateChain`; `onUnknownDefault` projection
+parameter in `evaluateWhen` / `evaluateNotBlock` /
+`readLeafOnUnknown`; the `ignoreExplicitModifiers` strict flag;
+`validateExemptionWhenClauseShape`).
 
 A predicate that throws — built-in or plugin-supplied, sync or async
 — is treated as "rule does not fire", logged via `console.warn` with
@@ -36,6 +40,51 @@ engine, not from a rule.
 The same pattern applies to observers in `observer-dispatcher.ts` —
 a throwing observer is isolated to its own dispatch and never
 escalates.
+
+**Exemption evaluation (registry carve-outs) is fail-closed in the
+OPPOSITE projection** — a throwing exemption predicate or an unknown
+leaf counts as "does not match" → the target guard still fires:
+
+- `evaluateExemptionClause` runs `evaluateWhen` with
+  `onUnknownDefault: "allow"` (unknown → false → no exemption)
+  across all four projection sites: the `cwd` leaf, plugin-predicate
+  leaves, `condition:`, and the `not:` block-level policy.
+- STRICT fail-closed — NO escape hatch: exemption evaluation also
+  passes `ignoreExplicitModifiers: true`, so ANY explicit
+  `onUnknown:` modifier present in an exemption clause is IGNORED
+  (the projection is hard "allow" at all four sites). Even an
+  `as any`-smuggled `onUnknown: "block"` never exempts on unknown.
+  Unknown-handling is a policy of the PRIMARY gate (the rule); a
+  carve-out shipped by a third-party plugin can never weaken it.
+  Enforced at three levels: type-level (`ExemptionWhenClause` in
+  schema.ts — writing `onUnknown` in an exemption is a compile
+  error), load-time (`validateExemptionWhenClauseShape` rejects a
+  smuggled `onUnknown` — clause top level, not-block top level, and
+  leaf object forms), and evaluation (this flag — defense-in-depth).
+- Escapes `evaluateWhen` doesn't swallow
+  (`UnknownPredicateError`, `evaluateHappened` shape throws) are
+  caught per-exemption in `evaluateExemptionClause` — a throwing
+  exemption predicate = "does not match" = guard fires. Warn logs
+  label the EXEMPTION, not the target rule: the outer catch emits
+  `exemption for rule "…" threw`, and throws swallowed INSIDE
+  `evaluateWhen` (handler / `condition:` catches) carry the source
+  tag `@exemption` instead of a rule source like `@git` / `@user`.
+
+**`unless` disambiguation:** `Rule.unless` is a per-rule, same-rule-scope optional exemption field. The registry is the cross-plugin ACCUMULATION mechanism — exemption-by-name stacks across layers and plugins; `unless` only lives on the rule it exempts.
+
+**Exemption target names** (`exemption.rule`) flow into the same
+user-visible surfaces (orphan diagnostics, `pi-steering list`
+output, evaluator warn logs), so they get the same treatment:
+`validateName("rule", exemption.rule, "exemption")` inside
+`validateUserConfigNames` (config exemptions) and `resolvePlugins`
+(plugin exemptions; a malformed exemption drops the whole plugin,
+mirroring the rule/observer skip), plus the `buildEvaluator`
+defense-in-depth throw for direct-caller paths. Exemption `when:`
+clauses also pass `validateExemptionWhenClauseShape` at
+`buildEvaluator` time — an empty clause (`when: {}`) would be
+vacuous-true and silently exempt its target rule, opening the
+guard, and a smuggled `onUnknown` would weaken the rule's
+fail-closed posture.
 
 ### `S2` — write-through-read consistency
 
@@ -87,7 +136,9 @@ per `S2`.
 
 **Where:** `internal/session-runtime.ts` (`buildSessionRuntime` →
 `finalizePluginState`); `bin/pi-steering.ts`
-(`runCliMergeWithInfoCapture`).
+(`runCliMergeWithInfoCapture`); `internal/drop-unused-observers.ts`
+(`collectConsumedEvents`); `internal/finalize-plugin-state.ts`
+(exemption-when threading); `testing/index.ts` (`loadHarness`).
 
 **What:** Both surfaces apply `disabledRules` filtering BEFORE
 running `dropUnusedObservers`, so an observer whose only consumers
@@ -95,8 +146,18 @@ are disabled rules surfaces the same `console.info` breadcrumb in
 both paths. A future surface that bypasses this ordering would see
 different observer-drop behavior than the runtime.
 
+**Exemption parity extension:** `collectConsumedEvents` scans
+EXEMPTION clauses' top-level `when.happened` identically to rules
+(threaded through `finalizePluginState` from both config + plugin
+buckets by all three callers). An observer whose writes are consumed
+ONLY by an exemption's `happened` survives the drop — without this,
+the exemption would be silently dead (its observer dropped, its
+event never written).
+
 **Pinned by:** `internal/session-runtime.test.ts` (runtime branch);
-`bin/pi-steering.test.ts` (CLI branch).
+`bin/pi-steering.test.ts` (CLI branch); exemption-consumed-observer
+survival test in `internal/session-runtime.test.ts` / observer-drop
+unit tests.
 
 ### `O2` — single-emission lock for cross-detector tracker-name collisions
 

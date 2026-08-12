@@ -310,6 +310,50 @@ describe("register(): factory throws on diagnostics", () => {
     await expectRegisterThrow([/\[warning\]/, /duplicate observer "obs-x"/]);
   });
 
+  it("throws on exemption-orphan (warning-class, failOnWarnings default)", async () => {
+    // An exemption targeting a rule name absent from the merged
+    // universe is warning-class but escalates under the default
+    // `failOnWarnings: true` — a typo'd carve-out must not ship
+    // silently as a dead exemption.
+    writeSteeringSingleFileConfig(
+      tmpHome,
+      `export default {
+				disableDefaults: true,
+				exemptions: [
+					{ rule: "no-such-rule", when: { cwd: "/vault/" } },
+				],
+			};`,
+    );
+    process.chdir(tmpHome);
+    await expectRegisterThrow([
+      /\[warning\]/,
+      /exemption for rule "no-such-rule" \(config\)/,
+    ]);
+  });
+
+  it("exemption-orphan with failOnWarnings: false falls through to console.warn", async () => {
+    writeSteeringSingleFileConfig(
+      tmpHome,
+      `export default {
+				disableDefaults: true,
+				failOnWarnings: false,
+				exemptions: [
+					{ rule: "no-such-rule", when: { cwd: "/vault/" } },
+				],
+			};`,
+    );
+    process.chdir(tmpHome);
+    const mock = makeMockPi();
+    await register(mock.api as ExtensionAPI);
+    const warn = capturedWarns.find((m) =>
+      /exemption for rule "no-such-rule"/.test(m),
+    );
+    assert.ok(
+      warn !== undefined,
+      `expected exemption-orphan on console.warn, got: ${JSON.stringify(capturedWarns)}`,
+    );
+  });
+
   it("throws on rule-collision", async () => {
     writeSteeringSingleFileConfig(
       tmpHome,

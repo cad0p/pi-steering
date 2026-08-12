@@ -502,6 +502,54 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
       `expected NO observer-drop breadcrumb (consumer rule is enabled, observer is consumed); got: ${JSON.stringify(infos)}`,
     );
   });
+
+  it("does NOT drop the observer when the only consumer is an exemption's happened (O1 parity extension)", async () => {
+    // An observer whose writes are consumed ONLY by an exemption's
+    // top-level `happened` must survive the drop — otherwise the
+    // carve-out is silently dead (its event never written).
+    // `finalizePluginState` threads both exemption buckets (config +
+    // plugin) into `collectConsumedEvents`; this test pins the config
+    // bucket through the production factory path.
+    writeSteeringSingleFileConfig(
+      tmpHome,
+      `export default {
+				disableDefaults: true,
+				observers: [
+					{
+						name: "obs-x",
+						writes: ["X"],
+						onResult: () => {},
+					},
+				],
+				rules: [
+					{
+						name: "consumer",
+						tool: "bash",
+						field: "command",
+						pattern: /^never$/,
+						reason: "r",
+					},
+				],
+				exemptions: [
+					{
+						rule: "consumer",
+						when: { happened: { event: "X" } },
+					},
+				],
+			};`,
+    );
+    const result = await buildSessionRuntime(tmpHome, noopHost);
+    assert.ok(result.evaluator);
+    assert.ok(result.dispatcher);
+    const breadcrumb = infos.find((m) =>
+      /\[pi-steering\] observer 'obs-x' dropped/.test(m),
+    );
+    assert.equal(
+      breadcrumb,
+      undefined,
+      `expected NO observer-drop breadcrumb (exemption's happened consumes the write); got: ${JSON.stringify(infos)}`,
+    );
+  });
 });
 
 describe("formatAggregatedDiagnostics: rule-based spec", () => {

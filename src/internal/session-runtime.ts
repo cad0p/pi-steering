@@ -46,8 +46,79 @@ import {
   resolvePlugins,
   validateUserConfigNames,
 } from "../plugin-merger.ts";
-import type { SteeringConfig, SteeringDiagnostic } from "../schema.ts";
+import type {
+  Exemption,
+  Plugin,
+  SteeringConfig,
+  SteeringDiagnostic,
+} from "../schema.ts";
 import { finalizePluginState } from "./finalize-plugin-state.ts";
+
+/**
+ * Detect exemptions whose target rule name doesn't exist in the final
+ * merged rule universe and emit a warning-class `exemption-orphan`
+ * diagnostic for each — the carve-out can never match anything.
+ *
+ * Universe formula (single source of truth for runtime, CLI, and
+ * `loadHarness` — all three funnel through `runMergerPipeline`):
+ *
+ *   `merged.rules` ∪ rule names across `merged.plugins` ∪
+ *   (disableDefaults ? ∅ : DEFAULT_RULES ∪ DEFAULT_PLUGINS rule names)
+ *
+ * `merged.plugins` intentionally includes DISABLED plugins (loader's
+ * `mergePlugins` keeps them; `resolvePlugins` filters them from
+ * `resolved.rules`) — a rule shipped only by a disabled plugin exists
+ * in the universe, so an exemption targeting it is inert, silent, and
+ * NOT orphaned (by-design disable, consistent with the disabled-rule
+ * `console.info` breadcrumb). `resolved.rules` is redundant under
+ * this formula. Defaults are included unless `disableDefaults` is
+ * true — computed via `mergeBool(layers, "disableDefaults")`, NOT
+ * `defaults === undefined`, because the CLI passes `undefined`
+ * defaults while `disableDefaults` is false.
+ */
+function detectExemptionOrphans(
+  merged: SteeringConfig,
+  layers: readonly SteeringConfig[],
+): SteeringDiagnostic[] {
+  const universe = new Set<string>();
+  for (const rule of merged.rules ?? []) universe.add(rule.name);
+  for (const plugin of merged.plugins ?? []) {
+    for (const rule of plugin.rules ?? []) universe.add(rule.name);
+  }
+  const disableDefaults = mergeBool(layers, "disableDefaults") === true;
+  if (!disableDefaults) {
+    for (const rule of DEFAULT_RULES) universe.add(rule.name);
+    // `DEFAULT_PLUGINS` is `[] as const` today — the cast is required
+    // because iterating a literal empty tuple types the element as
+    // `never`. Count-locked (see defaults.test.ts); the loop is the
+    // latent-parity guard for a future default plugin shipping rules.
+    for (const plugin of DEFAULT_PLUGINS as readonly Plugin[]) {
+      for (const rule of plugin.rules ?? []) universe.add(rule.name);
+    }
+  }
+
+  const diagnostics: SteeringDiagnostic[] = [];
+  const check = (exemption: Exemption, source: string): void => {
+    if (universe.has(exemption.rule)) return;
+    diagnostics.push({
+      type: "warning",
+      kind: "exemption-orphan",
+      message:
+        `exemption for rule "${exemption.rule}" (${source}) targets a rule ` +
+        "that doesn't exist in the merged config; exemption ignored. " +
+        "Check the rule name for typos, or install the plugin that ships it.",
+    });
+  };
+  for (const plugin of merged.plugins ?? []) {
+    for (const exemption of plugin.exemptions ?? []) {
+      check(exemption, `plugin "${plugin.name}"`);
+    }
+  }
+  for (const exemption of merged.exemptions ?? []) {
+    check(exemption, "config");
+  }
+  return diagnostics;
+}
 
 /**
  * Run `buildConfig` then `resolvePlugins` over the raw layer list,
@@ -55,7 +126,9 @@ import { finalizePluginState } from "./finalize-plugin-state.ts";
  * diagnostic is error-class. Avoids double-emitting
  * `tracker-name-collision` (O2 in INVARIANTS.md).
  * `validateUserConfigNames` runs unconditionally so user-config name
- * issues surface alongside merge errors.
+ * issues surface alongside merge errors; `detectExemptionOrphans`
+ * runs on the merged config so runtime / CLI / loadHarness see the
+ * same rule universe (defaults divergence handled explicitly).
  */
 export function runMergerPipeline(
   layers: readonly SteeringConfig[],
@@ -71,11 +144,16 @@ export function runMergerPipeline(
     defaults,
   );
   const userConfigNameDiagnostics = validateUserConfigNames(layers);
+  const exemptionOrphanDiagnostics = detectExemptionOrphans(merged, layers);
   if (mergeDiagnostics.some((d) => d.type === "error")) {
     return {
       merged,
       resolved: null,
-      diagnostics: [...mergeDiagnostics, ...userConfigNameDiagnostics],
+      diagnostics: [
+        ...mergeDiagnostics,
+        ...userConfigNameDiagnostics,
+        ...exemptionOrphanDiagnostics,
+      ],
     };
   }
   const resolved = resolvePlugins(
@@ -89,6 +167,7 @@ export function runMergerPipeline(
     diagnostics: [
       ...mergeDiagnostics,
       ...userConfigNameDiagnostics,
+      ...exemptionOrphanDiagnostics,
       ...resolved.diagnostics,
     ],
   };
@@ -190,6 +269,8 @@ export async function buildSessionRuntime(
     resolved.rules,
     filteredConfig.observers ?? [],
     resolved.observers,
+    filteredConfig.exemptions ?? [],
+    resolved.exemptions ?? [],
   );
   const filteredResolved = {
     ...resolved,

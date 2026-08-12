@@ -37,6 +37,7 @@ import {
   RESERVED_PREDICATE_KEYS,
 } from "./evaluator-internals/predicates.ts";
 import type {
+  Exemption,
   Observer,
   OperatorField,
   Plugin,
@@ -176,6 +177,13 @@ export function validateUserConfigNames(
       const d = validateName("observer", observer.name, "user config");
       if (d !== undefined) diagnostics.push(d);
     }
+    // S3: exemption target names flow into user-visible strings
+    // (orphan diagnostics, list output, evaluator warn logs) —
+    // validate them like rule names.
+    for (const exemption of layer.exemptions ?? []) {
+      const d = validateName("rule", exemption.rule, "exemption");
+      if (d !== undefined) diagnostics.push(d);
+    }
   }
   return diagnostics;
 }
@@ -216,6 +224,19 @@ export interface ResolvedPluginState {
 
   /** Plugin-shipped rules in registration order, deduped by name. */
   rules: Rule[];
+
+  /**
+   * Plugin-shipped guard-rule carve-outs, in plugin registration
+   * order. Optional: absent when no active plugin ships exemptions
+   * (the evaluator treats `undefined` as an empty bucket).
+   *
+   * `disabledPlugins` filters are applied BEFORE collection — a
+   * disabled plugin contributes NOTHING, including its exemptions.
+   * Config-layer exemptions are NOT here; they live on
+   * `SteeringConfig.exemptions` and are unioned with this bucket at
+   * evaluator build time (see `buildEvaluator`).
+   */
+  exemptions?: readonly Exemption[];
 
   /**
    * Rule-name → plugin-name mapping for every rule surviving in
@@ -358,6 +379,22 @@ export function resolvePlugins(
     }
     for (const obs of plugin.observers ?? []) {
       const d = validateName("observer", obs.name, `plugin "${plugin.name}"`);
+      if (d !== undefined) {
+        diagnostics.push(d);
+        pluginValid = false;
+      }
+    }
+    // S3: exemption target names flow into user-visible strings
+    // (orphan diagnostics, list output, evaluator warn logs) —
+    // validate them like rule names, with the same all-or-nothing
+    // plugin skip so a malformed exemption can't leak a forged
+    // name into downstream strings.
+    for (const exemption of plugin.exemptions ?? []) {
+      const d = validateName(
+        "rule",
+        exemption.rule,
+        `plugin "${plugin.name}" exemption`,
+      );
       if (d !== undefined) {
         diagnostics.push(d);
         pluginValid = false;
@@ -585,6 +622,17 @@ export function resolvePlugins(
     }
   }
 
+  // --- exemptions ---------------------------------------------------------
+  // Plugin-shipped carve-outs accumulate with the rest of the plugin;
+  // `disabledPlugins` (applied above to build `activePlugins`) drops
+  // them with everything else. No name dedup / collision concept —
+  // duplicates are idempotent at evaluation time.
+  const exemptions: Exemption[] = [];
+  for (const plugin of activePlugins) {
+    if (!plugin.exemptions) continue;
+    exemptions.push(...plugin.exemptions);
+  }
+
   return {
     predicates,
     observers,
@@ -593,6 +641,7 @@ export function resolvePlugins(
     composedTrackers,
     rules,
     rulePluginOwners: Object.fromEntries(ruleOwner),
+    ...(exemptions.length > 0 ? { exemptions } : {}),
     diagnostics,
   };
 }

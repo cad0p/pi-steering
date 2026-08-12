@@ -307,6 +307,8 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
     resolved.rules,
     filteredConfig.observers ?? [],
     resolved.observers,
+    filteredConfig.exemptions ?? [],
+    resolved.exemptions ?? [],
   );
   const filteredResolved = { ...resolved, observers: [...pluginKept] };
 

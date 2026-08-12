@@ -537,6 +537,128 @@ describe("pi-steering list", () => {
     assert.equal(active.disabled, undefined);
     assert.equal(disabled.disabled, true);
   });
+
+  it("text format renders an Exemptions section ONLY when non-empty", async () => {
+    writeSteeringDirConfig(
+      scratch,
+      `export default {
+				exemptions: [
+					{ rule: "no-force-push", when: { cwd: /\\/vault\\// } },
+				],
+			};`,
+    );
+    const r = await runCli({ cwd: scratch }, "list");
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, /Exemptions:/);
+    assert.match(r.stdout, /no-force-push ← config \(when: cwd\)/);
+    // No orphan diagnostic: DEFAULT_RULES names are part of the CLI's
+    // rule universe (the CLI passes defaults=undefined while
+    // disableDefaults is false).
+    assert.equal(r.stderr, "");
+  });
+
+  it("text format labels plugin exemptions with the plugin name", async () => {
+    writeSteeringDirConfig(
+      scratch,
+      `export default {
+				plugins: [
+					{
+						name: "napkin",
+						exemptions: [
+							{ rule: "no-force-push", when: { cwd: /\\/vault\\// } },
+						],
+					},
+				],
+			};`,
+    );
+    const r = await runCli({ cwd: scratch }, "list");
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, /no-force-push ← napkin \(when: cwd\)/);
+  });
+
+  it("JSON output carries an additive exemptions key with source labels", async () => {
+    writeSteeringDirConfig(
+      scratch,
+      `export default {
+				plugins: [
+					{
+						name: "napkin",
+						exemptions: [
+							{ rule: "no-force-push", when: { cwd: /\\/vault\\// } },
+						],
+					},
+				],
+				exemptions: [
+					{ rule: "no-long-running-commands", when: { cwd: /\\/tmp\\// } },
+				],
+			};`,
+    );
+    const r = await runCli({ cwd: scratch }, "list", "--format=json");
+    assert.equal(r.code, 0);
+    const parsed = JSON.parse(r.stdout) as {
+      exemptions: Array<{ rule: string; when: string; source: string }>;
+    };
+    assert.deepEqual(parsed.exemptions, [
+      { rule: "no-force-push", when: "cwd", source: "napkin" },
+      {
+        rule: "no-long-running-commands",
+        when: "cwd",
+        source: "config",
+      },
+    ]);
+  });
+
+  it("exemption targeting a disabled-plugin-only rule is NOT flagged orphan (CLI parity)", async () => {
+    writeSteeringDirConfig(
+      scratch,
+      `export default {
+				plugins: [
+					{
+						name: "napkin",
+						rules: [
+							{
+								name: "no-main-commit",
+								tool: "bash",
+								field: "command",
+								pattern: /^git\\s+commit/,
+								reason: "no",
+							},
+						],
+						exemptions: [
+							{ rule: "no-main-commit", when: { cwd: /\\/vault\\// } },
+						],
+					},
+				],
+				disabledPlugins: ["napkin"],
+			};`,
+    );
+    const r = await runCli({ cwd: scratch }, "list");
+    assert.equal(r.code, 0);
+    assert.equal(
+      r.stderr.includes("exemption for rule"),
+      false,
+      `disabled-plugin-only rule must not be flagged orphan; stderr: ${r.stderr}`,
+    );
+    // The exemption still renders (the listing shows merged state,
+    // disabled or not — mirroring how disabled plugin rules render).
+    assert.match(r.stdout, /no-main-commit ← napkin \(when: cwd\)/);
+  });
+
+  it("text format omits the Exemptions section entirely when empty (pinned output)", async () => {
+    writeSteeringDirConfig(
+      scratch,
+      `export default {
+				plugins: [{ name: "git", rules: [] }],
+			};`,
+    );
+    const r = await runCli({ cwd: scratch }, "list");
+    assert.equal(r.code, 0);
+    assert.equal(r.stdout.includes("Exemptions:"), false);
+    // JSON empty shape stays additive + empty.
+    const rj = await runCli({ cwd: scratch }, "list", "--format=json");
+    const parsed = JSON.parse(rj.stdout) as { exemptions: unknown[] };
+    assert.deepEqual(parsed.exemptions, []);
+  });
 });
 
 // ---------------------------------------------------------------------------

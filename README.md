@@ -695,6 +695,37 @@ Changing more than the reason (tightening the pattern, scoping by cwd, swapping 
 
 > **Always use a fresh `name` for the replacement.** Reusing the plugin rule's name has two failure modes — same name + no `disabledRules` keeps both rules (your customization silently fails to apply) and same name + `disabledRules` filters out both (silent fail-OPEN, the worst outcome for a safety rule). The git plugin's [Customization](./src/plugins/git/README.md#customization) section walks through worked examples (soften the reason text; cwd-based exemption with the array-form `cwd:` predicate's `onUnknown: "allow"` pin to keep `not:` carve-outs fail-closed under walker-unknown cwd).
 
+### Exemptions (the registry)
+
+**Exemptions narrow a guard rule without copying or replacing it.** An `Exemption` is a name-keyed carve-out: when its `when` clause matches a candidate, the target rule does NOT fire — evaluation continues to the next rule exactly as if the rule had missed.
+
+```ts
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
+
+export default defineConfig({
+  plugins: [gitPlugin],
+  exemptions: [
+    {
+      rule: "no-main-commit",
+      when: { cwd: /\/Goldmine\// },
+    },
+  ],
+});
+```
+
+**Accumulation, not replacement.** Exemptions attach by target name to whichever rule wins that name after `disabledRules` filtering — the winning rule's body doesn't matter, only its name. Config-layer exemptions UNION across layers (project + global both apply, no inner-wins), and plugin-shipped exemptions (`Plugin.exemptions`) stack on top. Multiple exemptions for the same rule are OR-ed: ANY matching clause exempts. Duplicates are idempotent; there is no collision concept.
+
+Inside `defineConfig`, `exemptions[].rule` is typo-checked against the same rule-name union as `disabledRules`, and `when.happened.event` narrows against the config's `writes` union.
+
+**Fail-closed is STRICT — no escape hatch.** Exemption clauses evaluate with an "allow"-default projection — the OPPOSITE default from rule `when:` clauses. A predicate that can't resolve (walker-unknown cwd, a throwing handler, an unregistered predicate key) counts as "does not match", so the guard still fires. Exemptions are always fail-closed: an unknown walker value never exempts; the target rule's own `onUnknown` policy decides. `onUnknown` cannot be written inside an exemption (compile error; rejected at load if smuggled via `as any` / plain JS). A carve-out — even one shipped by a third-party plugin — can never weaken the guard's fail-closed posture.
+
+**Interplay with disables.** An exemption targeting a rule that exists but is disabled (via `disabledRules` or a disabled plugin) is inert and silent — by-design disable, no diagnostic. An exemption targeting a rule name that doesn't exist anywhere in the merged config surfaces an `exemption-orphan` warning at factory time (strict mode throws), so typos fail loudly instead of silently shipping a dead carve-out.
+
+**`unless` disambiguation.** `Rule.unless` is a per-rule, same-rule-scope optional exemption field. The registry is the cross-plugin ACCUMULATION mechanism: plugin A can exempt rule B (shipped by another plugin) by name, and multiple authors' carve-outs stack. `unless` cannot do that — it only lives on the rule it exempts.
+
+`pi-steering list` renders the merged Exemptions section (only when non-empty) and the JSON output carries an additive `exemptions` key; see the [CLI](#cli) section.
+
 ## Walker extensibility
 
 Plugin authors who need a new walker state dimension (something beyond `cwd` / `env` / `branch`) register a `Tracker<T>` under `Plugin.trackers`. The engine composes trackers at config load and feeds the merged map into unbash-walker's `walk()`.

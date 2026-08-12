@@ -22,7 +22,7 @@
  * intercepting stdout.
  */
 
-import type { Observer, Rule } from "../schema.ts";
+import type { Observer, Rule, TopLevelWhenClause } from "../schema.ts";
 
 /** An observer dropped by {@link dropUnusedObservers}. */
 export interface DroppedObserver {
@@ -41,12 +41,18 @@ export interface DroppedObserver {
  *   references determine consumption. Disabled rules should already
  *   be filtered out by the caller — this helper honors whatever's
  *   passed in.
+ * @param exemptionWhens - Exemption clauses (config + plugin buckets)
+ *   whose top-level `happened` references ALSO count as consumption.
+ *   Without this, an observer whose writes are consumed ONLY by an
+ *   exemption's `happened` would be dropped and the carve-out would
+ *   be silently dead (O1 parity — same scan as rules).
  */
 export function dropUnusedObservers(
   observers: readonly Observer[],
   rules: readonly Rule[],
+  exemptionWhens: readonly TopLevelWhenClause<string>[] = [],
 ): { kept: readonly Observer[]; dropped: readonly DroppedObserver[] } {
-  const consumed = collectConsumedEvents(rules);
+  const consumed = collectConsumedEvents(rules, exemptionWhens);
   const kept: Observer[] = [];
   const dropped: DroppedObserver[] = [];
   for (const o of observers) {
@@ -68,11 +74,23 @@ export function dropUnusedObservers(
 }
 
 /** Collect every event referenced by any rule's `happened.event` /
- *  `happened.since`. Rules without `when.happened` contribute nothing. */
-function collectConsumedEvents(rules: readonly Rule[]): Set<string> {
+ *  `happened.since` — plus exemption clauses' top-level `happened`
+ *  (identical scan, O1 parity: an observer whose writes feed an
+ *  exemption must survive the drop or the carve-out dies silently).
+ *  Rules and exemptions without `when.happened` contribute nothing. */
+function collectConsumedEvents(
+  rules: readonly Rule[],
+  exemptionWhens: readonly TopLevelWhenClause<string>[] = [],
+): Set<string> {
   const consumed = new Set<string>();
   for (const rule of rules) {
     const h = rule.when?.happened;
+    if (h === undefined) continue;
+    if (typeof h.event === "string") consumed.add(h.event);
+    if (typeof h.since === "string") consumed.add(h.since);
+  }
+  for (const when of exemptionWhens) {
+    const h = when.happened;
     if (h === undefined) continue;
     if (typeof h.event === "string") consumed.add(h.event);
     if (typeof h.since === "string") consumed.add(h.since);

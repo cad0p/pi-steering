@@ -675,6 +675,60 @@ export type TopLevelWhenClauseNoRecurse<Writes extends string = string> = {
   PredicateModifiers;
 
 /**
+ * Exemption clause — a `when`-shaped clause WITHOUT any `onUnknown`
+ * modifier. Exemptions are STRICTLY fail-closed: unknown walker
+ * values never exempt (the guard still fires). The modifier-stripped
+ * shape forbids the fail-open direction at compile time.
+ *
+ * Built from the existing building blocks: {@link InnerValue} (bare |
+ * spreadBase, no modifiers — leaf spread forms lose `onUnknown`),
+ * {@link BuiltInWhenLeavesInner} (the inner flavor whose `cwd` has no
+ * `{ pattern, onUnknown }` object form), and the not-block without
+ * `PredicateModifiers` (`Omit<TopLevelWhenClauseNoRecurse,
+ * "onUnknown">` strips the block-level modifier).
+ *
+ * `onUnknown` is forbidden ANYWHERE inside an exemption clause — at
+ * the clause top level, at the not-block top level, and in leaf
+ * object forms. Unknown-handling is a policy of the PRIMARY gate (the
+ * rule); a carve-out (possibly shipped by a third-party plugin) must
+ * never be able to weaken the guard's fail-closed posture. Enforced
+ * at three levels:
+ *   1. type-level (this type — writing `onUnknown` is a compile
+ *      error),
+ *   2. runtime validation
+ *      (`validateExemptionWhenClauseShape` rejects a smuggled
+ *      `onUnknown` at load time for `as any` / plain-JS authors),
+ *   3. evaluation (explicit modifiers are ignored regardless — the
+ *      projection is hard "allow"; defense-in-depth).
+ *
+ * The target rule's own `onUnknown:` policy decides how unknown
+ * values project for the GUARD; an exemption can only ever contribute
+ * "does not match" on unknown.
+ *
+ * @see Exemption
+ * @see InnerValue
+ * @see BuiltInWhenLeavesInner
+ * @see TopLevelWhenClauseNoRecurse
+ */
+export type ExemptionWhenClause<Writes extends string = string> = {
+  [K in keyof PiSteeringPredicates as K extends ReservedPredicateKey
+    ? never
+    : K]?: InnerValue<K & PluginPredicateKey>;
+} & BuiltInWhenLeavesInner<Writes> & {
+    // `happened` / `condition` are re-declared to strip the
+    // `| undefined` that `BuiltInWhenLeavesInner`'s indexed-access
+    // declarations (`BuiltInWhenLeavesOuter<Writes>["happened"]` /
+    // `["condition"]`) leak under `exactOptionalPropertyTypes` —
+    // the intersection of `X | undefined` (inner flavor) with `X`
+    // (this declaration) resolves to `X`, keeping the type
+    // assignable to {@link TopLevelWhenClause} at internal surfaces
+    // (evaluator exemption map, finalizePluginState, validator).
+    happened?: Exclude<BuiltInWhenLeavesInner<Writes>["happened"], undefined>;
+    condition?: Exclude<BuiltInWhenLeavesInner<Writes>["condition"], undefined>;
+    not?: Omit<TopLevelWhenClauseNoRecurse<Writes>, "onUnknown">;
+  };
+
+/**
  * Type-erased alias for {@link PredicateHandler} used at registry
  * boundaries (notably {@link Plugin.predicates}).
  *
@@ -1527,6 +1581,81 @@ export interface PredicateContext {
 }
 
 // ---------------------------------------------------------------------------
+// Exemption
+// ---------------------------------------------------------------------------
+
+/**
+ * A carve-out for a guard rule: when the given `when` clause MATCHES,
+ * the target rule does NOT fire — evaluation continues to the next
+ * rule exactly as if the target had missed.
+ *
+ * Exemptions are the name-keyed registry mechanism for narrowing
+ * guard rules (e.g. the git plugin's `no-main-commit`) WITHOUT
+ * copying or replacing them:
+ *
+ *   - **Accumulation, not replacement.** Exemptions attach by target
+ *     name to whichever rule wins that name after `disabledRules`
+ *     filtering — the winning rule's body doesn't matter, only its
+ *     name. Config-layer exemptions union across layers (no
+ *     inner-wins), and plugin-shipped exemptions stack with config
+ *     exemptions. Multiple exemptions for the same rule are OR-ed:
+ *     ANY matching clause prevents the rule from firing.
+ *   - **Duplicates are idempotent.** There is no collision concept;
+ *     the same carve-out declared twice is harmless.
+ *   - **Fail-closed is STRICT — no escape hatch.** Exemption clauses
+ *     evaluate with an "allow"-default projection — a predicate that
+ *     can't resolve (walker-unknown cwd, throwing handler,
+ *     unregistered predicate key) counts as "does not match", so the
+ *     guard still fires. This is the OPPOSITE default from rule
+ *     `when:` clauses, which project unknown to "match" (fail-closed
+ *     for rules = fire); see the evaluator's exemption path and `S1`
+ *     in INVARIANTS.md. `onUnknown` is forbidden ANYWHERE in an
+ *     exemption clause: {@link ExemptionWhenClause} strips the
+ *     modifier at the type level (compile error),
+ *     `validateExemptionWhenClauseShape` rejects a smuggled
+ *     `onUnknown` at load time, and evaluation ignores explicit
+ *     modifiers regardless (hard "allow" projection). Unknown
+ *     handling is a policy of the target rule — an exemption can
+ *     never opt back into unknown-exempts.
+ *
+ * Distinct from {@link Rule.unless} (a per-rule, same-rule-scope
+ * optional exemption field) and from {@link Rule.when.not} (boolean
+ * negation of a sub-clause): the registry is the cross-plugin
+ * ACCUMULATION mechanism. See the README "Exemptions" section.
+ *
+ * `Writes` is the union of session-entry event literals the clause's
+ * `when.happened.event` is allowed to reference — threaded through by
+ * {@link defineConfig} identically to {@link Rule.when}.
+ * `RuleName` is the compile-time rule-name union the target is
+ * typo-checked against inside {@link defineConfig}; both default to
+ * `string` outside it (no check skipped at the schema level).
+ */
+export interface Exemption<
+  Writes extends string = string,
+  RuleName extends string = string,
+> {
+  /**
+   * Target rule name — the rule this exemption carves out. Typo-
+   * checked against the `AllRuleNames` union inside
+   * {@link defineConfig}; plain `string` at schema level. An
+   * exemption targeting a rule name that doesn't exist in the final
+   * merged rule universe surfaces an `exemption-orphan` warning
+   * (strict mode throws); a target that exists but is disabled is
+   * inert, silent, and NOT orphaned.
+   */
+  rule: RuleName;
+
+  /**
+   * Clause that, when it MATCHES, prevents the target rule from
+   * firing. Evaluated with the fail-closed "allow"-default
+   * projection (unknown → does not match → guard still fires);
+   * typed as {@link ExemptionWhenClause} so `onUnknown` cannot be
+   * written anywhere in the clause (compile error).
+   */
+  when: ExemptionWhenClause<Writes>;
+}
+
+// ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
 
@@ -1562,6 +1691,28 @@ export interface Plugin {
 
   /** Observers the plugin ships. Referenced by name from rules. */
   observers?: readonly Observer[];
+
+  /**
+   * Guard-rule carve-outs this plugin ships — see {@link Exemption}.
+   *
+   * Plugin exemptions accumulate with the rest of the plugin:
+   * `disabledPlugins` drops them with everything else (a disabled
+   * plugin contributes NOTHING), and they stack with config-layer
+   * exemptions targeting the same rule (OR-ed at evaluation).
+   *
+   * Exemption `when` clauses are STRICTLY fail-closed: `onUnknown`
+   * cannot be written anywhere inside them (type-level ban via
+   * {@link ExemptionWhenClause}; rejected at load if smuggled), so a
+   * plugin-shipped carve-out can never weaken the target rule's
+   * fail-closed posture — the target rule's own `onUnknown:` policy
+   * decides on unknown walker values.
+   *
+   * Use-case: a plugin that wants to narrow ANOTHER plugin's (or a
+   * default rule's) guard for its own domain — e.g. a vault plugin
+   * exempting `no-main-commit` when `cwd` is inside a vault tree —
+   * without copying or replacing the rule body.
+   */
+  exemptions?: readonly Exemption[];
 
   /**
    * NEW trackers the plugin introduces. Keys are tracker names (e.g.
@@ -1729,6 +1880,33 @@ export interface SteeringConfig {
 
   /** Inline observers (rules reference by name). */
   observers?: readonly Observer[];
+
+  /**
+   * Guard-rule carve-outs — see {@link Exemption}. Name-keyed
+   * clauses that, when they match, prevent the target rule from
+   * firing.
+   *
+   * ACCUMULATION, not replacement: config-layer exemptions UNION
+   * across layers (project + global both apply — no inner-wins), and
+   * plugin-shipped exemptions stack on top. Multiple exemptions for
+   * the same rule are OR-ed — ANY matching clause exempts. An
+   * exemption targeting a rule name that doesn't exist in the final
+   * merged rule universe surfaces an `exemption-orphan` warning
+   * (strict mode throws at factory time); a target that exists but
+   * is disabled (via {@link disabledRules} or a disabled plugin) is
+   * inert and silent.
+   *
+   * Inside {@link defineConfig}, `rule` is typo-checked against the
+   * `AllRuleNames` union (same machinery as {@link disabledRules})
+   * and `when.happened.event` narrows against the config's `writes`
+   * union. See the README "Exemptions" section for the fail-closed
+   * semantics (unknown predicate state counts as "does not match",
+   * so a carve-out can never silently open a guard). `onUnknown` is
+   * forbidden in exemption `when` clauses — typed via
+   * {@link ExemptionWhenClause}, rejected at load if smuggled; the
+   * target rule's own `onUnknown:` policy decides on unknown values.
+   */
+  exemptions?: readonly Exemption[];
 }
 
 // ---------------------------------------------------------------------------
@@ -1844,6 +2022,17 @@ export type SteeringDiagnosticKind =
    * extension is ignored.
    */
   | "extension-orphan"
+  /**
+   * An exemption targets a rule name that doesn't exist in the final
+   * merged rule universe (merged rules + plugin-shipped rules +
+   * defaults, honoring `disableDefaults`). The carve-out can never
+   * match anything and is dropped. Warning-class: strict mode throws
+   * at factory time, like `extension-orphan`. A target that exists
+   * but is disabled (via `disabledRules` or a disabled plugin) is
+   * inert, silent, and NOT flagged — by-design disable, consistent
+   * with the disabled-rule `console.info` breadcrumb.
+   */
+  | "exemption-orphan"
   /**
    * A plugin attempts to register a tracker under a reserved name
    * (e.g. `events`). Always an error — reserved names are owned by

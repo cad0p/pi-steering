@@ -360,6 +360,47 @@ describe("pi-steering list", () => {
     assert.match(r.stdout, /Disabled rules: some-disabled-rule/);
   });
 
+  it("loads a config importing a .ts-shipped node_modules plugin without layer-import-failed", async () => {
+    // pi-napkin #77 end-to-end symptom at the CLI surface: on main
+    // (native type-stripping), a config importing a `.ts`-shipped
+    // node_modules plugin is dropped with a `layer-import-failed`
+    // warning on stderr and the global/project config silently
+    // degrades. The jiti loader must load it clean.
+    const pi = join(scratch, ".pi", "steering");
+    mkdirSync(pi, { recursive: true });
+    const pkgDir = join(scratch, "node_modules", "@cad0p", "fake-plugin");
+    mkdirSync(join(pkgDir, "src"), { recursive: true });
+    writeFileSync(
+      join(pkgDir, "package.json"),
+      JSON.stringify({
+        name: "@cad0p/fake-plugin",
+        type: "module",
+        exports: { ".": "./src/index.ts" },
+      }),
+      "utf8",
+    );
+    writeFileSync(
+      join(pkgDir, "src", "index.ts"),
+      'export const fakePlugin = { name: "fake" };\n',
+      "utf8",
+    );
+    writeFileSync(
+      join(pi, "index.ts"),
+      'import { fakePlugin } from "@cad0p/fake-plugin";\n' +
+        "export default { plugins: [fakePlugin] };\n",
+      "utf8",
+    );
+    const r = await runCli({ cwd: scratch }, "list");
+    assert.equal(r.code, 0);
+    assert.ok(
+      !r.stderr.includes("layer-import-failed"),
+      `expected clean load; stderr: ${r.stderr}`,
+    );
+    // Unknown plugin names render as a bare name line (no bracket).
+    assert.match(r.stdout, /Resolved config: 1 plugin/);
+    assert.match(r.stdout, /^fake$/m);
+  });
+
   it("--format=json emits a parseable structure with all sections", async () => {
     writeSteeringDirConfig(
       scratch,

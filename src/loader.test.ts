@@ -612,6 +612,137 @@ describe("loader: loadConfigs", () => {
     );
     assert.deepEqual(second.diagnostics, []);
   });
+
+  it("reloads a statically-imported sibling .ts file between calls", async () => {
+    // Regression pin for the whole point of #23: on the old
+    // native-ESM design, `?t=` only busted the config ENTRY; a
+    // statically-imported sibling like `./rules/a.ts` stayed in
+    // Node's ESM module map keyed by URL → stale forever. jiti
+    // `evalModule` routes every transitive import through its own
+    // loader with `moduleCache: false` (fresh instance per call), so
+    // the sibling is re-read from disk on every load. The `.ts`
+    // extension in the import specifier is REQUIRED — jiti and Node
+    // type-stripping both resolve explicit extensions only.
+    const dir = join(tmp, "transitive");
+    mkdirSync(dir, { recursive: true });
+    const sibling = join(dir, ".pi", "steering", "rules", "a.ts");
+    writeConfig(sibling, "export const v = 1;\n");
+    writeConfig(
+      join(dir, ".pi", "steering", "index.ts"),
+      'import { v } from "./rules/a.ts";\n' +
+        'export default { disabledRules: ["x" + v] };\n',
+    );
+
+    const first = await loadConfigs(dir);
+    assert.equal(first.layers[0]?.disabledRules?.[0], "x1");
+
+    writeConfig(sibling, "export const v = 2;\n");
+    const second = await loadConfigs(dir);
+    assert.equal(
+      second.layers[0]?.disabledRules?.[0],
+      "x2",
+      "expected sibling edit to propagate on second call; got stale " +
+        "value, which means the sibling was served from a module cache",
+    );
+    assert.deepEqual(second.diagnostics, []);
+  });
+
+  it("reloads a compiled .js sibling between calls", async () => {
+    // Same shape as the .ts sibling pin: with the old native design
+    // even COMPILED .js siblings sat in Node's ESM cache keyed by
+    // URL. With jiti `moduleCache: false` + a fresh instance per
+    // load, every file the config transitively reaches (`.ts` or
+    // `.js`) is re-read from disk — a plugin author editing a
+    // compiled `dist/index.js` during development sees the change on
+    // the next reload.
+    const dir = join(tmp, "transitive-js");
+    mkdirSync(dir, { recursive: true });
+    const compiled = join(dir, ".pi", "steering", "rules", "compiled.js");
+    writeConfig(compiled, 'export const c = "c1";\n');
+    writeConfig(
+      join(dir, ".pi", "steering", "index.ts"),
+      'import { c } from "./rules/compiled.js";\n' +
+        'export default { disabledRules: ["js-" + c] };\n',
+    );
+
+    const first = await loadConfigs(dir);
+    assert.equal(first.layers[0]?.disabledRules?.[0], "js-c1");
+
+    writeConfig(compiled, 'export const c = "c2";\n');
+    const second = await loadConfigs(dir);
+    assert.equal(
+      second.layers[0]?.disabledRules?.[0],
+      "js-c2",
+      "expected compiled sibling edit to propagate on second call",
+    );
+    assert.deepEqual(second.diagnostics, []);
+  });
+
+  it("loads a .ts-shipped plugin from node_modules cleanly", async () => {
+    // pi-napkin #77 scenario: `@cad0p/pi-napkin/steering` ships raw
+    // `.ts` source as its package entry. Native type-stripping
+    // hard-refuses `.ts` under `node_modules`
+    // (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) → the layer fails
+    // with `layer-import-failed` and the config is dropped. jiti has
+    // no such restriction — the plugin must load clean.
+    const dir = join(tmp, "plugin-ts");
+    mkdirSync(dir, { recursive: true });
+    const pkgDir = join(dir, "node_modules", "@cad0p", "fake-plugin");
+    writeConfig(
+      join(pkgDir, "package.json"),
+      JSON.stringify({
+        name: "@cad0p/fake-plugin",
+        type: "module",
+        exports: { ".": "./src/index.ts" },
+      }),
+    );
+    writeConfig(
+      join(pkgDir, "src", "index.ts"),
+      'export const fakePlugin = { name: "fake" };\n',
+    );
+    writeConfig(
+      join(dir, ".pi", "steering", "index.ts"),
+      'import { fakePlugin } from "@cad0p/fake-plugin";\n' +
+        "export default { plugins: [fakePlugin] };\n",
+    );
+
+    const { layers, diagnostics } = await loadConfigs(dir);
+    assert.equal(layers.length, 1);
+    assert.equal(layers[0]?.plugins?.[0]?.name, "fake");
+    assert.ok(
+      !diagnostics.some((d) => d.kind === "layer-import-failed"),
+      `expected clean load; got: ${JSON.stringify(diagnostics)}`,
+    );
+  });
+
+  it("rejects `export default undefined` with the must-have-default message", async () => {
+    // Without the getOwnPropertyDescriptor probe, jiti's interop
+    // proxy (interopDefault: true) makes `mod.default` return a
+    // fabricated non-undefined value for a nullish real default, so
+    // `export default undefined` passes the `in` + undefined checks
+    // and the module silently loads as an empty-ish config. The
+    // descriptor probe sees the raw exports object: the `default`
+    // key EXISTS (so `in` cannot distinguish this from a real
+    // default) but its VALUE is undefined → reject with the same
+    // message as a missing default export.
+    const cwd = join(tmp, "default-undefined");
+    mkdirSync(cwd, { recursive: true });
+    writeConfig(
+      join(cwd, ".pi", "steering.ts"),
+      "export default undefined;\n",
+    );
+    const { layers, diagnostics } = await loadConfigs(cwd);
+    assert.deepEqual(layers, []);
+    const hit = diagnostics.find((d) => d.kind === "layer-import-failed");
+    assert.ok(
+      hit,
+      `expected layer-import-failed diagnostic; got: ${JSON.stringify(diagnostics)}`,
+    );
+    assert.ok(
+      hit.message.includes("must have a default export"),
+      `expected must-have-default message; got: ${hit.message}`,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

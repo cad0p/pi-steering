@@ -162,10 +162,16 @@ export function findConfigFile(
  * (hence the `await` below).
  *
  * jiti's default `interopDefault: true` wraps the module namespace in
- * an interop Proxy whose `default` getter falls back to the namespace
- * itself when the source has no default export — so the guard below
- * probes for a real `default` KEY (`"default" in mod`), not just
- * `mod.default === undefined`, which would never fire.
+ * an interop Proxy, so NEITHER `"default" in mod` NOR `mod.default`
+ * reliably detects a real default export. The proxy's `get` trap
+ * falls back to the namespace (or a `{ default: … }` wrapper)
+ * whenever the real default is nullish, so `mod.default` is never
+ * `undefined`; and `in` falls through to the raw exports object,
+ * which OWNS a `default` key even for `export default undefined`.
+ * The only reliable signal is the own-property descriptor probe
+ * below (`Object.getOwnPropertyDescriptor`): it bypasses the proxy's
+ * traps, sees the raw exports object, and yields `value: undefined`
+ * exactly when the source default is nullish.
  */
 async function importConfigFile(path: string): Promise<SteeringConfig> {
   // Fresh instance per load: per-instance parentCache is empty, and
@@ -186,14 +192,19 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
     default?: unknown;
   } & Record<string, unknown>;
 
-  // `"default" in mod` must be checked before `mod.default ===
-  // undefined`: jiti's interop wrapper makes `mod.default` fall back
-  // to the module namespace itself when the source has no default
-  // export, so the bare undefined check would never fire (and a
-  // named-exports-only module would silently load as a config). The
-  // `in` probe hits the raw exports object (the wrapper has no `has`
-  // trap) — exactly "did the source `export default`".
-  if (!("default" in mod) || mod.default === undefined) {
+  // Probe the own property descriptor instead of `"default" in mod`
+  // or `mod.default`: jiti's interop wrapper (interopDefault: true)
+  // is a Proxy whose `get` trap fabricates a non-`undefined` value
+  // for nullish real defaults — `export default undefined` yields an
+  // object and a named-exports-only module yields the namespace, so
+  // the bare checks would never fire and the module would silently
+  // load as a config. `in` is no better: it falls through to the raw
+  // exports object, which DOES own a `default` key for `export
+  // default undefined`. The descriptor (which bypasses the proxy's
+  // traps) is the only signal that sees the raw exports object AND
+  // the true value of its `default` key.
+  const defaultDesc = Object.getOwnPropertyDescriptor(mod, "default");
+  if (defaultDesc === undefined || defaultDesc.value === undefined) {
     // Path is intentionally omitted from the message; the caller wraps
     // this throw in a `layer-import-failed` diagnostic whose own `path`
     // field is the single source of truth for the file location.
@@ -203,7 +214,7 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
         "`export default defineConfig({ ... })`.",
     );
   }
-  const candidate = mod.default;
+  const candidate = defaultDesc.value;
   if (
     candidate === null ||
     typeof candidate !== "object" ||

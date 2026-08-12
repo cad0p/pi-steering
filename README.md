@@ -54,7 +54,7 @@ Why both steps matter:
 
 It also picks up edits to **everything the config imports**. Each load creates a fresh jiti instance (`moduleCache: false`), so transitive imports route through jiti's loader and get re-read from disk and re-evaluated on every reload:
 
-- **Sibling files** — `.ts` or `.js` modules next to the config (e.g. `./rules/*.ts`).
+- **Sibling files** — `.ts` modules next to the config (e.g. `./rules/*.ts`), or `.js` in CommonJS scope (below).
 - **`.ts`-shipped plugin sources under `node_modules`** — a plugin whose package entry points at `.ts` source (e.g. `@cad0p/pi-napkin/steering`). This was previously broken outright: Node's native type-stripping hard-refused `.ts` under `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), dropping the config with `layer-import-failed`. jiti has no such restriction — the plugin loads, and edits to its source hot-reload.
 - **`.js` files in CommonJS scope** — a package without `"type": "module"` in its `package.json`.
 

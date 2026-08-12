@@ -728,10 +728,7 @@ describe("loader: loadConfigs", () => {
     // message as a missing default export.
     const cwd = join(tmp, "default-undefined");
     mkdirSync(cwd, { recursive: true });
-    writeConfig(
-      join(cwd, ".pi", "steering.ts"),
-      "export default undefined;\n",
-    );
+    writeConfig(join(cwd, ".pi", "steering.ts"), "export default undefined;\n");
     const { layers, diagnostics } = await loadConfigs(cwd);
     assert.deepEqual(layers, []);
     const hit = diagnostics.find((d) => d.kind === "layer-import-failed");

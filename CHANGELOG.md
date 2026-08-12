@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [calver-released]
+
+<!-- USER-EDITABLE SECTION START -->
+<!-- Add your curated release notes here. -->
+<!-- USER-EDITABLE SECTION END -->
+
+### 🚀 Features
+
+- Exemption registry — composable carve-outs for guard rules ([#26](https://github.com/cad0p/pi-steering/pull/26)) ([#27](https://github.com/cad0p/pi-steering/pull/27))
+
+
 ## [0.2.0] - 2026-08-11
 
 <!-- USER-EDITABLE SECTION START -->

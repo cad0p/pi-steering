@@ -27,7 +27,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
 
-const repoRoot = resolve(new URL("..", import.meta.url).pathname);
+const repoRoot = resolve(import.meta.dirname, "..");
 const distEntry = join(repoRoot, "dist/index.js");
 
 /* -------------------------------------------------------------------------- */

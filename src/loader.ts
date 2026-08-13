@@ -10,9 +10,17 @@
  * {@link SteeringDiagnosticKind} JSDoc for the diagnostic stream.
  */
 
-import { existsSync, globSync, readFileSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  globSync,
+  mkdirSync,
+  readFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createJiti } from "jiti";
 import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
 import { runMergerPipeline } from "./internal/session-runtime.ts";
@@ -141,6 +149,34 @@ export function findConfigFile(
 // ---------------------------------------------------------------------------
 
 /**
+ * jiti's id-relative default cache resolution (prepareCacheDir) treats
+ * the instance id as a directory: for a file id like `<pkg>/src/loader.ts`
+ * it probes `<pkg>/src/node_modules` (never exists) and silently falls
+ * back to `${tmpdir}/jiti` — volatile (wiped on reboot → every pi
+ * process re-pays the ~1.2s cold transpile once), machine-wide shared
+ * and unbounded. Pin to the package's own `node_modules/.cache/jiti`
+ * when the package has a node_modules dir; fall back to jiti's default
+ * otherwise (status quo).
+ *
+ * Exported for tests — not part of the library's public API.
+ */
+export function resolveJitiCacheDir(moduleUrl: string): string | true {
+  if (!moduleUrl.startsWith("file://")) return true;
+  const pkgRoot = dirname(dirname(fileURLToPath(moduleUrl)));
+  const nm = join(pkgRoot, "node_modules");
+  try {
+    if (!existsSync(nm)) return true; // never create a stray node_modules
+    const dir = join(nm, ".cache", "jiti");
+    mkdirSync(dir, { recursive: true });
+    accessSync(dir, constants.W_OK);
+    return dir;
+  } catch {
+    return true; // read-only pnpm store etc. → jiti default (tmpdir), same as today
+  }
+}
+const JITI_CACHE_DIR = resolveJitiCacheDir(import.meta.url);
+
+/**
  * Load a single config file (via jiti `evalModule`) and return its
  * default export. The module MUST `export default` a
  * {@link SteeringConfig} object — the loader does not accept
@@ -158,10 +194,17 @@ export function findConfigFile(
  * anything in `require.cache` — every load re-reads and re-evaluates
  * the file from disk, INCLUDING everything the config transitively
  * imports (sibling `.ts` / `.js` files, `node_modules` plugins).
- * `fsCache: true` is a source-level cache only (transformed output,
- * keyed by content hash) — it never affects reload semantics. The
- * source string is evaluated fresh each call, so a failed load never
- * poisons subsequent loads.
+ * `fsCache` is a source-level cache only (transformed output, keyed
+ * by content hash) — it never affects reload semantics. The source
+ * string is evaluated fresh each call, so a failed load never
+ * poisons subsequent loads. Cache location contract: the directory
+ * is pinned to `<pkgRoot>/node_modules/.cache/jiti` when the package
+ * has a writable `node_modules` dir (see
+ * {@link resolveJitiCacheDir}), else jiti's default `${tmpdir}/jiti`
+ * fallback. The option is passed explicitly, so `JITI_FS_CACHE` env
+ * defaults are overridden either way — unchanged from before (the
+ * loader already passed `fsCache: true` explicitly; jiti's option
+ * merge gives userOptions precedence over env defaults).
  *
  * `async: true` is passed explicitly to `evalModule`: it wraps the
  * module in an async function, so top-level `await` and dynamic
@@ -188,7 +231,7 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
   // including everything the config transitively imports.
   const jiti = createJiti(import.meta.url, {
     moduleCache: false,
-    fsCache: true,
+    fsCache: JITI_CACHE_DIR,
   });
   const source = readFileSync(path, "utf8");
   // async: true → async wrapper: top-level await + dynamic import()

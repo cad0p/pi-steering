@@ -14,10 +14,17 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 import { useIsolatedHome } from "./__test-helpers__.ts";
 import {
   buildConfig,
@@ -26,6 +33,7 @@ import {
   loadConfigs,
   loadSteeringConfig,
   resolveAgentDir,
+  resolveJitiCacheDir,
 } from "./loader.ts";
 import type { Plugin, SteeringConfig } from "./schema.ts";
 
@@ -1431,6 +1439,62 @@ describe("loader: loadSteeringConfig", () => {
           /\(user config\)/.test(d.message),
       ),
       `expected an invalid-name diagnostic for the malformed user-config rule; got: ${JSON.stringify(diagnostics)}`,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveJitiCacheDir
+// ---------------------------------------------------------------------------
+
+describe("loader: resolveJitiCacheDir", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "pi-steering-jiti-cache-"));
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("pins to <pkg>/node_modules/.cache/jiti when node_modules exists", () => {
+    const pkg = join(tmp, "pkg");
+    mkdirSync(join(pkg, "node_modules"), { recursive: true });
+    const id = pathToFileURL(join(pkg, "src", "loader.ts")).href;
+    const dir = resolveJitiCacheDir(id);
+    assert.equal(dir, join(pkg, "node_modules", ".cache", "jiti"));
+    // The mkdirSync side effect IS part of the contract.
+    assert.ok(existsSync(dir), "expected cache dir to exist on disk");
+  });
+
+  it("returns true (jiti default) when the package has no node_modules", () => {
+    const pkg = join(tmp, "pkg");
+    mkdirSync(pkg, { recursive: true });
+    const id = pathToFileURL(join(pkg, "src", "loader.ts")).href;
+    assert.equal(resolveJitiCacheDir(id), true);
+    // The "never create a stray node_modules" guard.
+    assert.ok(!existsSync(join(pkg, "node_modules")));
+  });
+
+  it("returns true when node_modules/.cache is a regular file", () => {
+    const pkg = join(tmp, "pkg");
+    mkdirSync(join(pkg, "node_modules"), { recursive: true });
+    // Blocks mkdirSync(join(nm, ".cache", "jiti"), { recursive: true }).
+    writeFileSync(join(pkg, "node_modules", ".cache"), "blocker", "utf8");
+    const id = pathToFileURL(join(pkg, "src", "loader.ts")).href;
+    assert.equal(resolveJitiCacheDir(id), true);
+  });
+
+  it("returns true for a non-file URL id", () => {
+    assert.equal(resolveJitiCacheDir("data:text/javascript,export {}"), true);
+  });
+
+  it("maps a dist/loader.js id to the same package cache dir", () => {
+    const pkg = join(tmp, "pkg");
+    mkdirSync(join(pkg, "node_modules"), { recursive: true });
+    const id = pathToFileURL(join(pkg, "dist", "loader.js")).href;
+    assert.equal(
+      resolveJitiCacheDir(id),
+      join(pkg, "node_modules", ".cache", "jiti"),
     );
   });
 });

@@ -41,9 +41,9 @@ import {
 } from "../evaluator.ts";
 import {
   buildConfig,
+  type LoadConfigsOptions,
   loadConfigs,
   mergeBool,
-  type LoadConfigsOptions,
 } from "../loader.ts";
 import {
   buildObserverDispatcher,

@@ -23,8 +23,8 @@
  *   2 - import-json conversion error ({@link FromJSONError})
  */
 
-import { readFile, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { FromJSONError, fromJSON } from "../compat.ts";
@@ -358,7 +358,10 @@ function hasTrustRequiringProjectResourcesMirror(cwd: string): boolean {
   }
   while (true) {
     const agentsSkillsDir = join(currentDir, ".agents", "skills");
-    if (agentsSkillsDir !== userAgentsSkillsDir && existsSync(agentsSkillsDir)) {
+    if (
+      agentsSkillsDir !== userAgentsSkillsDir &&
+      existsSync(agentsSkillsDir)
+    ) {
       return true;
     }
     const parentDir = dirname(currentDir);

@@ -891,6 +891,10 @@ Implication: running pi inside a directory hierarchy whose steering configs you 
 
 Only run pi in directory hierarchies whose steering configs you trust.
 
+### Project trust gate
+
+Since 0.2.x, the project layer loads **only when the project is trusted** — pi-steering adopts pi's RESOLVED project-trust decision rather than asking its own question. Trusted means: the directory has no trust-requiring pi resources, or pi's trust store (`<agentDir>/trust.json`, `~/.pi/agent/trust.json`) holds a `true` entry for it (or an ancestor) — resolved via pi's startup trust prompt, `pi --project-trust-override`, or the trust store. Untrusted projects skip the project layer with an info-class breadcrumb (`[pi-steering] [info] …project layer skipped`); the **global layer always loads**, so global steering keeps working in untrusted trees. Steering-only projects (no `.pi/settings.json`, `.pi/extensions`, …) are **never gated** — pi auto-trusts them, so the gate is inert there. The approval path is pi's own trust flow (prompt / store / override); pi-steering never prompts, never writes trust.json, and never resolves trust itself. `pi-steering list` mirrors the same non-UI formula and reports `projectLayerTrusted` in its JSON output.
+
 ### Plugin trust
 
 Plugins register predicates (`when.<key>` handlers), observers, and `onFire` hooks — all of which **run arbitrary code during the evaluator's hot path**. A malicious or buggy plugin can:

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Project-layer trust gate** (issue [#22](https://github.com/cad0p/pi-steering/issues/22)): project-layer steering configs load only when the project is trusted — the bridge adopts pi's RESOLVED project-trust decision (`ctx.isProjectTrusted()`), with no trust UI, no prompt, and no trust.json writes of its own. Untrusted projects skip the project layer with an info-class breadcrumb; the global layer always loads, so global steering keeps working in untrusted trees. Steering-only projects are never gated (pi auto-trusts them). `pi-steering list` mirrors pi's non-UI trust formula and reports `projectLayerTrusted` in its JSON output.
+
 ## [0.2.0] - 2026-08-11
 
 <!-- USER-EDITABLE SECTION START -->

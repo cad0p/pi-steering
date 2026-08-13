@@ -451,7 +451,9 @@ describe("buildSessionRuntime: project-trust gate", () => {
     assert.ok(result.dispatcher);
     // Breadcrumb: exactly one info line, single-line shape with the
     // skipped dir as path prefix.
-    const breadcrumbs = infos.filter((m) => m.includes("project layer skipped"));
+    const breadcrumbs = infos.filter((m) =>
+      m.includes("project layer skipped"),
+    );
     assert.equal(
       breadcrumbs.length,
       1,

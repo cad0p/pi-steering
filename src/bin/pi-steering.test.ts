@@ -1128,7 +1128,11 @@ describe("pi-steering list: project trust gate", () => {
   function writeTrustStore(entries: Record<string, true | false | null>): void {
     const dir = join(scratch, ".pi", "agent");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "trust.json"), `${JSON.stringify(entries, null, 2)}\n`, "utf8");
+    writeFileSync(
+      join(dir, "trust.json"),
+      `${JSON.stringify(entries, null, 2)}\n`,
+      "utf8",
+    );
   }
 
   it("untrusted dir (no trust entry + trust-requiring resource): project layer skipped, [info] on stderr, JSON false", async () => {

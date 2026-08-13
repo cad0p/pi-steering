@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 - Exemption registry — composable carve-outs for guard rules ([#26](https://github.com/cad0p/pi-steering/pull/26)) ([#27](https://github.com/cad0p/pi-steering/pull/27))
 - Clean reload via jiti evalModule — transitive config reload, drop Node 22 floor ([#23](https://github.com/cad0p/pi-steering/pull/23)) ([#31](https://github.com/cad0p/pi-steering/pull/31))
+- Lazy session_start runtime build — register-only sync factory ([#9](https://github.com/cad0p/pi-steering/pull/9)) ([#30](https://github.com/cad0p/pi-steering/pull/30)) ([#37](https://github.com/cad0p/pi-steering/pull/37))
 
 ### 🐛 Bug Fixes
 

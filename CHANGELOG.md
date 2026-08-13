@@ -13,6 +13,10 @@ All notable changes to this project will be documented in this file.
 - Exemption registry — composable carve-outs for guard rules ([#26](https://github.com/cad0p/pi-steering/pull/26)) ([#27](https://github.com/cad0p/pi-steering/pull/27))
 - Clean reload via jiti evalModule — transitive config reload, drop Node 22 floor ([#23](https://github.com/cad0p/pi-steering/pull/23)) ([#31](https://github.com/cad0p/pi-steering/pull/31))
 
+### ⚙️ Miscellaneous Tasks
+
+- Modern-API budget harvest — @types/node ^22 + ES2024 lib, import.meta.main, fs.globSync, strip-types cleanup ([#32](https://github.com/cad0p/pi-steering/pull/32)) ([#33](https://github.com/cad0p/pi-steering/pull/33))
+
 
 ## [0.2.0] - 2026-08-11
 

@@ -82,7 +82,12 @@ export function useIsolatedHome(
 }
 
 /**
- * Like {@link useIsolatedHome} but also chdirs into the scratch dir, so factory-time tests find the per-test config via the loader's project layer. macOS tmpdir is a symlink; canonicalized via `realpathSync` so cwd-mismatch tests don't see false-divergence.
+ * Like {@link useIsolatedHome} but also chdirs into the scratch dir.
+ * The bridge no longer reads `process.cwd()` — the runtime builds
+ * from `ctx.cwd` at `session_start` and the loader takes cwd as a
+ * parameter — so the chdir is now unnecessary-but-harmless (kept for
+ * parity with the old eager-factory tests). `realpathSync` keeps the
+ * canonicalized path stable across macOS tmpdir symlinks.
  */
 export function useScratchHome(
   prefix: string,
@@ -172,6 +177,7 @@ export interface CustomEntry {
 export function makeCtx(
   cwd: string,
   entries: ReadonlyArray<CustomEntry> = [],
+  notify?: NotifyRecorder,
 ): ExtensionContext {
   return {
     cwd,
@@ -181,7 +187,70 @@ export function makeCtx(
       // unknown-cast below; any accidental dependency surfaces as a
       // clear TypeError rather than silently passing.
     } as unknown as ExtensionContext["sessionManager"],
+    // Only attach `ui` when a recorder is provided — a plain
+    // extension context has one, but suites that don't assert on
+    // notifications stay untouched.
+    ...(notify
+      ? {
+          ui: {
+            notify: (
+              message: string,
+              type?: "info" | "warning" | "error",
+            ) => {
+              notify.messages.push(message);
+              notify.types.push(type ?? "info");
+            },
+          },
+        }
+      : {}),
   } as ExtensionContext;
+}
+
+// ---------------------------------------------------------------------------
+// session_start firing + notification recorder
+// ---------------------------------------------------------------------------
+
+/**
+ * Records `ctx.ui.notify` calls (message bodies + types) so tests can
+ * assert the in-chat notification surface of the lazy session_start
+ * build. Create one with {@link makeNotifyRecorder} and pass it to
+ * {@link makeCtx} / {@link fireSessionStart}.
+ */
+export interface NotifyRecorder {
+  readonly messages: string[];
+  readonly types: string[];
+}
+
+export function makeNotifyRecorder(): NotifyRecorder {
+  return { messages: [], types: [] };
+}
+
+/**
+ * Structural slice of a mock pi that has registered a `session_start`
+ * handler — enough for {@link fireSessionStart} to drive it.
+ */
+export interface SessionStartMock {
+  handlers: Partial<
+    Record<"session_start", (event: unknown, ctx: unknown) => unknown>
+  >;
+}
+
+/**
+ * Fire the registered `session_start` handler with `cwd`, awaiting it
+ * (the lazy design builds the runtime inside the handler, so the
+ * promise must settle before firing tool calls). Pass an optional
+ * {@link NotifyRecorder} to capture `ui.notify` calls from the
+ * strict-mode error surface.
+ */
+export async function fireSessionStart(
+  mock: SessionStartMock,
+  cwd: string,
+  reason = "startup",
+  notify?: NotifyRecorder,
+): Promise<void> {
+  const h = mock.handlers.session_start;
+  if (!h) throw new Error("session_start handler not registered");
+  await h({ type: "session_start", reason }, makeCtx(cwd, [], notify));
 }
 
 // ---------------------------------------------------------------------------

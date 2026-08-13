@@ -31,6 +31,7 @@ import type {
   ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import {
+  fireSessionStart,
   makeCtx,
   useScratchHome,
   writeSteeringSingleFileConfig,
@@ -89,12 +90,6 @@ function fireAgentStart(mock: MockPi): void {
   const h = mock.handlers.agent_start;
   if (!h) throw new Error("agent_start handler not registered");
   h({ type: "agent_start" }, {});
-}
-
-async function fireSessionStart(mock: MockPi, cwd: string): Promise<void> {
-  const h = mock.handlers.session_start;
-  if (!h) throw new Error("session_start handler not registered");
-  await h({ type: "session_start", reason: "startup" }, makeCtx(cwd));
 }
 
 async function fireBashToolCall(
@@ -178,10 +173,10 @@ let tmpHome: string;
 
 /**
  * Bind a fresh `$HOME` per test AND chdir into it via the shared
- * {@link useScratchHome} helper. The bridge factory eagerly loads
- * from `process.cwd()` at register time, so tests must launch from
- * the scratch home for the loader's project + global layers to find
- * the per-test config.
+ * {@link useScratchHome} helper. The runtime builds from `ctx.cwd` at
+ * `session_start` — the bridge no longer reads `process.cwd()` at
+ * register time — so tests fire the session with `tmpHome` as the
+ * cwd; the chdir is kept for parity, not required.
  */
 function useRegisterScratchHome(): void {
   useScratchHome("pi-steering-register-", (t) => {
@@ -202,7 +197,7 @@ function writeSteeringConfig(dir: string, body: string): void {
 }
 
 /* -------------------------------------------------------------------------- */
-/* factory-time-load + tool_call with default rules                           */
+/* session-start-load + tool_call with default rules */
 /* -------------------------------------------------------------------------- */
 
 describe("register(): default rules wiring", () => {

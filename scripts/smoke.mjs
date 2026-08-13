@@ -145,6 +145,15 @@ const CASES = [
     expectRule: "no-force-push",
     requiresUserRule: true,
   },
+  {
+    label:
+      "user rule genuinely loads: overriding no-force-push alone still blocks via test-no-force-push",
+    command:
+      "git push --force origin main " +
+      "# steering-override: no-force-push \u2014 smoke pin",
+    expect: "block",
+    expectRule: "test-no-force-push",
+  },
 ];
 
 /* -------------------------------------------------------------------------- */

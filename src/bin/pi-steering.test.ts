@@ -1216,7 +1216,7 @@ describe("pi-steering list: project trust gate", () => {
     );
     assert.match(
       r.stderr,
-      /pi-steering: trust store .*unreadable; ignoring/,
+      /pi-steering: trust store .*(unreadable|malformed); ignoring/,
       `expected unreadable-store note; got: ${r.stderr}`,
     );
     assert.match(r.stderr, /\[info\] .*project layer skipped/);

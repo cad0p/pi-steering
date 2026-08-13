@@ -313,6 +313,9 @@ async function runList(args: string[]): Promise<number> {
  * (trust-manager.js) — the CLI reimplements pi's non-UI trust formula
  * because pi's `exports` map blocks deep imports of its internals.
  * The mirror is pinned by the bin tests; drift risk is documented.
+ * Scope note: fixed to pi's default `.pi` config dir — pi's
+ * configurable `pkg.piConfig.configDir` is out of scope (the loader
+ * itself is `.pi`-fixed, so the mirror and the loader stay in sync).
  */
 const TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES = [
   "settings.json",
@@ -378,10 +381,12 @@ function hasTrustRequiringProjectResourcesMirror(cwd: string): boolean {
  * Divergence (deliberate, O3): pi's `readTrustFile` THROWS on a
  * malformed store (pi would crash at startup); the CLI is a read-only
  * inspector and must not crash — it treats the store as EMPTY and
- * writes `pi-steering: trust store <path> unreadable; ignoring` to
- * stderr. The formula then proceeds on the empty store: with
- * trust-requiring resources present the decision is UNTRUSTED and the
- * project layer is skipped (mirror-faithful, no fail-open fallback).
+ * writes a `pi-steering: trust store <path> …; ignoring` note to
+ * stderr ("unreadable" for read/parse failures, "malformed" for
+ * structurally invalid contents). The formula then proceeds on the
+ * empty store: with trust-requiring resources present the decision is
+ * UNTRUSTED and the project layer is skipped (mirror-faithful, no
+ * fail-open fallback).
  */
 function trustStoreGetMirror(cwd: string): boolean | null {
   const agentDir = resolveAgentDir();
@@ -404,7 +409,7 @@ function trustStoreGetMirror(cwd: string): boolean | null {
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     process.stderr.write(
-      `pi-steering: trust store ${trustPath} unreadable; ignoring\n`,
+      `pi-steering: trust store ${trustPath} malformed; ignoring\n`,
     );
     return null;
   }
@@ -412,7 +417,7 @@ function trustStoreGetMirror(cwd: string): boolean | null {
   for (const value of Object.values(store)) {
     if (value !== true && value !== false && value !== null) {
       process.stderr.write(
-        `pi-steering: trust store ${trustPath} unreadable; ignoring\n`,
+        `pi-steering: trust store ${trustPath} malformed; ignoring\n`,
       );
       return null;
     }

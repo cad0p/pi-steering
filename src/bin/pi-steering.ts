@@ -39,7 +39,7 @@ import type {
 } from "../schema.ts";
 
 // `import.meta.main` (Node >=22.18, inside the 22.19.0 engines floor)
-// is only typed by @types/node from 22.20.1 on (and as a non-readonly
+// is only typed by @types/node from 22.18.0 on (and as a non-readonly
 // `boolean`, `@experimental`) — the declared floor `^22.15.0` predates
 // it, so this file-local ambient augmentation fills the gap. Ambient
 // declarations emit nothing at compile time; the runtime floor

@@ -39,20 +39,8 @@ import type {
 } from "../schema.ts";
 
 // `import.meta.main` (Node >=22.18, inside the 22.19.0 engines floor)
-// is typed by @types/node only from 22.18.0 on, as a non-readonly
-// `boolean` (`@experimental`) — the minimum of our `^22.15.0` range
-// predates that typing, so an install pinned at the floor would hit
-// TS2339 without this file-local ambient augmentation. Ambient
-// declarations emit nothing at compile time; the runtime floor
-// guarantees the property, and on resolutions >=22.18.0 the
-// augmentation merges with @types/node's identical declaration. Keep
-// `main` non-readonly so that merge stays conflict-free.
-declare global {
-  interface ImportMeta {
-    /** true iff this module is the process entry point (Node >=22.18). */
-    main: boolean;
-  }
-}
+// is typed by @types/node from 22.18.0 on — at or below our `^22.19.0`
+// types floor, so no augmentation needed here.
 
 /**
  * CLI entrypoint. Exported (not just `void main(...)` at module top)

@@ -1920,10 +1920,11 @@ export interface SteeringConfig {
  * SteeringDiagnostic.message}.
  *
  * The set is split between two surfaces:
- *   - LOADER (`layer-form-coexistence`, `layer-import-failed`,
- *     `layer-stray-file`, `plugin-name-collision`,
- *     `rule-name-collision`, `observer-name-collision`,
- *     `tracker-name-collision`) — produced while walking up the
+ *   - LOADER (`layer-project-untrusted`, `layer-form-coexistence`,
+ *     `layer-import-failed`, `layer-stray-file`,
+ *     `plugin-name-collision`, `rule-name-collision`,
+ *     `observer-name-collision`, `tracker-name-collision`) — produced
+ *     while walking up the
  *     filesystem, importing per-layer config files, and merging
  *     layers into a single effective config. The collision kinds in
  *     this group flag duplicates surfaced during layer merge — most
@@ -1948,8 +1949,23 @@ export interface SteeringConfig {
  * `resolvePlugins` for plugin authors debugging "why isn't my plugin
  * firing?" — mirrors the unused-observer drop pattern in
  * `internal/session-runtime.ts`.
+ *
+ * `layer-project-untrusted` is the single info-class member. Unlike
+ * the direct `console.info` breadcrumbs above, it IS in the union
+ * because it is produced by the loader's discovery pass and flows
+ * through the shared diagnostic stream; the runtime routes info-class
+ * diagnostics to `console.info` breadcrumbs (see the render-format
+ * matrix below).
  */
 export type SteeringDiagnosticKind =
+  /**
+   * The project layer was skipped because the project is untrusted
+   * (pi's RESOLVED project-trust decision, adopted by the trust
+   * gate). Info-class: normal behavior under the gate, never an
+   * issue — the global layer still loads, so steering keeps working.
+   * `path` points at the skipped `<cwd>/.pi/steering` directory.
+   */
+  | "layer-project-untrusted"
   /**
    * Both `.pi/steering/index.ts` AND `.pi/steering.ts` exist at the
    * same directory. The directory form wins; the flat form is
@@ -2089,20 +2105,26 @@ export type SteeringDiagnosticKind =
  *     a header line ("N config issues:") followed by a per-line bullet
  *     `  - [type] <path: >?<message>`. One `Error.message`, multi-line.
  *     Used when at least one diagnostic must abort the session.
- *     Produced by `formatAggregatedDiagnostics`.
+ *     Produced by `formatAggregatedDiagnostics`. The aggregate NEVER
+ *     carries info-class diagnostics by construction — the formatter
+ *     filters error/warning only, so a skipped project layer can
+ *     never abort a session or appear in the thrown body.
  *   - Single-line per-diagnostic (`formatSingleLineDiagnostic`):
  *     `[pi-steering] [<severity>] <path: >?<message>` per diagnostic.
- *     Severity tag (`[error]` / `[warning]`) follows the same
- *     bracketed convention as the multi-line aggregate's per-line
- *     bullets. Routed to `console.warn` for legacy fail-soft mode
- *     (`failOnWarnings: false`). Only warnings reach this route in
- *     practice — error-class diagnostics escalate to a thrown error
- *     via the aggregated form before warnings are flushed. Also
- *     routed to stderr for the CLI `pi-steering list` pre-flight
- *     surface (both warnings and errors render here; the bracketed
- *     severity tag distinguishes them). The function itself accepts
- *     both severities; the warnings-only narrowing is a property of
- *     the `console.warn` route's caller, not the formatter.
+ *     Severity tag (`[info]` / `[error]` / `[warning]`) follows the
+ *     same bracketed convention as the multi-line aggregate's
+ *     per-line bullets. Info-class diagnostics route to `console.info`
+ *     breadcrumbs (runtime, emitted before the throw/warn policy) or
+ *     stderr (CLI). Warning-class diagnostics route to
+ *     `console.warn` for legacy fail-soft mode (`failOnWarnings:
+ *     false`) — the fail-soft loop filters to warning-class only, so
+ *     info never re-emits through `console.warn`. Error-class
+ *     diagnostics escalate to a thrown error via the aggregated form
+ *     before warnings are flushed. Also routed to stderr for the CLI
+ *     `pi-steering list` pre-flight surface (all three severities
+ *     render here; the bracketed severity tag distinguishes them).
+ *     The function itself accepts every severity; the narrowing is a
+ *     property of each route's caller, not the formatter.
  *
  * The CLI prints diagnostics inline as the loader yields them, rather
  * than aggregating into a thrown error — the single-line shape
@@ -2112,6 +2134,11 @@ export interface SteeringDiagnostic {
   /**
    * Severity of the diagnostic.
    *
+   *   - `"info"` — normal-behavior breadcrumb (e.g. the project
+   *     layer skipped because the project is untrusted). Never
+   *     escalates strict mode; excluded from the aggregate throw
+   *     body by construction (the aggregator filters error/warning
+   *     only). Surfaces via `console.info` (runtime) or stderr (CLI).
    *   - `"warning"` — informational; safe to ignore in legacy
    *     fail-soft mode.
    *   - `"error"` — pi-steering cannot operate safely with this
@@ -2119,7 +2146,7 @@ export interface SteeringDiagnostic {
    *     to a thrown error regardless of the user's strict-mode
    *     preference.
    */
-  type: "warning" | "error";
+  type: "info" | "warning" | "error";
 
   /** Discriminator for programmatic dispatch and test assertions. */
   kind: SteeringDiagnosticKind;
@@ -2129,6 +2156,9 @@ export interface SteeringDiagnostic {
 
   /**
    * Source path, when applicable. Per kind:
+   *   - `layer-project-untrusted`: the skipped project layer
+   *     directory `<cwd>/.pi/steering` (the renderer's `${path}:
+   *     ${message}` prefix surfaces it once).
    *   - `layer-import-failed`: the source file the loader couldn't import.
    *   - `layer-stray-file`: the stray file under `.pi/steering/`.
    *   - `layer-form-coexistence`: the directory holding both forms

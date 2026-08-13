@@ -8,6 +8,10 @@
  * (project layer wins on name-keyed collisions). Per-symbol JSDoc
  * carries the contract; see also the {@link SteeringDiagnostic} /
  * {@link SteeringDiagnosticKind} JSDoc for the diagnostic stream.
+ *
+ * Trust gate: the project layer loads only when the project is
+ * trusted — `loadConfigs` accepts pi's RESOLVED project-trust
+ * decision via {@link LoadConfigsOptions} (see {@link loadConfigs}).
  */
 
 import {
@@ -149,6 +153,23 @@ export function findConfigFile(
 // ---------------------------------------------------------------------------
 
 /**
+ * Options for {@link loadConfigs} / {@link loadSteeringConfig}.
+ *
+ * `projectLayerTrusted` carries pi's RESOLVED project-trust decision
+ * for the load root: when `false`, the project layer at
+ * `<cwd>/.pi/steering/` is skipped and an `info`-class
+ * `layer-project-untrusted` diagnostic is emitted (only when a
+ * project-layer config candidate exists); the global layer ALWAYS
+ * loads. When `undefined` or `true` the gate is inert and today's
+ * exact behavior applies. The loader never resolves trust itself —
+ * it adopts the caller's decision (bridge captures `ctx.isProjectTrusted()`
+ * pre-await; the CLI mirrors pi's non-UI formula).
+ */
+export interface LoadConfigsOptions {
+  projectLayerTrusted?: boolean;
+}
+
+/**
  * jiti's id-relative default cache resolution (prepareCacheDir) treats
  * the instance id as a directory: for a file id like `<pkg>/src/loader.ts`
  * it probes `<pkg>/src/node_modules` (never exists) and silently falls
@@ -287,6 +308,17 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
  * to {@link buildConfig}, which expects inner-first so early entries
  * take precedence on collisions).
  *
+ * Trust gate: when `opts.projectLayerTrusted === false`, the project
+ * layer is SKIPPED entirely — no candidate scan beyond the
+ * `existsSync` probe, no stray-file scan, no coexistence diagnostic,
+ * no import (the gate precedes jiti eval, the loader's only
+ * code-execution surface). An `info`-class `layer-project-untrusted`
+ * diagnostic is emitted only when a project-layer config candidate
+ * exists (`findConfigFile(cwd, ".pi/steering").file !== null`), so
+ * an untrusted project without one produces no noise. The global
+ * layer loads unconditionally in every case. `projectLayerTrusted`
+ * undefined or `true` → exact pre-gate behavior.
+ *
  * Issues encountered along the way (per-layer import failure, dual
  * form coexistence, stray non-`.ts` file under the layer directory)
  * surface as structured {@link SteeringDiagnostic} entries on the
@@ -294,13 +326,32 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
  * — the bridge runtime owns the policy decision (throw vs. log) once
  * it has collected diagnostics from every source.
  */
-export async function loadConfigs(cwd: string): Promise<{
+export async function loadConfigs(
+  cwd: string,
+  opts?: LoadConfigsOptions,
+): Promise<{
   layers: SteeringConfig[];
   diagnostics: SteeringDiagnostic[];
 }> {
   const layers: SteeringConfig[] = [];
   const diagnostics: SteeringDiagnostic[] = [];
-  await loadLayer(cwd, ".pi/steering", layers, diagnostics);
+  if (opts?.projectLayerTrusted === false) {
+    // Gate: nothing of the project layer is inspected beyond the
+    // candidate probe — no stray scan, no coexistence diagnostic,
+    // no import. The coexistence diagnostic is intentionally NOT
+    // produced when untrusted (accepted, documented).
+    if (findConfigFile(cwd, ".pi/steering").file !== null) {
+      diagnostics.push({
+        type: "info",
+        kind: "layer-project-untrusted",
+        path: join(cwd, ".pi", "steering"),
+        message:
+          "project layer skipped (project untrusted); global layer still applies",
+      });
+    }
+  } else {
+    await loadLayer(cwd, ".pi/steering", layers, diagnostics);
+  }
   await loadLayer(resolveAgentDir(), "steering", layers, diagnostics);
   return { layers, diagnostics };
 }
@@ -640,6 +691,8 @@ export function buildConfig(
  * Convenience: load all layers for `cwd`, run the loader-side merge
  * (`buildConfig`), then the plugin merger (`resolvePlugins`) with
  * user-config rule + observer name validation between the two passes.
+ * `opts` is forwarded to {@link loadConfigs} unchanged (trust-gate
+ * parity for embedders — see {@link LoadConfigsOptions}).
  * Diagnostics from every surface flow into a single returned array,
  * so an external embedder writing their own bridge or pre-flight
  * check sees the SAME diagnostic stream the production runtime sees
@@ -658,8 +711,12 @@ export function buildConfig(
 export async function loadSteeringConfig(
   cwd: string,
   defaults?: SteeringConfig,
+  opts?: LoadConfigsOptions,
 ): Promise<{ config: SteeringConfig; diagnostics: SteeringDiagnostic[] }> {
-  const { layers, diagnostics: loaderDiagnostics } = await loadConfigs(cwd);
+  const { layers, diagnostics: loaderDiagnostics } = await loadConfigs(
+    cwd,
+    opts,
+  );
   const { merged, diagnostics: mergeAndResolveDiagnostics } = runMergerPipeline(
     layers,
     defaults,

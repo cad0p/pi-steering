@@ -39,7 +39,12 @@ import {
   type EvaluatorHost,
   type EvaluatorRuntime,
 } from "../evaluator.ts";
-import { buildConfig, loadConfigs, mergeBool } from "../loader.ts";
+import {
+  buildConfig,
+  loadConfigs,
+  mergeBool,
+  type LoadConfigsOptions,
+} from "../loader.ts";
 import {
   buildObserverDispatcher,
   type ObserverDispatcher,
@@ -215,10 +220,21 @@ export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
  * `failOnWarnings !== false`; otherwise emits surviving warnings via
  * `console.warn`. See {@link runMergerPipeline} for the merge contract
  * and `finalizePluginState` for observer-drop.
+ *
+ * `opts` is forwarded to {@link loadConfigs} — `projectLayerTrusted:
+ * false` gates the project layer behind pi's resolved project-trust
+ * decision (see {@link LoadConfigsOptions}). Info-class diagnostics
+ * (e.g. the `layer-project-untrusted` skip breadcrumb) are emitted
+ * via `console.info` BEFORE the throw/warn policy runs and are
+ * excluded from the aggregate throw body by construction
+ * (`formatAggregatedDiagnostics` filters error/warning only) — an
+ * untrusted project keeps global-layer steering in every strict-mode
+ * setting.
  */
 export async function buildSessionRuntime(
   cwd: string,
   host: EvaluatorHost,
+  opts?: LoadConfigsOptions,
 ): Promise<{
   evaluator: EvaluatorRuntime;
   dispatcher: ObserverDispatcher;
@@ -226,8 +242,18 @@ export async function buildSessionRuntime(
   const aggregated: SteeringDiagnostic[] = [];
 
   const { layers: rawLayers, diagnostics: loaderDiagnostics } =
-    await loadConfigs(cwd);
+    await loadConfigs(cwd, opts);
   aggregated.push(...loaderDiagnostics);
+
+  // Info-class breadcrumbs (e.g. `layer-project-untrusted` under the
+  // trust gate) surface on `console.info` here, BEFORE the throw/warn
+  // policy below — they describe normal behavior, never escalate, and
+  // must be visible even when the session build later throws on
+  // warning/error diagnostics. Mirrors the disabled-rules / dropped-
+  // observer `console.info` breadcrumb pattern.
+  for (const d of aggregated) {
+    if (d.type === "info") console.info(formatSingleLineDiagnostic(d));
+  }
 
   const disableDefaults = mergeBool(rawLayers, "disableDefaults") === true;
   const defaults: SteeringConfig | undefined = disableDefaults
@@ -250,8 +276,14 @@ export async function buildSessionRuntime(
     throw new Error(formatAggregatedDiagnostics(aggregated));
   }
   if (hasWarning) {
+    // Fail-soft single-line route — filtered to warning-class only
+    // (F1): info-class diagnostics were already breadcrumbed via
+    // `console.info` above and must never re-emit through the
+    // `console.warn` loop. Behavior-preserving today (no info
+    // producers existed before the trust gate); pins the single-route
+    // contract.
     for (const d of aggregated) {
-      console.warn(formatSingleLineDiagnostic(d));
+      if (d.type === "warning") console.warn(formatSingleLineDiagnostic(d));
     }
   }
 

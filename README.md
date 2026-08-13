@@ -50,7 +50,7 @@ Why both steps matter:
 
 ### Hot-reload of the user config
 
-`/reload` **does** pick up edits to your `.pi/steering/index.ts` (or `.pi/steering.ts`) without a pi restart. On every load the loader re-reads the file from disk and evaluates it fresh via jiti — nothing is cached by URL — and an initial-load failure (broken syntax, a runtime throw, a missing default export) doesn't poison subsequent loads after you fix the file.
+`/reload` **does** pick up edits to your `.pi/steering/index.ts` (or `.pi/steering.ts`) without a pi restart. On every load the loader re-reads the file from disk and evaluates it fresh via jiti — nothing is cached by URL — and an initial-load failure (broken syntax, a runtime throw, a missing default export) doesn't poison subsequent loads after you fix the file. Reload also rebinds a fresh extension instance whose first `session_start` re-runs the runtime build, so config validation — and re-validation after fixes — happens automatically (`session_start` fires with `reason: "reload"`).
 
 It also picks up edits to **everything the config imports**. Each load creates a fresh jiti instance (`moduleCache: false`), so transitive imports route through jiti's loader and get re-read from disk and re-evaluated on every reload:
 
@@ -726,7 +726,7 @@ Inside `defineConfig`, `exemptions[].rule` is typo-checked against the same rule
 
 **Fail-closed is STRICT — no escape hatch.** Exemption clauses evaluate with an "allow"-default projection — the OPPOSITE default from rule `when:` clauses. A predicate that can't resolve (walker-unknown cwd, a throwing handler, an unregistered predicate key) counts as "does not match", so the guard still fires. Exemptions are always fail-closed: an unknown walker value never exempts; the target rule's own `onUnknown` policy decides. `onUnknown` cannot be written inside an exemption (compile error; rejected at load if smuggled via `as any` / plain JS). A carve-out — even one shipped by a third-party plugin — can never weaken the guard's fail-closed posture.
 
-**Interplay with disables.** An exemption targeting a rule that exists but is disabled (via `disabledRules` or a disabled plugin) is inert and silent — by-design disable, no diagnostic. An exemption targeting a rule name that doesn't exist anywhere in the merged config surfaces an `exemption-orphan` warning at factory time (strict mode throws), so typos fail loudly instead of silently shipping a dead carve-out.
+**Interplay with disables.** An exemption targeting a rule that exists but is disabled (via `disabledRules` or a disabled plugin) is inert and silent — by-design disable, no diagnostic. An exemption targeting a rule name that doesn't exist anywhere in the merged config surfaces an `exemption-orphan` warning at session start (strict mode throws), so typos fail loudly instead of silently shipping a dead carve-out.
 
 **`unless` disambiguation.** `Rule.unless` is a per-rule, same-rule-scope optional exemption field. The registry is the cross-plugin ACCUMULATION mechanism: plugin A can exempt rule B (shipped by another plugin) by name, and multiple authors' carve-outs stack. `unless` cannot do that — it only lives on the rule it exempts.
 
@@ -883,7 +883,9 @@ pi-steering is a guardrail layer, not a sandbox. Several parts of the system exe
 
 ### Config execution
 
-`.pi/steering/index.ts` (and the `.pi/steering.ts` shorthand) is **arbitrary TypeScript executed at extension factory time with your full user privileges**. The loader reads exactly two layers — the project layer at `<launch-cwd>/.pi/steering/` and the global layer at `<agentDir>/steering/` — and merges them project-first (the project layer wins on name collisions). The bridge factory awaits the load before pi continues startup, so any throw from your config (or from a colliding plugin set) lands in pi's `[Extension issues]` diagnostic block at startup.
+`.pi/steering/index.ts` (and the `.pi/steering.ts` shorthand) is **arbitrary TypeScript executed at the first `session_start` with your full user privileges** (the bridge builds the steering runtime lazily, anchored on the session's `ctx.cwd`). The loader reads exactly two layers — the project layer at `<session-cwd>/.pi/steering/` and the global layer at `<agentDir>/steering/` — and merges them project-first (the project layer wins on name collisions).
+
+One-shot CLI contexts (`pi config`, `pi list`) never fire `session_start`, so they **never execute steering configs** — a trust improvement: running `pi config` in an untrusted directory no longer runs that directory's config code, and a strict-mode config can't pollute the CLI's output (see "Strict mode + load failures" below).
 
 Implication: running pi inside a directory hierarchy whose steering configs you don't trust is equivalent to running `node -e '…'` with that same file. Symlinked config directories are followed — a symlinked `.pi/steering/` landing in an unexpected directory executes as if it had been placed there directly.
 
@@ -895,7 +897,7 @@ Plugins register predicates (`when.<key>` handlers), observers, and `onFire` hoo
 
 - Shell out via `ctx.exec` (with the same privileges as pi).
 - Forge session entries via `ctx.appendEntry`, which later rules consult via `when.happened`.
-- Throw in unexpected places — predicate-runtime throws fail open (the rule never fires). Factory-time load failures throw with strict mode; see "Strict mode + load failures" below for the opt-out.
+- Throw in unexpected places — predicate-runtime throws fail open (the rule never fires). Session-start load failures throw with strict mode; see "Strict mode + load failures" below for the opt-out.
 
 A malicious plugin can trivially defeat any guardrail ship with your config. Review plugin source before adding it to `plugins: [...]` the same way you'd review any third-party dependency.
 
@@ -911,9 +913,9 @@ This is the out-of-band trust boundary. Within the steering engine, the invarian
 
 Strict mode = `failOnWarnings: true`, the default. Opt out per-config-layer with `failOnWarnings: false`.
 
-If your steering config fails to load at extension factory time (a plugin throws during import, a syntax error in `index.ts`, `pnpm` fails to resolve a dependency), pi-steering's bridge factory **throws and surfaces the diagnostic in pi's `[Extension issues]` block at startup** (yellow). Pi disables the extension for the session and continues running unsteered.
+If your steering config fails to load (a plugin throws during import, a syntax error in `index.ts`, `pnpm` fails to resolve a dependency), the failure surfaces at the **first `session_start`** of each session: the bridge catches strict-mode aggregate diagnostics and writes the **full aggregated body** to `console.error` **and** shows it as an in-chat error notification (toast). The session runs **unsteered** (fail-closed — the same as an extension that failed to load). A broken config is **no longer fatal at boot**: pi opens normally, the toast tells you exactly what's wrong, and you can fix it.
 
-Default behavior: any warning-class loader/merger diagnostic (cross-layer plugin name collision, within-layer rule/observer collision, predicate-key collision, etc.) escalates to the same thrown factory. Error-class diagnostics (tracker-name collision, reserved-name violations) ALWAYS throw. The aggregated message lists every diagnostic with errors first, one bullet per issue.
+Default behavior: any warning-class loader/merger diagnostic (cross-layer plugin name collision, within-layer rule/observer collision, predicate-key collision, etc.) escalates to the same aggregate throw at session start. Error-class diagnostics (tracker-name collision, reserved-name violations) ALWAYS throw. The aggregated message lists every diagnostic with errors first, one bullet per issue. Non-diagnostic engine errors are rethrown and render as a regular `Extension "..." error:` line — they are never mislabeled as config issues.
 
 Opt out of warning-class escalation by setting `failOnWarnings: false` on any layer of your config:
 
@@ -927,11 +929,13 @@ export default defineConfig({
 
 With `failOnWarnings: false`, warning-class diagnostics fall through to `console.warn` (single-line `[pi-steering] [warning] <message>` shape on stderr) and the bridge keeps running with the merged config. Error-class diagnostics still throw — the engine cannot operate safely with two plugins claiming the same state dimension.
 
-Note: pi's interactive TUI clobbers `console.warn` on `/reload` — for visibility prefer fixing the warnings or running `pi-steering list`.
+**Recovery loop: fix the config and `/reload`.** Every reload — and every `/new`, `/resume`, `/fork` — binds a fresh extension instance whose first `session_start` re-runs the build, so re-validation is automatic (`session_start` carries `reason: "reload"`). For an in-TUI look at what the bridge would load, run `pi-steering list` (prints the merged config) instead of relying on `console.warn`/`console.error`, which pi's interactive TUI clobbers.
 
 ### Cross-project resume
 
-When you `pi --resume` a session originally created in another project (Tab → "All" scope in the picker), pi-steering's rules are loaded from your launch cwd, NOT the session's cwd. Pi's footer (the bottom bar in interactive TUI mode) shows the session cwd; if it differs from where you launched, the bridge emits a single `[pi-steering] session cwd ... differs from launch cwd ...` line on stderr and continues evaluating with launch-cwd rules. To use the resumed session's project rules, exit pi and re-launch from that project's directory.
+When you `pi --resume` a session originally created in another project (Tab → "All" scope in the picker), steering rules are built from the **session's** cwd (`ctx.cwd`), not from wherever you launched pi. Only the project layer's anchor moves: rules load from `<session-cwd>/.pi/steering/` plus the unchanged global `<agentDir>/steering/` layer (which matches pi's own resource cwd). There is no launch-vs-session mismatch, and no warning to go with it.
+
+Downside (accepted): resuming a foreign session from a directory with strict rules silently drops the launch directory's project layer — the ruleset switch is silent and guardrails may be weaker in the "supervise a foreign session" workflow. To steer a resumed session with its project's rules, use the session's cwd (create or resume it from there); the launch directory no longer decides.
 
 ### Block-reason tag trust
 

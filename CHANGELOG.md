@@ -2,22 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.1] - 2026-08-13
-
-<!-- USER-EDITABLE SECTION START -->
-### Breaking
-
-- **Bridge `register()` is now synchronous + register-only** (issue [#9](https://github.com/cad0p/pi-steering/issues/9)): no config load and no evaluator construction at extension-factory time. The runtime build is deferred to the first `session_start`, anchored on the session's `ctx.cwd`.
-- **Strict-mode diagnostics surface at the first `session_start`**, not as a factory throw: the full aggregated body goes to `console.error` AND an in-chat error notification (toast), and the session runs unsteered. A broken config is no longer fatal at boot ([#9](https://github.com/cad0p/pi-steering/issues/9)/[#30](https://github.com/cad0p/pi-steering/issues/30)).
-- **Cross-project resume applies session-cwd rules** (project layer anchored on `ctx.cwd`; the global `agentDir` layer is unchanged); the launch-vs-session cwd-mismatch warning is removed.
-- **`pi config` / `pi list` no longer evaluate steering configs** ([#30](https://github.com/cad0p/pi-steering/issues/30)) — one-shot CLI contexts never fire `session_start`, so arbitrary project config code is not executed there.
-<!-- USER-EDITABLE SECTION END -->
-
-### Changed
-
-- Runtime build deferred to `session_start` anchored on `ctx.cwd` (fixes the ~1.1s eager-factory startup cost; the factory now only pays the ~58ms static module graph).
-- `/reload` (and `/new`, `/resume`, `/fork`) re-validates automatically via `session_start{reason:"reload"}` on the fresh per-session extension instance.
-
 ## [0.2.0] - 2026-08-11
 
 <!-- USER-EDITABLE SECTION START -->

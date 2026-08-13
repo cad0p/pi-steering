@@ -935,7 +935,7 @@ With `failOnWarnings: false`, warning-class diagnostics fall through to `console
 
 When you `pi --resume` a session originally created in another project (Tab → "All" scope in the picker), steering rules are built from the **session's** cwd (`ctx.cwd`), not from wherever you launched pi. Only the project layer's anchor moves: rules load from `<session-cwd>/.pi/steering/` plus the unchanged global `<agentDir>/steering/` layer (which matches pi's own resource cwd). There is no launch-vs-session mismatch, and no warning to go with it.
 
-Downside (accepted): resuming a foreign session from a directory with strict rules silently drops the launch directory's project layer — the ruleset switch is silent and guardrails may be weaker in the "supervise a foreign session" workflow. To steer a resumed session with its project's rules, use the session's cwd (create or resume it from there); the launch directory no longer decides.
+Downside (accepted): resuming a foreign session from a directory with strict rules silently drops the launch directory's project layer — the ruleset switch is silent and guardrails may be weaker in the "supervise a foreign session" workflow. To keep the current directory's guardrails while adopting a foreign conversation, **fork the session instead**: `pi --fork <session>` copies it into the current directory (the `--session <foreign-id>` path from a different project prompts "Fork this session into current directory?" — accept to fork), and the forked session's cwd is the launch directory, so it builds from the launch-dir project layer. If you want the session's own rules, resume it and launch pi from the session's directory — the launch directory no longer decides.
 
 ### Block-reason tag trust
 

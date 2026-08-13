@@ -18,6 +18,10 @@ All notable changes to this project will be documented in this file.
 
 - Await async factory + re-align smoke harness to v2 loader contract ([#34](https://github.com/cad0p/pi-steering/pull/34)) ([#35](https://github.com/cad0p/pi-steering/pull/35))
 
+### ⚡ Performance
+
+- Pin jiti fsCache to package-local node_modules/.cache/jiti ([#38](https://github.com/cad0p/pi-steering/pull/38)) ([#39](https://github.com/cad0p/pi-steering/pull/39))
+
 ### ⚙️ Miscellaneous Tasks
 
 - Modern-API budget harvest — @types/node ^22 + ES2024 lib, import.meta.main, fs.globSync, strip-types cleanup ([#32](https://github.com/cad0p/pi-steering/pull/32)) ([#33](https://github.com/cad0p/pi-steering/pull/33))

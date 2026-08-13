@@ -35,7 +35,11 @@ import { buildSessionRuntime } from "./internal/session-runtime.ts";
  *                         tool calls it spawns.
  *   - `session_start`   — lazily build the runtime on the first event,
  *                         anchored on the session's `ctx.cwd` (NOT the
- *                         process launch cwd). Build failures surface
+ *                         process launch cwd). The project layer is
+ *                         gated on pi's RESOLVED project-trust decision
+ *                         (`ctx.isProjectTrusted()`, captured before the
+ *                         await; absent → gate inert); the global layer
+ *                         always loads. Build failures surface
  *                         per the strict-mode contract: an aggregate
  *                         diagnostic throw renders the full body via
  *                         `console.error` + an in-chat `ui.notify`
@@ -72,7 +76,13 @@ export default function register(
     if (runtime !== null) return; // safety net; fresh instance per session anyway
     const ui = ctx.ui; // capture BEFORE await (getter asserts active)
     try {
-      runtime = await build(ctx.cwd, host);
+      // Capture pi's resolved project-trust decision BEFORE the await
+      // (same D3 pattern as `ui` — the getter must run against the
+      // live session context). `?.() ?? true` keeps the gate inert
+      // when the API is absent (older pi, test mocks): the project
+      // layer then loads exactly as before.
+      const projectLayerTrusted = ctx.isProjectTrusted?.() ?? true;
+      runtime = await build(ctx.cwd, host, { projectLayerTrusted });
     } catch (err) {
       if (
         !(err instanceof Error) ||

@@ -11,7 +11,10 @@
  *   pi-steering list [--format=text|json]
  *     Resolve the two-layer config (project `<cwd>/.pi/steering/` +
  *     global `<agentDir>/steering/`) from the CWD and print the
- *     effective plugins / rules / observers / disables.
+ *     effective plugins / rules / observers / disables. The project
+ *     layer is gated on pi's project-trust formula (mirrored here,
+ *     non-UI: trust.json / no trust-requiring resources → trusted);
+ *     the global layer always loads.
  *
  * Exit codes:
  *   0 - success
@@ -21,6 +24,9 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { FromJSONError, fromJSON } from "../compat.ts";
 import { EVALUATOR_BUILTIN_TRACKERS } from "../evaluator.ts";
 import { finalizePluginState } from "../internal/finalize-plugin-state.ts";
@@ -28,7 +34,7 @@ import {
   formatSingleLineDiagnostic,
   runMergerPipeline,
 } from "../internal/session-runtime.ts";
-import { loadConfigs } from "../loader.ts";
+import { loadConfigs, resolveAgentDir } from "../loader.ts";
 import type {
   Exemption,
   Observer,
@@ -86,7 +92,10 @@ SUBCOMMANDS
       <agentDir>/steering/) and print the resolved plugins, rules,
       and observers, grouped by source. Useful for answering "which
       rules are active here?" without reading the config files by
-      hand.
+      hand. The project layer loads only when the current directory
+      is trusted per pi's project-trust formula (trust.json entries
+      under <agentDir>/trust.json, or no trust-requiring resources
+      present); the global layer always loads.
 
 OPTIONS
   -h, --help    Show this help.
@@ -224,12 +233,18 @@ async function runList(args: string[]): Promise<number> {
 
   // Load project layer (cwd) + global layer (agent dir) and merge.
   // CLI deliberately omits DEFAULT_PLUGINS / DEFAULT_RULES; runtime
-  // injects them.
+  // injects them. The project layer is gated on pi's project-trust
+  // formula (mirrored in `resolveCliProjectTrust` below); info-class
+  // diagnostics (the trust skip) flow through `recordDiagnostic` to
+  // stderr like every other severity.
   let layers: readonly SteeringConfig[];
   let loaderDiagnostics: readonly SteeringDiagnostic[] = [];
+  let projectLayerTrusted = true;
   try {
+    projectLayerTrusted = resolveCliProjectTrust(process.cwd());
     ({ layers, diagnostics: loaderDiagnostics } = await loadConfigs(
       process.cwd(),
+      { projectLayerTrusted },
     ));
   } catch (err) {
     process.stderr.write(
@@ -263,7 +278,9 @@ async function runList(args: string[]): Promise<number> {
 
   if (layers.length === 0) {
     if (format === "json") {
-      process.stdout.write(`${JSON.stringify(emptyListJSON(), null, 2)}\n`);
+      process.stdout.write(
+        `${JSON.stringify(emptyListJSON(projectLayerTrusted), null, 2)}\n`,
+      );
     } else {
       process.stdout.write("No steering config found.\n");
     }
@@ -278,12 +295,146 @@ async function runList(args: string[]): Promise<number> {
 
   if (format === "json") {
     process.stdout.write(
-      `${JSON.stringify(renderListJSON(config), null, 2)}\n`,
+      `${JSON.stringify(renderListJSON(config, projectLayerTrusted), null, 2)}\n`,
     );
   } else {
     process.stdout.write(renderListText(config));
   }
   return sawError ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Project-trust resolution (CLI mirror of pi's non-UI formula)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resources that force a project-trust decision when present under
+ * `<dir>/.pi/`. Mirrors pi's `TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES`
+ * (trust-manager.js) — the CLI reimplements pi's non-UI trust formula
+ * because pi's `exports` map blocks deep imports of its internals.
+ * The mirror is pinned by the bin tests; drift risk is documented.
+ */
+const TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES = [
+  "settings.json",
+  "extensions",
+  "skills",
+  "prompts",
+  "themes",
+  "SYSTEM.md",
+  "APPEND_SYSTEM.md",
+];
+
+/**
+ * Canonicalize a path like pi's `canonicalizePath` (paths.js):
+ * `realpathSync`, falling back to the raw path when the target
+ * doesn't exist (deleted cwd safe). Trust keys are canonicalized so
+ * symlinked directories resolve to the same entry pi would consult.
+ */
+function canonicalizePath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * CLI mirror of pi's `hasTrustRequiringProjectResources`
+ * (trust-manager.js): true when `<dir>/.pi/` holds any trust-requiring
+ * resource at the canonicalized cwd, or when any ancestor (cwd
+ * included) has an `.agents/skills` dir other than the user's own
+ * canonicalized `$HOME/.agents/skills`. Ancestor walk stops at root.
+ */
+function hasTrustRequiringProjectResourcesMirror(cwd: string): boolean {
+  const homeDir = canonicalizePath(resolve(process.env.HOME || homedir()));
+  const userAgentsSkillsDir = join(homeDir, ".agents", "skills");
+  let currentDir = cwd;
+  if (
+    TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES.some((entry) =>
+      existsSync(join(currentDir, ".pi", entry)),
+    )
+  ) {
+    return true;
+  }
+  while (true) {
+    const agentsSkillsDir = join(currentDir, ".agents", "skills");
+    if (agentsSkillsDir !== userAgentsSkillsDir && existsSync(agentsSkillsDir)) {
+      return true;
+    }
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) return false;
+    currentDir = parentDir;
+  }
+}
+
+/**
+ * Read `<agentDir>/trust.json` and resolve the nearest entry for
+ * `cwd` — ancestor walk, first true/false wins, null skipped,
+ * root-stop. Mirrors pi's `ProjectTrustStore.get` (trust-manager.js).
+ *
+ * Divergence (deliberate, O3): pi's `readTrustFile` THROWS on a
+ * malformed store (pi would crash at startup); the CLI is a read-only
+ * inspector and must not crash — it treats the store as EMPTY and
+ * writes `pi-steering: trust store <path> unreadable; ignoring` to
+ * stderr. The formula then proceeds on the empty store: with
+ * trust-requiring resources present the decision is UNTRUSTED and the
+ * project layer is skipped (mirror-faithful, no fail-open fallback).
+ */
+function trustStoreGetMirror(cwd: string): boolean | null {
+  const agentDir = resolveAgentDir();
+  const trustPath = join(agentDir, "trust.json");
+  let parsed: unknown;
+  try {
+    const raw = readFileSync(trustPath, "utf8");
+    parsed = JSON.parse(raw);
+  } catch {
+    // Missing store = empty store (pi's readTrustFile returns {} for
+    // a nonexistent file). Unreadable / malformed JSON: same empty
+    // store, but noted on stderr so the skip that follows is
+    // explainable.
+    if (existsSync(trustPath)) {
+      process.stderr.write(
+        `pi-steering: trust store ${trustPath} unreadable; ignoring\n`,
+      );
+    }
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    process.stderr.write(
+      `pi-steering: trust store ${trustPath} unreadable; ignoring\n`,
+    );
+    return null;
+  }
+  const store = parsed as Record<string, unknown>;
+  for (const value of Object.values(store)) {
+    if (value !== true && value !== false && value !== null) {
+      process.stderr.write(
+        `pi-steering: trust store ${trustPath} unreadable; ignoring\n`,
+      );
+      return null;
+    }
+  }
+  // Ancestor walk: first true/false wins, null skipped, root-stop.
+  let currentDir = canonicalizePath(resolve(cwd));
+  while (true) {
+    const value = store[currentDir];
+    if (value === true || value === false) return value;
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) return null;
+    currentDir = parentDir;
+  }
+}
+
+/**
+ * CLI mirror of pi's non-UI project-trust formula (main.js):
+ * `trusted = !hasTrustRequiringProjectResources(cwd) ||
+ * trustStore.get(cwd) === true`. No override, no prompt — the CLI is
+ * a read-only inspector and adopts the resolved store decision.
+ */
+function resolveCliProjectTrust(cwd: string): boolean {
+  const resolvedCwd = canonicalizePath(resolve(cwd));
+  if (!hasTrustRequiringProjectResourcesMirror(resolvedCwd)) return true;
+  return trustStoreGetMirror(resolvedCwd) === true;
 }
 
 /**
@@ -348,7 +499,10 @@ USAGE
 Loads the project layer (<cwd>/.pi/steering/) and the global layer
 (~/.pi/agent/steering/, or $PI_CODING_AGENT_DIR/steering) and prints
 the effective plugins, rules, and observers. Project layer wins on
-rule-name collision.
+rule-name collision. The project layer loads only when the current
+directory is trusted per pi's project-trust formula (trust.json
+entries, or no trust-requiring resources present); the global layer
+always loads.
 
 FLAGS
   --format=text   (default) human-readable grouped output
@@ -389,10 +543,14 @@ const KNOWN_PLUGIN_SOURCES: Record<string, string> = {
  *     userObservers: [{ name, writes }],
  *     disabled: { rules: [...], plugins: [...] },
  *     defaultNoOverride: bool|null,
- *     disableDefaults: bool|null
+ *     disableDefaults: bool|null,
+ *     projectLayerTrusted: bool
  *   }
  */
-function renderListJSON(config: SteeringConfig): unknown {
+function renderListJSON(
+  config: SteeringConfig,
+  projectLayerTrusted: boolean,
+): unknown {
   const disabledSet = new Set(config.disabledRules ?? []);
   const disabledPluginsSet = new Set(config.disabledPlugins ?? []);
   const plugins = (config.plugins ?? []).map((p) => ({
@@ -424,10 +582,11 @@ function renderListJSON(config: SteeringConfig): unknown {
     },
     defaultNoOverride: config.defaultNoOverride ?? null,
     disableDefaults: config.disableDefaults ?? null,
+    projectLayerTrusted,
   };
 }
 
-function emptyListJSON(): unknown {
+function emptyListJSON(projectLayerTrusted: boolean): unknown {
   return {
     plugins: [],
     userRules: [],
@@ -436,6 +595,7 @@ function emptyListJSON(): unknown {
     disabled: { rules: [], plugins: [] },
     defaultNoOverride: null,
     disableDefaults: null,
+    projectLayerTrusted,
   };
 }
 

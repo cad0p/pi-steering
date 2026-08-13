@@ -23,57 +23,74 @@ import { buildSessionRuntime } from "./internal/session-runtime.ts";
  *
  * Lifecycle wiring:
  *
- *   - factory time      — eager load via {@link buildSessionRuntime};
- *                         throws on diagnostic per the strict-mode
- *                         contract.
+ *   - factory time      — register-only, synchronous: no config load,
+ *                         no evaluator construction, no `process.cwd()`
+ *                         capture. One-shot CLI contexts (`pi config`,
+ *                         `pi list`) never fire `session_start`, so
+ *                         they never execute steering configs.
  *   - `agent_start`     — bump the internal `agentLoopIndex` counter
  *                         so tool_call / tool_result handlers can
  *                         forward it into the evaluator + dispatcher.
  *                         One agent loop = one user prompt + all the
  *                         tool calls it spawns.
- *   - `session_start`   — emit a `console.warn` if the resumed
- *                         session's `ctx.cwd` differs from the launch
- *                         cwd captured at factory time (cross-project
- *                         resume). The engine continues evaluating
- *                         with launch-cwd rules.
- *   - `tool_call` / `tool_result` route through the evaluator and
- *     dispatcher (see {@link buildSessionRuntime}).
+ *   - `session_start`   — lazily build the runtime on the first event,
+ *                         anchored on the session's `ctx.cwd` (NOT the
+ *                         process launch cwd). Build failures surface
+ *                         per the strict-mode contract: an aggregate
+ *                         diagnostic throw renders the full body via
+ *                         `console.error` + an in-chat `ui.notify`
+ *                         ("error") and leaves the session unsteered
+ *                         (fail-closed); any other error is rethrown
+ *                         and stays loud. Later `session_start`s on
+ *                         the same instance are no-ops (safety net;
+ *                         fresh instance per session — `/reload`,
+ *                         `/new`, `/resume`, `/fork` re-validate).
+ *   - `tool_call` / `tool_result` — route through the evaluator and
+ *     dispatcher when the runtime is built; return `undefined`
+ *     (unsteered) while unbuilt. See {@link buildSessionRuntime}.
  *
  * Exported as the default export per pi's extension convention.
+ *
+ * The optional `deps` parameter is a TEST-ONLY injection seam for the
+ * runtime builder; pi calls `register(pi)` with a single argument.
  */
-export default async function register(pi: ExtensionAPI): Promise<void> {
+export default function register(
+  pi: ExtensionAPI,
+  deps: { buildSessionRuntime?: typeof buildSessionRuntime } = {},
+): void {
   let agentLoopIndex = 0;
+  let runtime: Awaited<ReturnType<typeof buildSessionRuntime>> | null = null;
 
-  const host: EvaluatorHost = {
-    exec: pi.exec,
-    appendEntry: pi.appendEntry,
-  };
-
-  const launchCwd = process.cwd();
-
-  const { evaluator, dispatcher } = await buildSessionRuntime(launchCwd, host);
+  const build = deps.buildSessionRuntime ?? buildSessionRuntime;
+  const host: EvaluatorHost = { exec: pi.exec, appendEntry: pi.appendEntry };
 
   pi.on("agent_start", () => {
     agentLoopIndex += 1;
   });
 
-  pi.on("session_start", (_event, ctx: ExtensionContext) => {
-    if (ctx.cwd !== launchCwd) {
-      console.warn(
-        `[pi-steering] session cwd (${ctx.cwd}) differs from launch cwd ` +
-          `(${launchCwd}). Steering rules loaded from launch cwd; ` +
-          `session-cwd rules NOT applied. To use session-cwd rules, ` +
-          `exit pi and re-launch from ${ctx.cwd}.`,
-      );
+  pi.on("session_start", async (_event, ctx: ExtensionContext) => {
+    if (runtime !== null) return; // safety net; fresh instance per session anyway
+    const ui = ctx.ui; // capture BEFORE await (getter asserts active)
+    try {
+      runtime = await build(ctx.cwd, host);
+    } catch (err) {
+      if (!(err instanceof Error) || !/^\d+ config issues?:/.test(err.message)) {
+        throw err;
+      }
+      const body = err.message;
+      console.error(`[pi-steering] ${body}`);
+      ui.notify(`pi-steering disabled (strict mode): ${body}`, "error");
     }
   });
 
   pi.on("tool_call", (event, ctx) =>
-    evaluator.evaluate(event, ctx, agentLoopIndex),
+    runtime ? runtime.evaluator.evaluate(event, ctx, agentLoopIndex) : undefined,
   );
 
   pi.on("tool_result", (event, ctx) =>
-    dispatcher.dispatch(event, ctx, agentLoopIndex),
+    runtime
+      ? runtime.dispatcher.dispatch(event, ctx, agentLoopIndex)
+      : undefined,
   );
 }
 

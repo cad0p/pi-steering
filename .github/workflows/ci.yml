@@ -41,3 +41,7 @@ jobs:
         # their pretest builds it, then runs the rule-pack smoke tests
         # (locks README code blocks against drift).
         run: pnpm -r test
+      - name: Run steering smoke harness
+        # dist/ is built by the examples' pretest above; the explicit
+        # build guards against pretest ordering changes.
+        run: pnpm build && node scripts/smoke.mjs

@@ -194,10 +194,17 @@ const JITI_CACHE_DIR = resolveJitiCacheDir(import.meta.url);
  * anything in `require.cache` — every load re-reads and re-evaluates
  * the file from disk, INCLUDING everything the config transitively
  * imports (sibling `.ts` / `.js` files, `node_modules` plugins).
- * `fsCache: true` is a source-level cache only (transformed output,
- * keyed by content hash) — it never affects reload semantics. The
- * source string is evaluated fresh each call, so a failed load never
- * poisons subsequent loads.
+ * `fsCache` is a source-level cache only (transformed output, keyed
+ * by content hash) — it never affects reload semantics. The source
+ * string is evaluated fresh each call, so a failed load never
+ * poisons subsequent loads. Cache location contract: the directory
+ * is pinned to `<pkgRoot>/node_modules/.cache/jiti` when the package
+ * has a writable `node_modules` dir (see
+ * {@link resolveJitiCacheDir}), else jiti's default `${tmpdir}/jiti`
+ * fallback. The option is passed explicitly, so `JITI_FS_CACHE` env
+ * defaults are overridden either way — unchanged from before (the
+ * loader already passed `fsCache: true` explicitly; jiti's option
+ * merge gives userOptions precedence over env defaults).
  *
  * `async: true` is passed explicitly to `evalModule`: it wraps the
  * module in an async function, so top-level `await` and dynamic

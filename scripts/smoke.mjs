@@ -49,10 +49,12 @@ function makeMockPi() {
   return { api, handlers, entries };
 }
 
-function fireSessionStart(mock, cwd) {
+async function fireSessionStart(mock, cwd) {
   const h = mock.handlers.session_start;
   if (!h) throw new Error("session_start handler not registered");
-  h({}, { cwd });
+  // The runtime build now happens inside the session_start handler
+  // (lazy design) — must await it before firing tool calls.
+  await h({}, { cwd });
 }
 
 async function fireBashToolCall(mock, command, cwd) {
@@ -221,19 +223,14 @@ async function main() {
       );
     }
 
-    // The factory loads config at factory time from process.cwd() (the
-    // eager-load design: buildSessionRuntime runs inside register, before
-    // pi.on wiring). Point cwd at the session dir so the project layer
-    // resolves to the harness's rules dir, mirroring how pi loads rules
-    // from its launch cwd. distEntry is absolute, so the dynamic import
-    // above is unaffected by the chdir.
-    process.chdir(sessionDir);
-
     const mock = makeMockPi();
-    // register is async (factory awaits buildSessionRuntime before
-    // registering handlers) — must settle before firing session_start.
+    // register is sync and register-only (the runtime build is deferred
+    // to session_start) — awaited for parity with pi's loader, harmless.
     await register(mock.api);
-    fireSessionStart(mock, sessionDir);
+    // cwd flows via the fired ctx: the lazy session_start handler builds
+    // the runtime from ctx.cwd (the session dir), so its project layer
+    // resolves to the harness's rules dir.
+    await fireSessionStart(mock, sessionDir);
 
     for (const c of CASES) {
       // Track entries added by this case specifically so we can assert
@@ -296,10 +293,8 @@ async function main() {
   } finally {
     if (origHome === undefined) delete process.env.HOME;
     else process.env.HOME = origHome;
-    // sessionDir is the process cwd at this point; POSIX tolerates
-    // removing the cwd, Windows raises EPERM. Nothing after the finally
-    // block depends on cwd, so step back first.
-    process.chdir(repoRoot);
+    // The harness never chdirs anymore (no factory-time cwd capture), so
+    // sessionDir can be removed in place.
     cleanup();
     rmSync(tmpHome, { recursive: true, force: true });
   }

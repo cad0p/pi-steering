@@ -20,7 +20,8 @@
 // Usage:
 //   pnpm -r build                                   # build the extension
 //   node scripts/smoke.mjs                          # run against defaults only
-//   node scripts/smoke.mjs /path/to/steering-dir    # + user rules from that dir's .pi/steering.json
+//   node scripts/smoke.mjs /path/to/steering-dir    # + user rules from that dir's .pi/steering/
+//                                                     (v2 TS config: <dir>/.pi/steering/index.ts)
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,7 +55,7 @@ function fireSessionStart(mock, cwd) {
   h({}, { cwd });
 }
 
-function fireBashToolCall(mock, command, cwd) {
+async function fireBashToolCall(mock, command, cwd) {
   const h = mock.handlers.tool_call;
   if (!h) throw new Error("tool_call handler not registered");
   const event = {
@@ -63,6 +64,8 @@ function fireBashToolCall(mock, command, cwd) {
     toolCallId: "call-1",
     input: { command },
   };
+  // The handler forwards to evaluator.evaluate, which is async — await
+  // its promise so the block verdict is settled before we assert.
   return h(event, { cwd });
 }
 
@@ -131,11 +134,14 @@ const CASES = [
   },
   {
     label:
-      "user-defined test-no-force-push also fires (loaded via steering.json)",
+      "user-defined test-no-force-push also fires (loaded via .pi/steering/)",
     command: "git push --force origin main",
     expect: "block",
-    // Defaults come first in the merged list, so no-force-push wins over
-    // the user rule. This case asserts the merged-list precedence.
+    // v2 merges inner-first: the user rule lands BEFORE the defaults,
+    // so test-no-force-push wins over no-force-push. The reason's
+    // "no-force-push" substring assertion still matches the
+    // "[steering:test-no-force-push@user]" source tag, and the case
+    // stays green even if a future merge reorders to defaults-first.
     expectRule: "no-force-push",
     requiresUserRule: true,
   },
@@ -155,30 +161,37 @@ async function main() {
     // Create an isolated session dir with a user rule so the requiresUserRule
     // case has something to load. Project-local config lives under `.pi/`,
     // matching pi's extension layout (same place as `.pi/extensions/`).
+    // v2 form: a TS config at `.pi/steering/index.ts` (the v1
+    // `.pi/steering.json` is CLI import-json migration-only and is NOT
+    // loaded by the v2 loader — only `<slot>/index.ts` / `<slot>.ts`).
     sessionDir = mkdtempSync(join(tmpdir(), "pi-poc-smoke-"));
-    mkdirSync(join(sessionDir, ".pi"), { recursive: true });
+    mkdirSync(join(sessionDir, ".pi", "steering"), { recursive: true });
+    // The `satisfies import(...)` is type-only (erased at transform), so
+    // jiti never resolves the package at runtime.
+    const userRuleConfig = `export default {
+  // v2 override policy is fail-closed (defaultNoOverride defaults to
+  // true) — the harness exercises the override path, so it opts in
+  // explicitly, mirroring a real v2 config that uses overrides.
+  defaultNoOverride: false,
+  rules: [
+    {
+      name: "test-no-force-push",
+      tool: "bash",
+      field: "command",
+      pattern: "^git\\\\b.*push\\\\b.*--force",
+      reason: "blocked by smoke-test rule",
+    },
+  ],
+} satisfies import("@cad0p/pi-steering").SteeringConfig;
+`;
     writeFileSync(
-      join(sessionDir, ".pi", "steering.json"),
-      JSON.stringify(
-        {
-          rules: [
-            {
-              name: "test-no-force-push",
-              tool: "bash",
-              field: "command",
-              pattern: "^git\\b.*push\\b.*--force",
-              reason: "blocked by smoke-test rule",
-            },
-          ],
-        },
-        null,
-        2,
-      ),
+      join(sessionDir, ".pi", "steering", "index.ts"),
+      userRuleConfig,
     );
     cleanup = () => rmSync(sessionDir, { recursive: true, force: true });
   }
 
-  // Isolate $HOME so no outer ~/.pi/agent/steering.json leaks in.
+  // Isolate $HOME so no outer ~/.pi/agent/steering/ (global layer) leaks in.
   const tmpHome = mkdtempSync(join(tmpdir(), "pi-poc-smoke-home-"));
   mkdirSync(join(tmpHome, ".pi", "agent"), { recursive: true });
   const origHome = process.env.HOME;
@@ -198,15 +211,25 @@ async function main() {
       );
     }
 
+    // The factory loads config at factory time from process.cwd() (the
+    // eager-load design: buildSessionRuntime runs inside register, before
+    // pi.on wiring). Point cwd at the session dir so the project layer
+    // resolves to the harness's rules dir, mirroring how pi loads rules
+    // from its launch cwd. distEntry is absolute, so the dynamic import
+    // above is unaffected by the chdir.
+    process.chdir(sessionDir);
+
     const mock = makeMockPi();
-    register(mock.api);
+    // register is async (factory awaits buildSessionRuntime before
+    // registering handlers) — must settle before firing session_start.
+    await register(mock.api);
     fireSessionStart(mock, sessionDir);
 
     for (const c of CASES) {
       // Track entries added by this case specifically so we can assert
       // audit-log side effects without cross-contamination.
       const entriesBefore = mock.entries.length;
-      const result = fireBashToolCall(mock, c.command, sessionDir);
+      const result = await fireBashToolCall(mock, c.command, sessionDir);
       const blocked = result && result.block === true;
       const newEntries = mock.entries.slice(entriesBefore);
 
@@ -263,6 +286,10 @@ async function main() {
   } finally {
     if (origHome === undefined) delete process.env.HOME;
     else process.env.HOME = origHome;
+    // sessionDir is the process cwd at this point; POSIX tolerates
+    // removing the cwd, Windows raises EPERM. Nothing after the finally
+    // block depends on cwd, so step back first.
+    process.chdir(repoRoot);
     cleanup();
     rmSync(tmpHome, { recursive: true, force: true });
   }

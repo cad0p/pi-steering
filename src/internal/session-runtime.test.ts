@@ -18,6 +18,8 @@
  */
 
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   useIsolatedHome,
@@ -381,6 +383,192 @@ describe("buildSessionRuntime: strict-mode contract", () => {
         return true;
       },
     );
+  });
+});
+
+describe("buildSessionRuntime: project-trust gate", () => {
+  let tmpHome: string;
+  let infos: string[];
+  let warns: string[];
+  let origInfo: typeof console.info;
+  let origWarn: typeof console.warn;
+  useIsolatedHome("pi-steering-runtime-", (t) => {
+    tmpHome = t;
+  });
+
+  beforeEach(() => {
+    infos = [];
+    warns = [];
+    origInfo = console.info;
+    origWarn = console.warn;
+    console.info = (msg: unknown) => {
+      infos.push(String(msg));
+    };
+    console.warn = (msg: unknown) => {
+      warns.push(String(msg));
+    };
+  });
+
+  afterEach(() => {
+    console.info = origInfo;
+    console.warn = origWarn;
+  });
+
+  /** Project config + global config: the project one is the gate target. */
+  function writeTrustGateFixture(): void {
+    writeSteeringSingleFileConfig(
+      tmpHome,
+      `export default {
+				disableDefaults: true,
+				rules: [
+					{ name: "proj-rule", tool: "bash", field: "command", pattern: /^A/, reason: "proj" },
+				],
+			};`,
+    );
+    writeGlobalConfig(
+      `export default {
+				disableDefaults: true,
+				rules: [
+					{ name: "global-rule", tool: "bash", field: "command", pattern: /^B/, reason: "global" },
+				],
+			};`,
+    );
+  }
+
+  /** Write a config at the global layer `<agentDir>/steering/index.ts`. */
+  function writeGlobalConfig(body: string): void {
+    const dir = join(tmpHome, ".pi", "agent", "steering");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "index.ts"), body, "utf8");
+  }
+
+  it("emits a console.info breadcrumb and keeps global-layer steering when untrusted", async () => {
+    writeTrustGateFixture();
+    const result = await buildSessionRuntime(tmpHome, noopHost, {
+      projectLayerTrusted: false,
+    });
+    assert.ok(result.evaluator);
+    assert.ok(result.dispatcher);
+    // Breadcrumb: exactly one info line, single-line shape with the
+    // skipped dir as path prefix.
+    const breadcrumbs = infos.filter((m) => m.includes("project layer skipped"));
+    assert.equal(
+      breadcrumbs.length,
+      1,
+      `expected exactly one skip breadcrumb; got: ${JSON.stringify(infos)}`,
+    );
+    assert.match(
+      breadcrumbs[0] ?? "",
+      /^\[pi-steering\] \[info\] .*\.pi\/steering: project layer skipped/,
+    );
+    // The skip never reaches console.warn (F1 single-route contract).
+    assert.equal(
+      warns.filter((w) => w.includes("project layer skipped")).length,
+      0,
+      `expected no skip line on console.warn; got: ${JSON.stringify(warns)}`,
+    );
+  });
+
+  it("strict-mode aggregate throw does NOT mention the skip", async () => {
+    // A warning-producing GLOBAL config + an untrusted project layer:
+    // the strict-mode throw carries the warning but never the
+    // info-class skip (aggregate filters error/warning by
+    // construction).
+    writeTrustGateFixture();
+    // Make the global layer warning-producing (within-layer duplicate).
+    writeGlobalConfig(
+      `export default {
+				disableDefaults: true,
+				rules: [
+					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
+					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+				],
+			};`,
+    );
+    await assert.rejects(
+      () =>
+        buildSessionRuntime(tmpHome, noopHost, {
+          projectLayerTrusted: false,
+        }),
+      (err: Error) => {
+        assert.match(err.message, /^1 config issue:/);
+        assert.match(err.message, /duplicate rule "dup"/);
+        assert.doesNotMatch(err.message, /project layer skipped/);
+        assert.doesNotMatch(err.message, /layer-project-untrusted/);
+        return true;
+      },
+    );
+    // Breadcrumb still fired before the throw (escalation-independent).
+    assert.equal(
+      infos.filter((m) => m.includes("project layer skipped")).length,
+      1,
+      `expected the skip breadcrumb despite the strict-mode throw; got: ${JSON.stringify(infos)}`,
+    );
+  });
+
+  it("failOnWarnings: false does NOT double-emit the skip (F1 pin)", async () => {
+    // Global config with a warning + failOnWarnings: false → fail-soft
+    // path. The skip must appear exactly once (console.info) and zero
+    // times on console.warn — the fail-soft loop filters to
+    // warning-class only. Project config candidate present so the
+    // info diagnostic fires.
+    writeTrustGateFixture();
+    writeGlobalConfig(
+      `export default {
+				disableDefaults: true,
+				failOnWarnings: false,
+				rules: [
+					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
+					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+				],
+			};`,
+    );
+    const result = await buildSessionRuntime(tmpHome, noopHost, {
+      projectLayerTrusted: false,
+    });
+    assert.ok(result.evaluator);
+    assert.ok(result.dispatcher);
+    assert.equal(
+      infos.filter((m) => m.includes("project layer skipped")).length,
+      1,
+      `expected exactly one skip breadcrumb on console.info; got: ${JSON.stringify(infos)}`,
+    );
+    assert.equal(
+      warns.filter((w) => w.includes("project layer skipped")).length,
+      0,
+      `expected zero skip lines on console.warn (F1); got: ${JSON.stringify(warns)}`,
+    );
+    // The warning itself still reaches console.warn once (fail-soft
+    // route unchanged).
+    assert.equal(
+      warns.filter((w) => w.includes('duplicate rule "dup"')).length,
+      1,
+      `expected the warning on console.warn; got: ${JSON.stringify(warns)}`,
+    );
+  });
+
+  it("failOnWarnings escalation is unaffected by the gate (absent opts)", async () => {
+    // Without opts the gate is inert: project layer loads, its
+    // warning escalates under strict mode exactly as before.
+    writeSteeringSingleFileConfig(
+      tmpHome,
+      `export default {
+				disableDefaults: true,
+				rules: [
+					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
+					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+				],
+			};`,
+    );
+    await assert.rejects(
+      () => buildSessionRuntime(tmpHome, noopHost),
+      (err: Error) => {
+        assert.match(err.message, /^1 config issue:/);
+        assert.match(err.message, /duplicate rule "dup"/);
+        return true;
+      },
+    );
+    assert.equal(infos.length, 0, "no info breadcrumb without the gate");
   });
 });
 

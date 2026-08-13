@@ -26,6 +26,7 @@ import type {
   PredicateHandler,
   Rule,
   SteeringConfig,
+  SteeringDiagnostic,
   WhenClause,
 } from "./schema.ts";
 
@@ -230,6 +231,21 @@ describe("schema: shape smoke tests", () => {
       observers: [],
     };
     assert.equal(cfg.defaultNoOverride, true);
+  });
+
+  it("SteeringDiagnostic accepts info severity + layer-project-untrusted kind", () => {
+    // Pins the trust-gate addition to the type union: info-class
+    // diagnostics are normal-behavior breadcrumbs, never escalate.
+    const diag: SteeringDiagnostic = {
+      type: "info",
+      kind: "layer-project-untrusted",
+      path: "/proj/.pi/steering",
+      message:
+        "project layer skipped (project untrusted); global layer still applies",
+    };
+    assert.equal(diag.type, "info");
+    assert.equal(diag.kind, "layer-project-untrusted");
+    assert.equal(diag.path, "/proj/.pi/steering");
   });
 
   it("PredicateContext exposes the documented surface", () => {

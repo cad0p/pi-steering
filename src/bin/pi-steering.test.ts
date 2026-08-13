@@ -20,11 +20,13 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { writeSteeringDirConfig } from "../__test-helpers__.ts";
 
@@ -1082,5 +1084,186 @@ describe("pi-steering list: diagnostics on stderr", () => {
       /\[pi-steering\] observer 'obs-x' dropped/,
       `expected NO observer-drop breadcrumb on stderr (consumer rule is enabled, observer is consumed); got: ${r.stderr}`,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// list — project trust gate
+// ---------------------------------------------------------------------------
+
+/**
+ * Trust-gate fixtures for the CLI's mirrored pi trust formula.
+ *
+ * NOTE (F3): bin-test scratch dirs are raw `mkdtempSync` (NOT
+ * realpath'ed) — trust.json keys must use `realpathSync(scratch)` /
+ * `realpathSync(parent)`, never `resolve()`, because the mirror
+ * canonicalizes before lookup (pi's write path does the same).
+ */
+describe("pi-steering list: project trust gate", () => {
+  /** Write `<scratch>/.pi/settings.json` — makes the trust store read load-bearing (F3). */
+  function writeTrustRequiringResource(): void {
+    mkdirSync(join(scratch, ".pi"), { recursive: true });
+    writeFileSync(join(scratch, ".pi", "settings.json"), "{}", "utf8");
+  }
+
+  /** Steering config with a distinctive rule so its presence in output is observable. */
+  function writeProjectSteeringConfig(): void {
+    writeSteeringDirConfig(
+      scratch,
+      `export default {
+				rules: [
+					{
+						name: "trusted-project-rule",
+						tool: "bash",
+						field: "command",
+						pattern: /^echo trusted$/,
+						reason: "no",
+					},
+				],
+			};`,
+    );
+  }
+
+  /** Write the child's trust store (`<scratch>/.pi/agent/trust.json` — HOME is scratch). */
+  function writeTrustStore(entries: Record<string, true | false | null>): void {
+    const dir = join(scratch, ".pi", "agent");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "trust.json"), `${JSON.stringify(entries, null, 2)}\n`, "utf8");
+  }
+
+  it("untrusted dir (no trust entry + trust-requiring resource): project layer skipped, [info] on stderr, JSON false", async () => {
+    writeTrustRequiringResource();
+    writeProjectSteeringConfig();
+    const r = await runCli({ cwd: scratch }, "list", "--format=json");
+    assert.equal(r.code, 0);
+    const parsed = JSON.parse(r.stdout) as {
+      projectLayerTrusted: boolean;
+      userRules: unknown[];
+    };
+    assert.equal(parsed.projectLayerTrusted, false);
+    // Project rules NOT listed (layers empty under the gate).
+    assert.deepEqual(parsed.userRules, []);
+    assert.ok(
+      !r.stdout.includes("trusted-project-rule"),
+      `project rule must not appear; stdout: ${r.stdout}`,
+    );
+    assert.match(
+      r.stderr,
+      /\[pi-steering\] \[info\] .*\.pi\/steering: project layer skipped/,
+      `expected [info] skip line on stderr; got: ${r.stderr}`,
+    );
+  });
+
+  it("trusted dir (trust.json true + trust-requiring resource): project layer loads, JSON true", async () => {
+    writeTrustRequiringResource();
+    writeProjectSteeringConfig();
+    // The store entry is what flips the decision — the resource is
+    // present, so without it the dir would be untrusted.
+    writeTrustStore({ [realpathSync(scratch)]: true });
+    const r = await runCli({ cwd: scratch }, "list", "--format=json");
+    assert.equal(r.code, 0);
+    const parsed = JSON.parse(r.stdout) as {
+      projectLayerTrusted: boolean;
+      userRules: Array<{ name: string }>;
+    };
+    assert.equal(parsed.projectLayerTrusted, true);
+    assert.equal(parsed.userRules[0]?.name, "trusted-project-rule");
+    assert.ok(
+      !r.stderr.includes("project layer skipped"),
+      `expected no skip line when trusted; stderr: ${r.stderr}`,
+    );
+  });
+
+  it("trust.json false entry: project layer skipped", async () => {
+    writeTrustRequiringResource();
+    writeProjectSteeringConfig();
+    writeTrustStore({ [realpathSync(scratch)]: false });
+    const r = await runCli({ cwd: scratch }, "list", "--format=json");
+    assert.equal(r.code, 0);
+    const parsed = JSON.parse(r.stdout) as {
+      projectLayerTrusted: boolean;
+    };
+    assert.equal(parsed.projectLayerTrusted, false);
+    assert.ok(
+      !r.stdout.includes("trusted-project-rule"),
+      `project rule must not appear; stdout: ${r.stdout}`,
+    );
+    assert.match(r.stderr, /\[info\] .*project layer skipped/);
+  });
+
+  it("malformed trust.json: stderr note, empty-store semantics → untrusted → skipped (F2)", async () => {
+    writeTrustRequiringResource();
+    writeProjectSteeringConfig();
+    const dir = join(scratch, ".pi", "agent");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "trust.json"), "{ not json", "utf8");
+    const r = await runCli({ cwd: scratch }, "list", "--format=json");
+    assert.equal(r.code, 0);
+    const parsed = JSON.parse(r.stdout) as {
+      projectLayerTrusted: boolean;
+    };
+    // Mirror-faithful: the FORMULA decides on the empty store — with
+    // trust-requiring resources present that is UNTRUSTED → skip. The
+    // CLI diverges from pi only in not crashing (read-only inspector).
+    assert.equal(parsed.projectLayerTrusted, false);
+    assert.ok(
+      !r.stdout.includes("trusted-project-rule"),
+      `project rule must not appear; stdout: ${r.stdout}`,
+    );
+    assert.match(
+      r.stderr,
+      /pi-steering: trust store .*unreadable; ignoring/,
+      `expected unreadable-store note; got: ${r.stderr}`,
+    );
+    assert.match(r.stderr, /\[info\] .*project layer skipped/);
+  });
+
+  it("parent-dir trust entry honored via ancestor walk", async () => {
+    writeTrustRequiringResource();
+    writeProjectSteeringConfig();
+    writeTrustStore({ [realpathSync(dirname(scratch))]: true });
+    const r = await runCli({ cwd: scratch }, "list", "--format=json");
+    assert.equal(r.code, 0);
+    const parsed = JSON.parse(r.stdout) as {
+      projectLayerTrusted: boolean;
+      userRules: Array<{ name: string }>;
+    };
+    assert.equal(parsed.projectLayerTrusted, true);
+    assert.equal(parsed.userRules[0]?.name, "trusted-project-rule");
+  });
+
+  it("symlinked cwd: trust key is the canonicalized target", async () => {
+    // Project dir reached via a symlink; the mirror canonicalizes
+    // before the store lookup, so the entry written for the real
+    // target decides. (getcwd resolves the symlink, and the mirror's
+    // canonicalizePath agrees on the same target.)
+    const realDir = join(scratch, "real");
+    mkdirSync(join(realDir, ".pi"), { recursive: true });
+    writeFileSync(join(realDir, ".pi", "settings.json"), "{}", "utf8");
+    writeSteeringDirConfig(
+      realDir,
+      `export default {
+				rules: [
+					{
+						name: "symlink-rule",
+						tool: "bash",
+						field: "command",
+						pattern: /^echo sym$/,
+						reason: "no",
+					},
+				],
+			};`,
+    );
+    const link = join(scratch, "link");
+    symlinkSync(realDir, link);
+    writeTrustStore({ [realpathSync(realDir)]: true });
+    const r = await runCli({ cwd: link }, "list", "--format=json");
+    assert.equal(r.code, 0);
+    const parsed = JSON.parse(r.stdout) as {
+      projectLayerTrusted: boolean;
+      userRules: Array<{ name: string }>;
+    };
+    assert.equal(parsed.projectLayerTrusted, true);
+    assert.equal(parsed.userRules[0]?.name, "symlink-rule");
   });
 });

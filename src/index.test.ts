@@ -22,8 +22,9 @@
  */
 
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import type {
   ExtensionAPI,
   ToolCallEvent,
@@ -827,5 +828,109 @@ describe("register(): two-pass disableDefaults merge", () => {
     // Other defaults still present.
     const rmResult = await fireBashToolCall(mock, "rm -rf /", tmpHome);
     assert.equal(rmResult?.block, true);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* project-trust gate — bridge three-way (false / true / absent)              */
+/* -------------------------------------------------------------------------- */
+
+describe("register(): project-trust gate", () => {
+  let infos: string[];
+  let origInfo: typeof console.info;
+  useRegisterScratchHome();
+
+  beforeEach(() => {
+    infos = [];
+    origInfo = console.info;
+    console.info = (msg: unknown) => {
+      infos.push(String(msg));
+    };
+  });
+  afterEach(() => {
+    console.info = origInfo;
+  });
+
+  /** Distinct project + global blocking rules so each layer's fate is observable. */
+  function writeGateFixture(): void {
+    writeSteeringConfig(
+      tmpHome,
+      `{
+				rules: [
+					{
+						name: "no-proj-echo",
+						tool: "bash",
+						field: "command",
+						pattern: /^echo proj$/,
+						reason: "project rule",
+					},
+				],
+			}`,
+    );
+    // Global layer at `<agentDir>/steering/index.ts` — write directly
+    // (writeSteeringDirConfig would nest under `<dir>/.pi/steering`).
+    const globalDir = join(tmpHome, ".pi", "agent", "steering");
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(
+      join(globalDir, "index.ts"),
+      `export default {
+				rules: [
+					{
+						name: "no-glob-echo",
+						tool: "bash",
+						field: "command",
+						pattern: /^echo glob$/,
+						reason: "global rule",
+					},
+				],
+			};`,
+      "utf8",
+    );
+  }
+
+  it("isProjectTrusted → false: project rule skipped, global steers, breadcrumb, no crash", async () => {
+    writeGateFixture();
+    const mock = makeMockPi();
+    await register(mock.api as ExtensionAPI);
+    await fireSessionStart(mock, tmpHome, "startup", undefined, false);
+
+    // Project-layer rule must NOT fire.
+    const proj = await fireBashToolCall(mock, "echo proj", tmpHome);
+    assert.equal(proj, undefined);
+    // Global-layer rule still steers.
+    const glob = await fireBashToolCall(mock, "echo glob", tmpHome);
+    assert.equal(glob?.block, true);
+    assert.match(glob?.reason ?? "", /no-glob-echo/);
+    // Info breadcrumb emitted exactly once, single-line shape.
+    assert.equal(
+      infos.filter((m) => m.includes("project layer skipped")).length,
+      1,
+      `expected one skip breadcrumb; got: ${JSON.stringify(infos)}`,
+    );
+  });
+
+  it("isProjectTrusted → true: project layer loads (rule fires)", async () => {
+    writeGateFixture();
+    const mock = makeMockPi();
+    await register(mock.api as ExtensionAPI);
+    await fireSessionStart(mock, tmpHome, "startup", undefined, true);
+
+    const proj = await fireBashToolCall(mock, "echo proj", tmpHome);
+    assert.equal(proj?.block, true);
+    assert.match(proj?.reason ?? "", /no-proj-echo/);
+    assert.equal(infos.length, 0, "no breadcrumb when trusted");
+  });
+
+  it("method absent: gate inert, project layer loads (fallback)", async () => {
+    writeGateFixture();
+    const mock = makeMockPi();
+    await register(mock.api as ExtensionAPI);
+    // No projectTrusted arg → makeCtx leaves isProjectTrusted off.
+    await fireSessionStart(mock, tmpHome);
+
+    const proj = await fireBashToolCall(mock, "echo proj", tmpHome);
+    assert.equal(proj?.block, true);
+    assert.match(proj?.reason ?? "", /no-proj-echo/);
+    assert.equal(infos.length, 0, "no breadcrumb when gate is inert");
   });
 });

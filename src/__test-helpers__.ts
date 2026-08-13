@@ -70,13 +70,13 @@ export function useIsolatedHome(
   let priorHome: string | undefined;
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), prefix));
-    priorHome = process.env["HOME"];
-    process.env["HOME"] = tmp;
+    priorHome = process.env.HOME;
+    process.env.HOME = tmp;
     onReady?.(tmp);
   });
   afterEach(() => {
-    if (priorHome === undefined) delete process.env["HOME"];
-    else process.env["HOME"] = priorHome;
+    if (priorHome === undefined) delete process.env.HOME;
+    else process.env.HOME = priorHome;
     rmSync(tmp, { recursive: true, force: true });
   });
 }
@@ -99,15 +99,15 @@ export function useScratchHome(
   beforeEach(() => {
     priorCwd = process.cwd();
     tmp = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
-    priorHome = process.env["HOME"];
-    process.env["HOME"] = tmp;
+    priorHome = process.env.HOME;
+    process.env.HOME = tmp;
     process.chdir(tmp);
     onReady?.(tmp);
   });
   afterEach(() => {
     process.chdir(priorCwd);
-    if (priorHome === undefined) delete process.env["HOME"];
-    else process.env["HOME"] = priorHome;
+    if (priorHome === undefined) delete process.env.HOME;
+    else process.env.HOME = priorHome;
     rmSync(tmp, { recursive: true, force: true });
   });
 }
@@ -193,10 +193,7 @@ export function makeCtx(
     ...(notify
       ? {
           ui: {
-            notify: (
-              message: string,
-              type?: "info" | "warning" | "error",
-            ) => {
+            notify: (message: string, type?: "info" | "warning" | "error") => {
               notify.messages.push(message);
               notify.types.push(type ?? "info");
             },

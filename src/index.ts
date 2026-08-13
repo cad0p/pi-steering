@@ -74,7 +74,10 @@ export default function register(
     try {
       runtime = await build(ctx.cwd, host);
     } catch (err) {
-      if (!(err instanceof Error) || !/^\d+ config issues?:/.test(err.message)) {
+      if (
+        !(err instanceof Error) ||
+        !/^\d+ config issues?:/.test(err.message)
+      ) {
         throw err;
       }
       const body = err.message;
@@ -84,7 +87,9 @@ export default function register(
   });
 
   pi.on("tool_call", (event, ctx) =>
-    runtime ? runtime.evaluator.evaluate(event, ctx, agentLoopIndex) : undefined,
+    runtime
+      ? runtime.evaluator.evaluate(event, ctx, agentLoopIndex)
+      : undefined,
   );
 
   pi.on("tool_result", (event, ctx) =>

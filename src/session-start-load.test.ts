@@ -198,7 +198,10 @@ async function expectSessionStartThrow(
     errorLine,
     `expected aggregated diagnostic on console.error; got: ${JSON.stringify(capturedErrors)}`,
   );
-  const body = errorLine!.slice("[pi-steering] ".length);
+  // `assert.ok` above narrows `errorLine` to string — the strict-mode
+  // error surface always carries the body, or the assert would have
+  // failed already.
+  const body = errorLine.slice("[pi-steering] ".length);
   for (const m of matchers) {
     assert.match(body, m);
   }
@@ -339,7 +342,10 @@ describe("session_start: throws on diagnostics", () => {
     const mock = makeMockPi();
     await register(mock.api as ExtensionAPI);
     // cwd flows via the fired ctx — the project layer is `inner`.
-    await expectSessionStartThrow(mock, inner, [/\[warning\]/, /plugin "shared"/]);
+    await expectSessionStartThrow(mock, inner, [
+      /\[warning\]/,
+      /plugin "shared"/,
+    ]);
   });
 
   it("throws on per-layer import failure", async () => {
@@ -655,12 +661,15 @@ describe("session_start: aggregated render snapshot", () => {
     // The aggregate throw is caught at session_start: the full body
     // lands on console.error (TUI-clobbered surface) AND in the
     // in-chat notification (the visible surface).
-    const errorLine = capturedErrors.find((m) => m.startsWith("[pi-steering] "));
+    const errorLine = capturedErrors.find((m) =>
+      m.startsWith("[pi-steering] "),
+    );
     assert.ok(
       errorLine,
       `expected console.error; got: ${JSON.stringify(capturedErrors)}`,
     );
-    const body = errorLine!.slice("[pi-steering] ".length);
+    // `assert.ok` above narrows `errorLine` to string.
+    const body = errorLine.slice("[pi-steering] ".length);
 
     // Header: plural form ("issues"), no leading prefix (pi adds
     // "Failed to load extension: " automatically downstream).
@@ -669,33 +678,37 @@ describe("session_start: aggregated render snapshot", () => {
     // Bullet shape: two-space indent, dash, space, severity in
     // brackets, no padding for column alignment.
     const lines = body.split("\n");
-    assert.equal(
-      lines.length,
-      4,
-      `expected header + 3 bullets; got: ${body}`,
-    );
+    assert.equal(lines.length, 4, `expected header + 3 bullets; got: ${body}`);
+    // Indexing with noUncheckedIndexedAccess yields `string | undefined`;
+    // the length assert above makes every index valid — narrow through
+    // a helper instead of non-null assertions.
+    const bullet = (i: number): string => {
+      const line = lines[i];
+      assert.ok(line !== undefined, `expected bullet at line ${i}`);
+      return line;
+    };
     // Errors-first ordering: line 1 is the [error] bullet. Tighten
     // to enforce that no path prefix slips between the severity
     // tag and the message text — a future change adding a path
     // prefix to `reserved-tracker-name` would surface here.
     assert.match(
-      lines[1]!,
+      bullet(1),
       /^ {2}- \[error\] tracker name "events" is reserved/,
     );
-    assert.match(lines[2]!, /^ {2}- \[warning\] /);
-    assert.match(lines[3]!, /^ {2}- \[warning\] /);
+    assert.match(bullet(2), /^ {2}- \[warning\] /);
+    assert.match(bullet(3), /^ {2}- \[warning\] /);
 
     // Warnings preserve declaration order from `resolvePlugins`
     // (observer pass before rule pass).
-    assert.match(lines[2]!, /duplicate observer "obs-x"/);
-    assert.match(lines[3]!, /duplicate rule "dup"/);
+    assert.match(bullet(2), /duplicate observer "obs-x"/);
+    assert.match(bullet(3), /duplicate rule "dup"/);
 
     // No padding (severity tag flush against the next token).
     assert.doesNotMatch(body, /\[error\] {2,}/);
     assert.doesNotMatch(body, /\[warning\] {2,}/);
 
     // No footer (the message ends at the last bullet).
-    assert.equal(lines[lines.length - 1]!.startsWith("  - "), true);
+    assert.equal(bullet(3).startsWith("  - "), true);
 
     // The in-chat notification carries the FULL body (not a count),
     // prefixed by the disabled banner, with type "error".
@@ -745,12 +758,15 @@ describe("session_start: notify content pin", () => {
     await fireSessionStart(mock, tmpHome, "startup", notifications);
 
     // console.error carries the full aggregated body.
-    const errorLine = capturedErrors.find((m) => m.startsWith("[pi-steering] "));
+    const errorLine = capturedErrors.find((m) =>
+      m.startsWith("[pi-steering] "),
+    );
     assert.ok(
       errorLine,
       `expected console.error; got: ${JSON.stringify(capturedErrors)}`,
     );
-    const body = errorLine!.slice("[pi-steering] ".length);
+    // `assert.ok` above narrows `errorLine` to string.
+    const body = errorLine.slice("[pi-steering] ".length);
     assert.match(
       body,
       /^1 config issue:\n {2}- \[warning\] duplicate observer "obs-x"/,

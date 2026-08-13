@@ -36,7 +36,6 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 
 import * as ts from "typescript";
 
@@ -50,7 +49,7 @@ import type {
 
 void (0 as unknown as TopLevelWhenClause | TopLevelWhenClauseNoRecurse);
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
+const HERE = import.meta.dirname;
 const PLUGIN_GIT_PATH = path.resolve(HERE, "plugins/git/index.ts");
 const SCHEMA_PATH = path.resolve(HERE, "schema.ts");
 const INDEX_PATH = path.resolve(HERE, "index.ts");

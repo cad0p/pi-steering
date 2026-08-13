@@ -392,6 +392,27 @@ describe("loader: loadConfigs", () => {
     assert.ok(paths.some((p) => p.endsWith("rules.js")));
   });
 
+  it("does NOT report stray-file diagnostics for dotfiles under .pi/steering/", async () => {
+    const cwd = join(tmp, "project");
+    mkdirSync(cwd, { recursive: true });
+    // Dotfiles (.gitignore, .DS_Store, editor junk) are never
+    // config-candidate files — the globSync-based stray scan
+    // excludes them (the old readdirSync+statSync loop listed them
+    // and warned about a stray .gitignore).
+    mkdirSync(join(cwd, ".pi", "steering"), { recursive: true });
+    writeFileSync(join(cwd, ".pi", "steering", ".gitignore"), "*", "utf8");
+    writeFileSync(
+      join(cwd, ".pi", "steering", ".DS_Store"),
+      "editor junk",
+      "utf8",
+    );
+    const { diagnostics } = await loadConfigs(cwd);
+    assert.deepEqual(
+      diagnostics.filter((d) => d.kind === "layer-stray-file"),
+      [],
+    );
+  });
+
   it("does NOT report stray-file diagnostics for .ts helpers under .pi/steering/", async () => {
     const cwd = join(tmp, "project");
     mkdirSync(cwd, { recursive: true });

@@ -95,7 +95,7 @@ describe("my steering config", () => {
 });
 ```
 
-Run with `node --test --experimental-strip-types '.pi/steering/**/*.test.ts'`.
+Run with `node --test '.pi/steering/**/*.test.ts'`.
 
 ## Details
 

@@ -10,7 +10,7 @@
  * {@link SteeringDiagnosticKind} JSDoc for the diagnostic stream.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createJiti } from "jiti";
@@ -52,19 +52,26 @@ function unexpectedFilesUnderSteering(
   const steeringDir = join(dir, slot);
   if (!existsSync(steeringDir)) return [];
   try {
-    const entries = readdirSync(steeringDir);
+    // globSync with withFileTypes: true (Node >=22.2, inside the
+    // floor) deliberately narrows the stray scan to non-dotfile
+    // regular files: dotfiles (.gitignore, .DS_Store, editor junk)
+    // are never config-candidate files, so warning about them is
+    // noise; symlinked entries are excluded (glob reports them as
+    // non-file dirents, and a symlinked helper is a deliberate
+    // redirect, not a stray); directories stay filtered by
+    // isFile(). Ordering is sorted (glob) — previously unspecified
+    // and unpinned.
+    const entries = globSync("*", {
+      cwd: steeringDir,
+      withFileTypes: true,
+    });
     const out: string[] = [];
-    for (const name of entries) {
-      const full = join(steeringDir, name);
-      try {
-        const st = statSync(full);
-        if (!st.isFile()) continue;
-        if (name === "index.ts") continue;
-        if (name.endsWith(".ts")) continue; // allow helpers like `rules.ts`
-        out.push(full);
-      } catch {
-        // skip unreadable entry
-      }
+    for (const entry of entries) {
+      const name = entry.name;
+      if (name === "index.ts") continue;
+      if (name.endsWith(".ts")) continue; // allow helpers like `rules.ts`
+      if (!entry.isFile()) continue;
+      out.push(join(steeringDir, name));
     }
     return out;
   } catch {

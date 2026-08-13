@@ -38,6 +38,10 @@ import type {
   TopLevelWhenClause,
 } from "../schema.ts";
 
+// `import.meta.main` (Node >=22.18, inside the 22.19.0 engines floor)
+// is typed by @types/node from 22.18.0 on — at or below our `^22.19.0`
+// types floor, so no augmentation needed here.
+
 /**
  * CLI entrypoint. Exported (not just `void main(...)` at module top)
  * so the test suite can exercise the argument parser without spawning
@@ -626,10 +630,14 @@ function plural(word: string, n: number): string {
 }
 
 // Bootstrap: only invoke `main` when this module is the entry point,
-// not when imported for testing. `import.meta.url` matches `argv[1]`
-// when run as `node pi-steering.js`.
-const entry = process.argv[1];
-if (entry !== undefined && import.meta.url === `file://${entry}`) {
+// not when imported for testing.
+//
+// The previous check (`process.argv[1]` compared against
+// `file://${entry}`) had two failure modes: symlink invocation
+// (argv[1] is the symlink path, import.meta.url the realpath) and
+// non-URL-encoded interpolation (a space or `#` in the path breaks
+// the match). `import.meta.main` is correct in all cases.
+if (import.meta.main) {
   void main(process.argv).then((code) => {
     process.exit(code);
   });

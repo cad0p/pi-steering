@@ -4,8 +4,8 @@
 /**
  * Tests for the `@cad0p/pi-steering` CLI (`./pi-steering.ts`).
  *
- * Runs the CLI as a subprocess via `node --experimental-strip-types
- * src/bin/pi-steering.ts …`. This mirrors real invocation (the built
+ * Runs the CLI as a subprocess via `node src/bin/pi-steering.ts …`.
+ * This mirrors real invocation (the built
  * shebang script runs under a fresh node) and sidesteps the
  * `node:test` worker's stdout sharing — patching
  * `process.stdout.write` in-process swallows the worker's TAP frames.
@@ -24,19 +24,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 import { writeSteeringDirConfig } from "../__test-helpers__.ts";
 
 // ---------------------------------------------------------------------------
 // subprocess runner
 // ---------------------------------------------------------------------------
 
-const CLI_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "pi-steering.ts",
-);
+const CLI_PATH = resolve(import.meta.dirname, "pi-steering.ts");
 
 interface RunResult {
   code: number;
@@ -45,7 +41,7 @@ interface RunResult {
 }
 
 /**
- * Run the CLI as a child process under `node --experimental-strip-types`.
+ * Run the CLI as a child process under `node`.
  * Returns the exit code and captured stdout/stderr. Never throws for
  * non-zero exit codes — the caller asserts on `code`.
  *
@@ -74,15 +70,11 @@ function runCli(
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: scratch };
   delete env.PI_CODING_AGENT_DIR;
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(
-      process.execPath,
-      ["--experimental-strip-types", CLI_PATH, ...args],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-        ...(cwd !== undefined ? { cwd } : {}),
-        env,
-      },
-    );
+    const child = spawn(process.execPath, [CLI_PATH, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(cwd !== undefined ? { cwd } : {}),
+      env,
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -96,8 +88,9 @@ function runCli(
     child.on("error", rejectPromise);
     child.on("close", (code) => {
       // Filter the Node experimental-strip-types warning so tests
-      // assert against clean stderr. The warning is
-      // version-dependent; drop any line mentioning it.
+      // assert against clean stderr. Type stripping is default-on on
+      // the floor, so the warning no longer appears; the filter stays
+      // as harmless robustness against other warnings.
       const cleanedStderr = stderr
         .split("\n")
         .filter((line) => !/ExperimentalWarning/.test(line))

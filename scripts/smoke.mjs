@@ -134,15 +134,16 @@ const CASES = [
   },
   {
     label:
-      "user-defined test-no-force-push also fires (loaded via .pi/steering/)",
+      "user-defined test-no-force-push fires first (v2 merges user rules before defaults)",
     command: "git push --force origin main",
     expect: "block",
-    // v2 merges inner-first: the user rule lands BEFORE the defaults,
-    // so test-no-force-push wins over no-force-push. The reason's
-    // "no-force-push" substring assertion still matches the
-    // "[steering:test-no-force-push@user]" source tag, and the case
-    // stays green even if a future merge reorders to defaults-first.
-    expectRule: "no-force-push",
+    // v2 merges inner-first: defaults are pushed to the END of the
+    // effective layer list, so the user rule lands BEFORE the
+    // defaults and test-no-force-push wins over no-force-push. Assert
+    // the user rule's name so a hypothetical reorder to
+    // defaults-first fails loudly instead of passing via the
+    // no-force-push substring inside the source tag.
+    expectRule: "test-no-force-push",
     requiresUserRule: true,
   },
   {

@@ -817,7 +817,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
     // Reserved-name violations fire only at the plugin-merger surface;
     // without the merger pass in `runList`, a user running
     // `pi-steering list` on a config with a reserved tracker name
-    // would see no error, then hit the same violation at extension factory time.
+    // would see no error, then hit the same violation at session-start build time.
     writeSteeringDirConfig(
       scratch,
       `const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
@@ -913,7 +913,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
   });
 
   it("flags a malformed user-config rule name with an invalid-name diagnostic and exits 1", async () => {
-    // User-config rule names are validated only at extension factory time
+    // User-config rule names are validated only at session-start build time
     // (via the evaluator's build-time throw). Without this CLI pass,
     // `pi-steering list` would render the malformed rule as a valid
     // listing on stdout, then production would refuse to start —
@@ -1006,7 +1006,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
   it("surfaces an `observer dropped` breadcrumb when the consumer rule is disabled via `disabledRules` (parity with runtime)", async () => {
     // CLI must filter `merged.rules` against `disabledRules` before
     // `dropUnusedObservers` so the observer set the runtime would
-    // drop at extension factory time matches what `pi-steering list`
+    // drop at session-start build time matches what `pi-steering list`
     // reports.
     writeSteeringDirConfig(
       scratch,

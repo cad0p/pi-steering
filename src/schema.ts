@@ -1892,7 +1892,7 @@ export interface SteeringConfig {
    * the same rule are OR-ed — ANY matching clause exempts. An
    * exemption targeting a rule name that doesn't exist in the final
    * merged rule universe surfaces an `exemption-orphan` warning
-   * (strict mode throws at factory time); a target that exists but
+   * (strict mode throws at session start); a target that exists but
    * is disabled (via {@link disabledRules} or a disabled plugin) is
    * inert and silent.
    *
@@ -2027,7 +2027,7 @@ export type SteeringDiagnosticKind =
    * merged rule universe (merged rules + plugin-shipped rules +
    * defaults, honoring `disableDefaults`). The carve-out can never
    * match anything and is dropped. Warning-class: strict mode throws
-   * at factory time, like `extension-orphan`. A target that exists
+   * at session start, like `extension-orphan`. A target that exists
    * but is disabled (via `disabledRules` or a disabled plugin) is
    * inert, silent, and NOT flagged — by-design disable, consistent
    * with the disabled-rule `console.info` breadcrumb.

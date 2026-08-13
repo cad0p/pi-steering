@@ -417,7 +417,7 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
     // `disabledRules`"). The runtime filters `merged.rules` against
     // `disabledRules` BEFORE handing the union to
     // `dropUnusedObservers`, so an observer whose only consumer is
-    // disabled gets dropped at extension factory time. This test pins the
+    // disabled gets dropped at runtime build time (session start). This test pins the
     // production code path — a future refactor that swaps the
     // runtime's filter order (filtering after observer-drop instead
     // of before, or skipping the filter entirely) would let

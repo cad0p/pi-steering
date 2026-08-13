@@ -23,10 +23,13 @@
  * on the merged config (default: true). Otherwise warnings are
  * emitted to `console.warn` for legacy fail-soft semantics.
  *
- * The bridge calls `buildSessionRuntime` once at extension factory
- * time. A thrown factory propagates through pi's extension loader
- * into pi's `[Extension issues]` diagnostic block (which survives
- * `/reload`); the bridge does not catch.
+ * The bridge defers the build to the first `session_start` on each
+ * extension instance, anchored on the session's `ctx.cwd`. A
+ * strict-mode aggregate throw (the "<n> config issue(s):" header) is
+ * caught by the bridge and surfaced as a `console.error` line plus an
+ * in-chat `ui.notify` carrying the FULL aggregated body; the session
+ * runs unsteered (fail-closed). Any other error is rethrown and stays
+ * loud via pi's `Extension "..." error:` rendering.
  */
 
 import { DEFAULT_PLUGINS, DEFAULT_RULES } from "../defaults.ts";

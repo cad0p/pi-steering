@@ -173,5 +173,5 @@ error message lists each tracker-name collision exactly once.
 
 **Pinned by:** `internal/session-runtime.test.ts` "throws on an
 error-class diagnostic regardless of failOnWarnings" (single-emission
-lock); `factory-time-load.test.ts` "throws on tracker-name-collision"
+lock); `session-start-load.test.ts` "throws on tracker-name-collision"
 (integration mirror).

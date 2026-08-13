@@ -143,7 +143,7 @@ export function validateName(
  * Validate the `name` field on every user-config rule and observer.
  * Plugin-shipped rule / observer / plugin names are validated inside
  * {@link resolvePlugins}; user-config rules and observers reach
- * {@link validateName} only at factory time (via
+ * {@link validateName} only at session-start build time (via
  * `buildEvaluator` / `buildObserverDispatcher`'s build-time throw).
  *
  * The CLI's `pi-steering list` pre-flight surface uses this helper

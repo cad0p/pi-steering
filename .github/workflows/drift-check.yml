@@ -47,16 +47,21 @@ jobs:
             # search so repeated drift weeks comment instead of stacking
             # duplicate issues. This step is the ONLY one allowed to
             # exit 1 — script failures surface as the `check` failure.
+            # The body is built in a file so the block scalar's leading
+            # whitespace can't leak into the rendered markdown (4-space
+            # indents would render the summary as a code block).
+            {
+              echo "Weekly drift check FAILED against pi $NEW."
+              echo
+              cat .drift-summary.md
+              echo
+              echo "See run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            } > .drift-issue.md
             EXISTING=$(gh issue list --state open --search 'in:title "[drift]"' --json number --jq '.[0].number // empty')
-            BODY="Weekly drift check FAILED against pi $NEW.
-
-            $(cat .drift-summary.md)
-
-            See run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             if [ -n "$EXISTING" ]; then
-              gh issue comment "$EXISTING" --body "$BODY"
+              gh issue comment "$EXISTING" --body-file .drift-issue.md
             else
-              gh issue create --title "[drift] pi $NEW breaks pi-steering's trust gate or bridge API" --body "$BODY"
+              gh issue create --title "[drift] pi $NEW breaks pi-steering's trust gate or bridge API" --body-file .drift-issue.md
             fi
             exit 1
           fi

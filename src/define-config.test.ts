@@ -1129,7 +1129,7 @@ describe("defineConfig: plugin-shipped exemption targets (issue #29)", () => {
   it("rejects a plugin whose exemption targets are shipped by an unlisted plugin (napkin alone)", () => {
     // napkin's carve-outs target the git plugin's rules; without git in
     // the plugins tuple the targets are orphans — failure moves from a
-    // session-start `exemption-orphan` warning to compile time, on the
+    // session-start `exemption-orphan` error to compile time, on the
     // offending plugin element's own line.
     const cfg = defineConfig({
       plugins: [

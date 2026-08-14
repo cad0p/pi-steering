@@ -239,7 +239,9 @@ type PluginExemptionTargets<P extends readonly Plugin[]> = P extends readonly [
  * plugin's `no-main-commit`; that plugin must be listed alongside in
  * `plugins`). If the shipping plugin is missing, the target is an
  * orphan: the config compiles clean but surfaces an `exemption-orphan`
- * warning at session start (strict mode throws). This check makes the
+ * ERROR at merge time — plugin-shipped orphans are error-class, so
+ * the runtime always throws (regardless of `failOnWarnings`), the CLI
+ * exits 1, and `loadHarness` short-circuits. This check makes the
  * failure compile-time instead.
  *
  * Semantics:
@@ -248,7 +250,8 @@ type PluginExemptionTargets<P extends readonly Plugin[]> = P extends readonly [
  *     rules + listed plugins' rules + inline rules.
  *   - Plugins whose `exemptions[].rule` widened to `string` (bare
  *     `: Plugin` annotation) are skipped — "can't verify", never a
- *     false-positive.
+ *     false-positive. The runtime `exemption-orphan` backstop still
+ *     covers them at merge time, now as a hard error (error-class).
  *   - The check is per-file: configs split across layers (global vs
  *     project) can false-positive because the runtime merges the
  *     layers' rule universes before the `detectExemptionOrphans`

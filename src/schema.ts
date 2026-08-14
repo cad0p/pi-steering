@@ -1639,11 +1639,13 @@ export interface Exemption<
    * checked against the `AllRuleNames` union inside
    * {@link defineConfig}; plain `string` at schema level. An
    * exemption targeting a rule name that doesn't exist in the final
-   * merged rule universe surfaces an `exemption-orphan` warning
-   * (strict mode throws); a target that exists but is disabled is
-   * inert, silent, and NOT orphaned. (Plugin-shipped exemptions get
-   * the same universe, cross-checked from the `plugins` tuple — see
-   * {@link Plugin.exemptions}.)
+   * merged rule universe surfaces an `exemption-orphan` diagnostic —
+   * warning-class when written in config (strict mode throws),
+   * error-class when shipped by a plugin (the runtime always throws
+   * regardless of `failOnWarnings`, the CLI exits 1); a target that
+   * exists but is disabled is inert, silent, and NOT orphaned.
+   * (Plugin-shipped exemptions get the same universe, cross-checked
+   * from the `plugins` tuple — see {@link Plugin.exemptions}.)
    */
   rule: RuleName;
 
@@ -1906,10 +1908,12 @@ export interface SteeringConfig {
    * plugin-shipped exemptions stack on top. Multiple exemptions for
    * the same rule are OR-ed — ANY matching clause exempts. An
    * exemption targeting a rule name that doesn't exist in the final
-   * merged rule universe surfaces an `exemption-orphan` warning
-   * (strict mode throws at session start); a target that exists but
-   * is disabled (via {@link disabledRules} or a disabled plugin) is
-   * inert and silent.
+   * merged rule universe surfaces an `exemption-orphan` diagnostic —
+   * warning-class when written here in config (strict mode throws at
+   * session start), error-class when shipped by a plugin (always
+   * throws, regardless of `failOnWarnings`); a target that exists
+   * but is disabled (via {@link disabledRules} or a disabled plugin)
+   * is inert and silent.
    *
    * Inside {@link defineConfig}, `rule` is typo-checked against the
    * `AllRuleNames` union (same machinery as {@link disabledRules})
@@ -2057,8 +2061,12 @@ export type SteeringDiagnosticKind =
    * An exemption targets a rule name that doesn't exist in the final
    * merged rule universe (merged rules + plugin-shipped rules +
    * defaults, honoring `disableDefaults`). The carve-out can never
-   * match anything and is dropped. Warning-class: strict mode throws
-   * at session start, like `extension-orphan`. A target that exists
+   * match anything and is dropped. Two-tier severity: plugin-shipped
+   * orphans are error-class (broken plugin/config contract — the
+   * runtime always throws regardless of `failOnWarnings`, the CLI
+   * exits 1, `loadHarness` short-circuits); config-written orphans
+   * are warning-class (strict mode throws at session start, else
+   * `console.warn`, like `extension-orphan`). A target that exists
    * but is disabled (via `disabledRules` or a disabled plugin) is
    * inert, silent, and NOT flagged — by-design disable, consistent
    * with the disabled-rule `console.info` breadcrumb.

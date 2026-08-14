@@ -15,10 +15,12 @@ All notable changes to this project will be documented in this file.
 - Lazy session_start runtime build — register-only sync factory ([#9](https://github.com/cad0p/pi-steering/pull/9)) ([#30](https://github.com/cad0p/pi-steering/pull/30)) ([#37](https://github.com/cad0p/pi-steering/pull/37))
 - Gate project-layer steering configs behind pi's project trust ([#22](https://github.com/cad0p/pi-steering/pull/22)) ([#40](https://github.com/cad0p/pi-steering/pull/40))
 - Weekly upstream drift check for the trust gate — mirror-fidelity test + drift workflow ([#42](https://github.com/cad0p/pi-steering/pull/42)) ([#43](https://github.com/cad0p/pi-steering/pull/43))
+- Compile-time detection of orphan plugin exemptions ([#29](https://github.com/cad0p/pi-steering/pull/29)) ([#46](https://github.com/cad0p/pi-steering/pull/46))
 
 ### 🐛 Bug Fixes
 
 - Await async factory + re-align smoke harness to v2 loader contract ([#34](https://github.com/cad0p/pi-steering/pull/34)) ([#35](https://github.com/cad0p/pi-steering/pull/35))
+- Set GH_TOKEN in drift-check Report step (e2e-caught) ([#44](https://github.com/cad0p/pi-steering/pull/44))
 
 ### ⚡ Performance
 

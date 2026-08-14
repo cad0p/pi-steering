@@ -64,8 +64,25 @@ import { finalizePluginState } from "./finalize-plugin-state.ts";
 
 /**
  * Detect exemptions whose target rule name doesn't exist in the final
- * merged rule universe and emit a warning-class `exemption-orphan`
- * diagnostic for each — the carve-out can never match anything.
+ * merged rule universe and emit an `exemption-orphan` diagnostic for
+ * each — the carve-out can never match anything.
+ *
+ * Two-tier severity contract (the ONLY severity split in orphan
+ * detection):
+ *
+ *   - Plugin-shipped exemptions (`merged.plugins[].exemptions`, source
+ *     `plugin "Y"`) are ERROR-class. A plugin explicitly shipping a
+ *     carve-out that targets a rule missing from the merged universe
+ *     is a broken plugin/config contract (e.g. the napkin plugin
+ *     documents "gitPlugin MUST be listed alongside") — it must fail
+ *     every surface: the runtime always throws (regardless of
+ *     `failOnWarnings`), the CLI exits 1, `loadHarness` short-circuits
+ *     to a no-op harness.
+ *   - Config-written exemptions (`merged.exemptions`, source
+ *     `config`) stay WARNING-class. User typos are already caught at
+ *     compile time by `AllRuleNames` inside `defineConfig`; `satisfies`
+ *     / JSON / JS authors keep the documented fail-soft path (strict
+ *     mode throws, else `console.warn`).
  *
  * Universe formula (single source of truth for runtime, CLI, and
  * `loadHarness` — all three funnel through `runMergerPipeline`):
@@ -106,10 +123,14 @@ function detectExemptionOrphans(
   }
 
   const diagnostics: SteeringDiagnostic[] = [];
-  const check = (exemption: Exemption, source: string): void => {
+  const check = (
+    exemption: Exemption,
+    source: string,
+    type: "error" | "warning",
+  ): void => {
     if (universe.has(exemption.rule)) return;
     diagnostics.push({
-      type: "warning",
+      type,
       kind: "exemption-orphan",
       message:
         `exemption for rule "${exemption.rule}" (${source}) targets a rule ` +
@@ -117,13 +138,15 @@ function detectExemptionOrphans(
         "Check the rule name for typos, or install the plugin that ships it.",
     });
   };
+  // Plugin bucket → error-class (broken plugin/config contract);
+  // config bucket → warning-class (fail-soft, see JSDoc above).
   for (const plugin of merged.plugins ?? []) {
     for (const exemption of plugin.exemptions ?? []) {
-      check(exemption, `plugin "${plugin.name}"`);
+      check(exemption, `plugin "${plugin.name}"`, "error");
     }
   }
   for (const exemption of merged.exemptions ?? []) {
-    check(exemption, "config");
+    check(exemption, "config", "warning");
   }
   return diagnostics;
 }
@@ -136,7 +159,9 @@ function detectExemptionOrphans(
  * `validateUserConfigNames` runs unconditionally so user-config name
  * issues surface alongside merge errors; `detectExemptionOrphans`
  * runs on the merged config so runtime / CLI / loadHarness see the
- * same rule universe (defaults divergence handled explicitly).
+ * same rule universe (defaults divergence handled explicitly). Its
+ * severity split — plugin-shipped orphans error-class, config-written
+ * orphans warning-class — applies identically on every surface.
  */
 export function runMergerPipeline(
   layers: readonly SteeringConfig[],

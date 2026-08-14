@@ -392,6 +392,46 @@ describe("loadHarness", () => {
     assert.match(hit.message, /^plugin name "bad name".*disallowed/);
   });
 
+  it("surfaces a plugin-shipped orphan exemption as error-class without throwing (no-op harness)", () => {
+    // Severity split at harness level: a plugin explicitly shipping a
+    // carve-out targeting a rule missing from the merged universe is
+    // error-class — the diagnostic is surfaced (no throw) and the
+    // harness short-circuits to the no-op pair, mirroring the
+    // invalid-name pattern above.
+    const plugin: Plugin = {
+      name: "napkin",
+      exemptions: [{ rule: "no-such-rule", when: { cwd: "/vault/" } }],
+    };
+    const harness = loadHarness({ config: { plugins: [plugin] } });
+    const hit = harness.diagnostics.find((d) => d.kind === "exemption-orphan");
+    assert.ok(
+      hit,
+      `expected an exemption-orphan diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+    );
+    assert.equal(hit.type, "error");
+    assert.match(hit.message, /\(plugin "napkin"\)/);
+    // No-op short-circuit: nothing resolves, nothing fires.
+    assert.equal(harness.resolved.rules.length, 0);
+  });
+
+  it("surfaces a config-written orphan exemption as warning-class (fail-soft)", () => {
+    // Config-written orphans keep the fail-soft path: warning-class
+    // diagnostic in `harness.diagnostics`, harness still builds
+    // (warning-class alone never short-circuits).
+    const harness = loadHarness({
+      config: {
+        exemptions: [{ rule: "no-such-rule", when: { cwd: "/vault/" } }],
+      },
+    });
+    const hit = harness.diagnostics.find((d) => d.kind === "exemption-orphan");
+    assert.ok(
+      hit,
+      `expected an exemption-orphan diagnostic; got: ${JSON.stringify(harness.diagnostics)}`,
+    );
+    assert.equal(hit.type, "warning");
+    assert.match(hit.message, /\(config\)/);
+  });
+
   it("returns a no-op harness on a plugin-merger-side error-class diagnostic (reserved-tracker-name)", () => {
     // Symmetric short-circuit: any error-class diagnostic — from the
     // loader, the cross-config merge, OR the plugin merger — produces

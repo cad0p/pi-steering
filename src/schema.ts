@@ -1641,7 +1641,9 @@ export interface Exemption<
    * exemption targeting a rule name that doesn't exist in the final
    * merged rule universe surfaces an `exemption-orphan` warning
    * (strict mode throws); a target that exists but is disabled is
-   * inert, silent, and NOT orphaned.
+   * inert, silent, and NOT orphaned. (Plugin-shipped exemptions get
+   * the same universe, cross-checked from the `plugins` tuple — see
+   * {@link Plugin.exemptions}.)
    */
   rule: RuleName;
 
@@ -1711,6 +1713,19 @@ export interface Plugin {
    * default rule's) guard for its own domain — e.g. a vault plugin
    * exempting `no-main-commit` when `cwd` is inside a vault tree —
    * without copying or replacing the rule body.
+   *
+   * Inside `defineConfig`, shipped exemption targets are cross-checked
+   * at compile time against the config's rule-name universe (default
+   * rules + listed plugins' rules + inline rules): a plugin whose
+   * exemptions target a rule shipped by a plugin NOT in the `plugins`
+   * array fails to compile, with a per-plugin `__steeringExemption`
+   * error on the offending plugin element. Two escape hatches, both
+   * by design: a bare `: Plugin` annotation widens
+   * `exemptions[].rule` to `string` and silently skips the check
+   * ("can't verify", never a false-positive), and configs split
+   * across layers (global vs project) can false-positive because the
+   * check is per-file while the runtime merges universes — keep the
+   * plugin and its target's shipping plugin in the same layer.
    */
   exemptions?: readonly Exemption[];
 

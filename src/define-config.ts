@@ -22,12 +22,15 @@
  * config unchanged. All the value is in the types.
  *
  * Generics threaded through (ADR §8):
- *   - `AllObserverNames<P, Inline>` — for `Rule.observer` string refs.
- *   - `AllWrites<P, R, Inline>`     — for `Rule.when.happened.event`.
- *   - `AllRuleNames<P, R>`          — for `config.disabledRules`.
- *   - `AllPluginNames<P>`           — for `config.disabledPlugins`.
+ *   - `AllObserverNames<P, Inline>`  — for `Rule.observer` string refs.
+ *   - `AllWrites<P, R, Inline>`      — for `Rule.when.happened.event`.
+ *   - `AllRuleNames<P, R>`           — for `config.disabledRules`.
+ *   - `AllPluginNames<P>`            — for `config.disabledPlugins`.
+ *   - `PluginExemptionsCheck<P, R>`  — for plugin-shipped `exemptions`
+ *     targets (cross-checked against the same rule-name universe as
+ *     user-written `exemptions` / `disabledRules`).
  *
- * All four helpers are exported from this module but NOT re-exported
+ * All five helpers are exported from this module but NOT re-exported
  * from the package root; they're internal plumbing, not user-facing
  * API. Stable enough that plugin authors who import them directly can
  * rely on their shape within a single minor version, but the contract
@@ -190,6 +193,101 @@ export type AllRuleNames<
   | ProjectField<R, "name">;
 
 // ---------------------------------------------------------------------------
+// PluginExemptionsCheck — plugin-shipped exemption targets vs. rule names.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pull the union of `rule` name literals off ONE plugin's shipped
+ * `exemptions` array.
+ *
+ * Plugins whose `exemptions[].rule` widened to `string` (bare
+ * `: Plugin` annotation instead of `as const satisfies Plugin`)
+ * contribute `never` — "can't verify" means "skip", never a
+ * false-positive. A plugin with no `exemptions` field contributes
+ * `never` too.
+ */
+type PluginExemptionTargetsOf<PL> = PL extends Plugin
+  ? PL["exemptions"] extends readonly (infer E)[]
+    ? E extends { rule: infer RName extends string }
+      ? string extends RName
+        ? never // widened → "can't verify" → skip
+        : RName
+      : never
+    : never
+  : never;
+
+/**
+ * Union every plugin's exemption-target literals across the `plugins`
+ * tuple — the plugin-shipped counterpart of the rule-name union
+ * user-written `exemptions[].rule` is typo-checked against.
+ */
+type PluginExemptionTargets<P extends readonly Plugin[]> = P extends readonly [
+  infer First,
+  ...infer Rest,
+]
+  ?
+      | PluginExemptionTargetsOf<First>
+      | (Rest extends readonly Plugin[] ? PluginExemptionTargets<Rest> : never)
+  : never;
+
+/**
+ * Compile-time check that every plugin-shipped exemption target exists
+ * in the config's rule-name universe.
+ *
+ * A plugin's `exemptions` carve out rules by name — possibly rules
+ * shipped by ANOTHER plugin (e.g. a vault plugin exempting the git
+ * plugin's `no-main-commit`; that plugin must be listed alongside in
+ * `plugins`). If the shipping plugin is missing, the target is an
+ * orphan: the config compiles clean but surfaces an `exemption-orphan`
+ * warning at session start (strict mode throws). This check makes the
+ * failure compile-time instead.
+ *
+ * Semantics:
+ *   - Targets are checked against the SAME universe user-written
+ *     `exemptions` / `disabledRules` are checked against: default
+ *     rules + listed plugins' rules + inline rules.
+ *   - Plugins whose `exemptions[].rule` widened to `string` (bare
+ *     `: Plugin` annotation) are skipped — "can't verify", never a
+ *     false-positive.
+ *   - The check is per-file: configs split across layers (global vs
+ *     project) can false-positive because the runtime merges the
+ *     layers' rule universes before the `detectExemptionOrphans`
+ *     backstop runs. Keep a plugin and its target's shipping plugin
+ *     in the same layer.
+ *   - `disableDefaults: true` is a blind spot shared with the
+ *     existing user-exemption typing (`AllRuleNames` always includes
+ *     default rule names).
+ *
+ * On failure, the `plugins` slot of the config parameter gains a
+ * synthetic per-element property `__steeringExemption` carrying the
+ * message — the TS2322 error lands on the offending plugin element's
+ * own line in the `plugins` array, naming the missing rule(s) and
+ * hinting to install the plugin that ships them.
+ *
+ * Happy path (no plugin-shipped exemptions, or every target present)
+ * resolves to `{}` — the intersection with `defineConfig`'s parameter
+ * is a zero change to inference or runtime behavior.
+ */
+export type PluginExemptionsCheck<
+  P extends readonly Plugin[],
+  R extends readonly Rule[],
+> =
+  PluginExemptionTargets<P> extends AllRuleNames<P, R>
+    ? // biome-ignore lint/complexity/noBannedTypes: the empty object type is the deliberate "zero change" happy path.
+      {} // happy path: zero change
+    : {
+        plugins?: {
+          [K in keyof P]: string extends PluginExemptionTargetsOf<P[K]>
+            ? P[K]
+            : PluginExemptionTargetsOf<P[K]> extends AllRuleNames<P, R>
+              ? P[K]
+              : P[K] & {
+                  readonly __steeringExemption: `exemption target '${Exclude<PluginExemptionTargetsOf<P[K]>, AllRuleNames<P, R>>}' not found in this config; install the plugin that ships it`;
+                };
+        };
+      };
+
+// ---------------------------------------------------------------------------
 // AllWrites — union of `writes[]` literals across rules + observers.
 // ---------------------------------------------------------------------------
 
@@ -309,6 +407,11 @@ export interface DefineConfigInput<
  * `string` and silently disables typo detection. Use `as const satisfies`
  * to keep the inference.
  *
+ * The same widening applies to plugin-shipped `exemptions`: a bare
+ * `: Plugin` annotation widens `exemptions[].rule` to `string`, which
+ * silently skips the plugin-exemption cross-check (see
+ * {@link PluginExemptionsCheck}) — same footgun family, same fix.
+ *
  * ## Behavior with no observers declared
  *
  * When no plugins contribute observers AND no inline `observers[]` is
@@ -352,7 +455,9 @@ export function defineConfig<
     AllObserverNames<P, Inline>,
     AllWrites<P, R, Inline>
   >[] = [],
->(config: DefineConfigInput<P, Inline, R>): SteeringConfig {
+>(
+  config: DefineConfigInput<P, Inline, R> & PluginExemptionsCheck<P, R>,
+): SteeringConfig {
   // Runtime work is minimal: copy the supplied config, widening the
   // `readonly` tuple slots back to plain arrays for downstream
   // consumers (loader, evaluator) that don't care about the tuple

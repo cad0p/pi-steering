@@ -557,6 +557,8 @@ export default defineConfig({
 });
 ```
 
+**Plugin-shipped exemption targets are checked too.** A plugin's `exemptions` carve out rules by name — possibly rules shipped by another plugin. Those targets are cross-checked against the same rule-name universe as user-written `exemptions` / `disabledRules` (default rules + listed plugins' rules + inline rules): a plugin whose carve-outs target rules shipped by a plugin you didn't list fails to compile, pointing at the offending plugin element (the message names the missing rule(s) and hints to install the shipping plugin). Two by-design gaps: a `: Plugin` annotation widens `exemptions[].rule` to `string` and silently skips the check (the runtime `exemption-orphan` backstop still covers those authors), and cross-layer config splits (plugin in global, its target's shipping plugin in a project layer) can false-positive because the check is per-file while the runtime merges universes — keep the plugin and its target's shipping plugin in the same layer.
+
 **Authoring gotcha.** For cross-reference checking to work, TypeScript must preserve literal types. Use `as const satisfies` on reusable constants:
 
 ```ts
@@ -722,7 +724,7 @@ export default defineConfig({
 
 **Accumulation, not replacement.** Exemptions attach by target name to whichever rule wins that name after `disabledRules` filtering — the winning rule's body doesn't matter, only its name. Config-layer exemptions UNION across layers (project + global both apply, no inner-wins), and plugin-shipped exemptions (`Plugin.exemptions`) stack on top. Multiple exemptions for the same rule are OR-ed: ANY matching clause exempts. Duplicates are idempotent; there is no collision concept.
 
-Inside `defineConfig`, `exemptions[].rule` is typo-checked against the same rule-name union as `disabledRules`, and `when.happened.event` narrows against the config's `writes` union.
+Inside `defineConfig`, `exemptions[].rule` is typo-checked against the same rule-name union as `disabledRules`, and `when.happened.event` narrows against the config's `writes` union. Plugin-shipped exemption targets get the same universe, cross-checked from the `plugins` tuple: a plugin whose carve-outs target a rule shipped by a plugin you didn't list fails to compile with a per-plugin `__steeringExemption` error (the runtime `exemption-orphan` backstop still covers `satisfies` / JSON / JS configs and plugins annotated `: Plugin`, whose widened `rule: string` silently skips the check).
 
 **Fail-closed is STRICT — no escape hatch.** Exemption clauses evaluate with an "allow"-default projection — the OPPOSITE default from rule `when:` clauses. A predicate that can't resolve (walker-unknown cwd, a throwing handler, an unregistered predicate key) counts as "does not match", so the guard still fires. Exemptions are always fail-closed: an unknown walker value never exempts; the target rule's own `onUnknown` policy decides. `onUnknown` cannot be written inside an exemption (compile error; rejected at load if smuggled via `as any` / plain JS). A carve-out — even one shipped by a third-party plugin — can never weaken the guard's fail-closed posture.
 

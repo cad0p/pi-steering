@@ -312,7 +312,11 @@ async function runList(args: string[]): Promise<number> {
  * `<dir>/.pi/`. Mirrors pi's `TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES`
  * (trust-manager.js) — the CLI reimplements pi's non-UI trust formula
  * because pi's `exports` map blocks deep imports of its internals.
- * The mirror is pinned by the bin tests; drift risk is documented.
+ * The mirror is cross-checked against pi's REAL trust machinery by
+ * the live-oracle fidelity test (`src/bin/mirror-fidelity.test.ts`,
+ * always-on in CI) and by the weekly upstream drift workflow
+ * (`.github/workflows/drift-check.yml` — bumps pi, runs the full
+ * suite, files a `[drift]` issue on any mismatch).
  * Scope note: fixed to pi's default `.pi` config dir — pi's
  * configurable `pkg.piConfig.configDir` is out of scope (the loader
  * itself is `.pi`-fixed, so the mirror and the loader stay in sync).
@@ -347,11 +351,17 @@ function canonicalizePath(p: string): string {
  * resource at the canonicalized cwd, or when any ancestor (cwd
  * included) has an `.agents/skills` dir other than the user's own
  * canonicalized `$HOME/.agents/skills`. Ancestor walk stops at root.
+ *
+ * Canonicalizes the cwd INTERNALLY (line-for-line pi's
+ * `canonicalizePath(resolvePath(cwd))`, trust-manager.js) so the
+ * standalone export behaves identically to pi on raw paths — the
+ * fidelity test feeds RAW paths to both sides, and the symlinked-cwd
+ * row exercises this parity.
  */
-function hasTrustRequiringProjectResourcesMirror(cwd: string): boolean {
+export function hasTrustRequiringProjectResourcesMirror(cwd: string): boolean {
   const homeDir = canonicalizePath(resolve(process.env.HOME || homedir()));
   const userAgentsSkillsDir = join(homeDir, ".agents", "skills");
-  let currentDir = cwd;
+  let currentDir = canonicalizePath(resolve(cwd));
   if (
     TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES.some((entry) =>
       existsSync(join(currentDir, ".pi", entry)),
@@ -386,9 +396,10 @@ function hasTrustRequiringProjectResourcesMirror(cwd: string): boolean {
  * structurally invalid contents). The formula then proceeds on the
  * empty store: with trust-requiring resources present the decision is
  * UNTRUSTED and the project layer is skipped (mirror-faithful, no
- * fail-open fallback).
+ * fail-open fallback). The malformed-store DIVERGENCE from pi (which
+ * throws) is asserted deliberately in the fidelity test.
  */
-function trustStoreGetMirror(cwd: string): boolean | null {
+export function trustStoreGetMirror(cwd: string): boolean | null {
   const agentDir = resolveAgentDir();
   const trustPath = join(agentDir, "trust.json");
   let parsed: unknown;
@@ -438,8 +449,11 @@ function trustStoreGetMirror(cwd: string): boolean | null {
  * `trusted = !hasTrustRequiringProjectResources(cwd) ||
  * trustStore.get(cwd) === true`. No override, no prompt — the CLI is
  * a read-only inspector and adopts the resolved store decision.
+ * Cross-checked against pi's real formula by the fidelity test.
  */
-function resolveCliProjectTrust(cwd: string): boolean {
+export function resolveCliProjectTrust(cwd: string): boolean {
+  // Pre-canonicalization is now redundant (the mirror canonicalizes
+  // internally, like pi) — kept so CLI behavior stays byte-identical.
   const resolvedCwd = canonicalizePath(resolve(cwd));
   if (!hasTrustRequiringProjectResourcesMirror(resolvedCwd)) return true;
   return trustStoreGetMirror(resolvedCwd) === true;

@@ -18,7 +18,7 @@ Use it when:
 pi install npm:@cad0p/pi-steering
 ```
 
-Requires **Node `>=22.19.0`** (see `package.json#engines`; the same floor as pi itself). Configs are loaded and transpiled by the bundled [jiti](https://github.com/unjs/jiti) runtime — no `tsx` / `ts-node` needed.
+Requires **Node `>=22.19.0`** (see `package.json#engines`; the same floor as pi itself). The project-layer trust gate (see [Security](#security)) needs **pi `>=0.79.1`** — the release that added `ctx.isProjectTrusted()` (peer floor in `package.json#peerDependencies`). On older pi the gate is inert (project layer loads as before) with a `console.info` breadcrumb at session start. Configs are loaded and transpiled by the bundled [jiti](https://github.com/unjs/jiti) runtime — no `tsx` / `ts-node` needed.
 
 ### Local install (during the PoC)
 

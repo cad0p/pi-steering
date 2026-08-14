@@ -79,8 +79,17 @@ export default function register(
       // Capture pi's resolved project-trust decision BEFORE the await
       // (same D3 pattern as `ui` — the getter must run against the
       // live session context). `?.() ?? true` keeps the gate inert
-      // when the API is absent (older pi, test mocks): the project
-      // layer then loads exactly as before.
+      // when the API is absent (pi < 0.79.1, test mocks): the project
+      // layer then loads exactly as before. The peer floor is
+      // `>=0.79.1` (the release that added `ctx.isProjectTrusted()`);
+      // the breadcrumb makes the inert fallback observable instead of
+      // silent, so an old-pi install doesn't quietly lose the gate.
+      if (typeof ctx.isProjectTrusted !== "function") {
+        console.info(
+          "[pi-steering] ctx.isProjectTrusted() unavailable (pi >=0.79.1 " +
+            "required) — project-layer trust gate inert; project layer loads",
+        );
+      }
       const projectLayerTrusted = ctx.isProjectTrusted?.() ?? true;
       runtime = await build(ctx.cwd, host, { projectLayerTrusted });
     } catch (err) {

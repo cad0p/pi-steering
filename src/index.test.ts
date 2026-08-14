@@ -921,7 +921,7 @@ describe("register(): project-trust gate", () => {
     assert.equal(infos.length, 0, "no breadcrumb when trusted");
   });
 
-  it("method absent: gate inert, project layer loads (fallback)", async () => {
+  it("method absent: gate inert, project layer loads + inertness breadcrumb", async () => {
     writeGateFixture();
     const mock = makeMockPi();
     await register(mock.api as ExtensionAPI);
@@ -931,6 +931,11 @@ describe("register(): project-trust gate", () => {
     const proj = await fireBashToolCall(mock, "echo proj", tmpHome);
     assert.equal(proj?.block, true);
     assert.match(proj?.reason ?? "", /no-proj-echo/);
-    assert.equal(infos.length, 0, "no breadcrumb when gate is inert");
+    // The inert fallback must be observable, not silent (old pi).
+    assert.equal(
+      infos.filter((m) => m.includes("trust gate inert")).length,
+      1,
+      `expected one inertness breadcrumb; got: ${JSON.stringify(infos)}`,
+    );
   });
 });

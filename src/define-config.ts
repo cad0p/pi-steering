@@ -225,8 +225,9 @@ type PluginExemptionTargets<P extends readonly Plugin[]> = P extends readonly [
   infer First,
   ...infer Rest,
 ]
-  ? PluginExemptionTargetsOf<First> |
-      (Rest extends readonly Plugin[] ? PluginExemptionTargets<Rest> : never)
+  ?
+      | PluginExemptionTargetsOf<First>
+      | (Rest extends readonly Plugin[] ? PluginExemptionTargets<Rest> : never)
   : never;
 
 /**
@@ -270,13 +271,21 @@ type PluginExemptionTargets<P extends readonly Plugin[]> = P extends readonly [
 export type PluginExemptionsCheck<
   P extends readonly Plugin[],
   R extends readonly Rule[],
-> = PluginExemptionTargets<P> extends AllRuleNames<P, R>
-  ? {} // happy path: zero change
-  : { plugins?: { [K in keyof P]:
-        string extends PluginExemptionTargetsOf<P[K]> ? P[K]
-        : PluginExemptionTargetsOf<P[K]> extends AllRuleNames<P, R> ? P[K]
-        : P[K] & { readonly __steeringExemption:
-            `exemption target '${Exclude<PluginExemptionTargetsOf<P[K]>, AllRuleNames<P, R>>}' not found in this config; install the plugin that ships it` } } };
+> =
+  PluginExemptionTargets<P> extends AllRuleNames<P, R>
+    ? // biome-ignore lint/complexity/noBannedTypes: the empty object type is the deliberate "zero change" happy path.
+      {} // happy path: zero change
+    : {
+        plugins?: {
+          [K in keyof P]: string extends PluginExemptionTargetsOf<P[K]>
+            ? P[K]
+            : PluginExemptionTargetsOf<P[K]> extends AllRuleNames<P, R>
+              ? P[K]
+              : P[K] & {
+                  readonly __steeringExemption: `exemption target '${Exclude<PluginExemptionTargetsOf<P[K]>, AllRuleNames<P, R>>}' not found in this config; install the plugin that ships it`;
+                };
+        };
+      };
 
 // ---------------------------------------------------------------------------
 // AllWrites — union of `writes[]` literals across rules + observers.
@@ -446,7 +455,9 @@ export function defineConfig<
     AllObserverNames<P, Inline>,
     AllWrites<P, R, Inline>
   >[] = [],
->(config: DefineConfigInput<P, Inline, R> & PluginExemptionsCheck<P, R>): SteeringConfig {
+>(
+  config: DefineConfigInput<P, Inline, R> & PluginExemptionsCheck<P, R>,
+): SteeringConfig {
   // Runtime work is minimal: copy the supplied config, widening the
   // `readonly` tuple slots back to plain arrays for downstream
   // consumers (loader, evaluator) that don't care about the tuple

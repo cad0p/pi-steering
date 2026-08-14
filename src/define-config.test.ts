@@ -1143,7 +1143,9 @@ describe("defineConfig: plugin-shipped exemption targets (issue #29)", () => {
   it("accepts the napkin plugin when the git plugin is listed (both orders)", () => {
     const cfg = defineConfig({ plugins: [napkinLike, shippedGitPlugin] });
     assert.equal(cfg.plugins?.length, 2);
-    const cfgReversed = defineConfig({ plugins: [shippedGitPlugin, napkinLike] });
+    const cfgReversed = defineConfig({
+      plugins: [shippedGitPlugin, napkinLike],
+    });
     assert.equal(cfgReversed.plugins?.length, 2);
   });
 
@@ -1163,14 +1165,15 @@ describe("defineConfig: plugin-shipped exemption targets (issue #29)", () => {
   // pin the EXACT message union — acceptance #1 requires the message
   // to name the missing rule(s) + the install hint, and pinning the
   // template text here locks it against drift.
-  type _Flagged = PluginExemptionsCheck<
-    readonly [typeof napkinLike],
-    readonly []
-  > extends infer C
-    ? C extends { plugins?: infer PL }
-      ? PL
-      : never
-    : never;
+  type _Flagged =
+    PluginExemptionsCheck<
+      readonly [typeof napkinLike],
+      readonly []
+    > extends infer C
+      ? C extends { plugins?: infer PL }
+        ? PL
+        : never
+      : never;
   type _FlaggedMsg = _Flagged extends readonly (infer E)[]
     ? E extends { __steeringExemption: infer M }
       ? M
@@ -1184,14 +1187,15 @@ describe("defineConfig: plugin-shipped exemption targets (issue #29)", () => {
   const _pinMsg: _Pin = true;
   void _pinMsg;
 
-  type _FlaggedPartial = PluginExemptionsCheck<
-    readonly [typeof napkinPartial],
-    readonly []
-  > extends infer C
-    ? C extends { plugins?: infer PL }
-      ? PL
-      : never
-    : never;
+  type _FlaggedPartial =
+    PluginExemptionsCheck<
+      readonly [typeof napkinPartial],
+      readonly []
+    > extends infer C
+      ? C extends { plugins?: infer PL }
+        ? PL
+        : never
+      : never;
   type _FlaggedPartialMsg = _FlaggedPartial extends readonly (infer E)[]
     ? E extends { __steeringExemption: infer M }
       ? M
@@ -1208,6 +1212,7 @@ describe("defineConfig: plugin-shipped exemption targets (issue #29)", () => {
   // at `{}` — zero change to the config parameter type.
   const _pinHappy: Equal<
     PluginExemptionsCheck<readonly [typeof shippedGitPlugin], readonly []>,
+    // biome-ignore lint/complexity/noBannedTypes: `{}` is the deliberate happy-path result (zero change).
     {}
   > = true;
   void _pinHappy;
@@ -1249,14 +1254,15 @@ describe("defineConfig: plugin-shipped exemption targets (issue #29)", () => {
     // Per-element isolation: BOTH tuple positions carry their own
     // `__steeringExemption` message (element 1 names napkin's two
     // targets; element 2 names just its own).
-    type _TwoFlagged = PluginExemptionsCheck<
-      readonly [typeof napkinLike, typeof napkinPartial],
-      readonly []
-    > extends infer C
-      ? C extends { plugins?: infer PL }
-        ? PL
-        : never
-      : never;
+    type _TwoFlagged =
+      PluginExemptionsCheck<
+        readonly [typeof napkinLike, typeof napkinPartial],
+        readonly []
+      > extends infer C
+        ? C extends { plugins?: infer PL }
+          ? PL
+          : never
+        : never;
     type _TwoMsgs = _TwoFlagged extends readonly [infer E1, infer E2]
       ? [
           E1 extends { __steeringExemption: infer M1 } ? M1 : never,
@@ -1266,8 +1272,10 @@ describe("defineConfig: plugin-shipped exemption targets (issue #29)", () => {
     type _PinTwo = Equal<
       _TwoMsgs,
       [
-        | "exemption target 'no-main-commit' not found in this config; install the plugin that ships it"
-        | "exemption target 'no-main-commit-github' not found in this config; install the plugin that ships it",
+        (
+          | "exemption target 'no-main-commit' not found in this config; install the plugin that ships it"
+          | "exemption target 'no-main-commit-github' not found in this config; install the plugin that ships it"
+        ),
         "exemption target 'no-such-rule' not found in this config; install the plugin that ships it",
       ]
     >;

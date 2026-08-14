@@ -5,6 +5,10 @@ packages:
 minimumReleaseAgeExclude:
   - '@cad0p/unbash-walker'
   - '@cad0p/pi-steering'
+  # Weekly upstream drift check (drift-check.yml) must always be able
+  # to pick up a fresh pi publish (<24h old) without pnpm 11's
+  # release-age guard blocking it.
+  - '@earendil-works/pi-coding-agent'
 # Build-script approval for the @earendil-works/pi-coding-agent peer graph
 # (mirrors pi-napkin's workspace file): genai's postinstall is needed for
 # its JS runtime; protobufjs works without its postinstall.

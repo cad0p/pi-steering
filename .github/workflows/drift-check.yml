@@ -1,0 +1,76 @@
+name: Weekly Upstream Drift Check
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with: { version: 11 }
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: pnpm }
+      - name: Bump pi to latest
+        run: pnpm up @earendil-works/pi-coding-agent
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Run drift checks
+        id: check
+        run: bash .github/scripts/drift-check.sh
+      - name: Report (PR or drift issue)
+        # Only reacts to the drift-check step itself: a `skipped`/
+        # `cancelled` outcome means an upstream step (bump/install) failed
+        # or the run was cancelled — an infra problem, not drift — the
+        # failing step already failed the job loudly and we file nothing
+        # (D6). The `failure` branch below is the ONLY place this step
+        # may exit 1.
+        if: always() && (steps.check.outcome == 'success' || steps.check.outcome == 'failure')
+        run: |
+          set -euo pipefail
+          NEW=$(node -p "require('./node_modules/@earendil-works/pi-coding-agent/package.json').version")
+          if [ "${{ steps.check.outcome }}" = "success" ]; then
+            if git diff --quiet -- pnpm-lock.yaml; then
+              echo "pi already latest ($NEW); suite green — no PR needed"
+            else
+              git checkout -b chore/pi-drift-bump 2>/dev/null || git checkout chore/pi-drift-bump
+              git add pnpm-lock.yaml
+              git -c user.name='pi-steering drift check' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore: bump @earendil-works/pi-coding-agent to $NEW (weekly drift check)"
+              git push -f origin chore/pi-drift-bump
+              # Exactly one live bump PR at a time: close any stale open
+              # PR from this branch before creating the fresh one.
+              for n in $(gh pr list --head chore/pi-drift-bump --state open --json number --jq '.[].number'); do gh pr close "$n" --comment "Superseded by this week's drift check"; done
+              gh pr create --base main --head chore/pi-drift-bump --title "chore: bump @earendil-works/pi-coding-agent to $NEW (weekly drift check)" --body "$(cat .drift-summary.md)"
+            fi
+          else
+            # Loud-failure contract: a failed run files (or comments on
+            # the existing open) [drift] issue. Dedupe by open-title
+            # search so repeated drift weeks comment instead of stacking
+            # duplicate issues. The body is built in a file so the block
+            # scalar's leading whitespace can't leak into the rendered
+            # markdown (4-space indents would render the summary as a
+            # code block).
+            if [ ! -f .drift-summary.md ]; then
+              echo "drift-check failed without a summary file — see the run log" >&2
+              exit 1
+            fi
+            {
+              echo "Weekly drift check FAILED against pi $NEW."
+              echo
+              cat .drift-summary.md
+              echo
+              echo "See run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            } > .drift-issue.md
+            EXISTING=$(gh issue list --state open --search 'in:title "[drift]"' --json number --jq '.[0].number // empty')
+            if [ -n "$EXISTING" ]; then
+              gh issue comment "$EXISTING" --body-file .drift-issue.md
+            else
+              gh issue create --title "[drift] pi $NEW breaks pi-steering's trust gate or bridge API" --body-file .drift-issue.md
+            fi
+            exit 1
+          fi

@@ -14,7 +14,11 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { DefaultPluginName, DefaultRuleName } from "./define-config.ts";
+import type {
+  DefaultPluginName,
+  DefaultRuleName,
+  PluginExemptionsCheck,
+} from "./define-config.ts";
 import { defineConfig } from "./define-config.ts";
 import shippedGitPlugin from "./plugins/git/index.ts";
 import type { Observer, Plugin, PredicateContext } from "./schema.ts";
@@ -1078,5 +1082,220 @@ describe("defineConfig: exemption typing + runtime copy", () => {
       ],
     });
     assert.equal(cfg.exemptions?.length, 6);
+  });
+});
+
+// Issue #29 fixtures — mirror @cad0p/pi-napkin/steering: a plugin whose
+// shipped exemptions target rules shipped by the git plugin
+// (no-main-commit / no-main-commit-github, see src/plugins/git/rules.ts).
+const napkinLike = {
+  name: "napkin",
+  exemptions: [
+    { rule: "no-main-commit", when: { cwd: "/vault/" } },
+    { rule: "no-main-commit-github", when: { cwd: "/vault/" } },
+  ],
+} as const satisfies Plugin;
+
+const napkinPartial = {
+  name: "napkin-partial",
+  exemptions: [{ rule: "no-such-rule", when: { cwd: "/vault/" } }],
+} as const satisfies Plugin;
+
+const napkinDefault = {
+  name: "napkin-default",
+  exemptions: [{ rule: "no-force-push", when: { cwd: "/vault/" } }],
+} as const satisfies Plugin;
+
+const napkinSelf = {
+  name: "napkin-self",
+  rules: [
+    {
+      name: "self-rule",
+      tool: "bash",
+      field: "command",
+      pattern: /./,
+      reason: "r",
+    },
+  ],
+  exemptions: [{ rule: "self-rule", when: { cwd: "/vault/" } }],
+} as const satisfies Plugin;
+
+const napkinInlineTarget = {
+  name: "napkin-inline-target",
+  exemptions: [{ rule: "user-inline-rule", when: { cwd: "/vault/" } }],
+} as const satisfies Plugin;
+
+describe("defineConfig: plugin-shipped exemption targets (issue #29)", () => {
+  it("rejects a plugin whose exemption targets are shipped by an unlisted plugin (napkin alone)", () => {
+    // napkin's carve-outs target the git plugin's rules; without git in
+    // the plugins tuple the targets are orphans — failure moves from a
+    // session-start `exemption-orphan` warning to compile time, on the
+    // offending plugin element's own line.
+    const cfg = defineConfig({
+      plugins: [
+        // @ts-expect-error — napkin's exemption targets (no-main-commit, no-main-commit-github) are shipped by the git plugin, which isn't listed here.
+        napkinLike,
+      ],
+    });
+    assert.equal(cfg.plugins?.length, 1);
+  });
+
+  it("accepts the napkin plugin when the git plugin is listed (both orders)", () => {
+    const cfg = defineConfig({ plugins: [napkinLike, shippedGitPlugin] });
+    assert.equal(cfg.plugins?.length, 2);
+    const cfgReversed = defineConfig({ plugins: [shippedGitPlugin, napkinLike] });
+    assert.equal(cfgReversed.plugins?.length, 2);
+  });
+
+  it("rejects a plugin whose exemption target is shipped by nobody, even with git listed", () => {
+    const cfg = defineConfig({
+      plugins: [
+        // @ts-expect-error — "no-such-rule" is shipped by nobody; git's rules don't cover it either.
+        napkinPartial,
+        shippedGitPlugin,
+      ],
+    });
+    assert.equal(cfg.plugins?.length, 2);
+  });
+
+  // Direct type-identity assertions for the failing branch. The
+  // behavioral negatives above only prove "some error fires"; these
+  // pin the EXACT message union — acceptance #1 requires the message
+  // to name the missing rule(s) + the install hint, and pinning the
+  // template text here locks it against drift.
+  type _Flagged = PluginExemptionsCheck<
+    readonly [typeof napkinLike],
+    readonly []
+  > extends infer C
+    ? C extends { plugins?: infer PL }
+      ? PL
+      : never
+    : never;
+  type _FlaggedMsg = _Flagged extends readonly (infer E)[]
+    ? E extends { __steeringExemption: infer M }
+      ? M
+      : never
+    : never;
+  type _Pin = Equal<
+    _FlaggedMsg,
+    | "exemption target 'no-main-commit' not found in this config; install the plugin that ships it"
+    | "exemption target 'no-main-commit-github' not found in this config; install the plugin that ships it"
+  >;
+  const _pinMsg: _Pin = true;
+  void _pinMsg;
+
+  type _FlaggedPartial = PluginExemptionsCheck<
+    readonly [typeof napkinPartial],
+    readonly []
+  > extends infer C
+    ? C extends { plugins?: infer PL }
+      ? PL
+      : never
+    : never;
+  type _FlaggedPartialMsg = _FlaggedPartial extends readonly (infer E)[]
+    ? E extends { __steeringExemption: infer M }
+      ? M
+      : never
+    : never;
+  type _PinPartial = Equal<
+    _FlaggedPartialMsg,
+    "exemption target 'no-such-rule' not found in this config; install the plugin that ships it"
+  >;
+  const _pinPartial: _PinPartial = true;
+  void _pinPartial;
+
+  // Happy path: a plugin shipping NO exemptions (git) leaves the check
+  // at `{}` — zero change to the config parameter type.
+  const _pinHappy: Equal<
+    PluginExemptionsCheck<readonly [typeof shippedGitPlugin], readonly []>,
+    {}
+  > = true;
+  void _pinHappy;
+
+  it("accepts targets that resolve to default, inline, or self-shipped rules", () => {
+    // "no-force-push" is an engine default — always in the universe.
+    const cfgDefault = defineConfig({ plugins: [napkinDefault] });
+    assert.equal(cfgDefault.plugins?.length, 1);
+    // "user-inline-rule" is registered as an inline rule in this config.
+    const cfgInline = defineConfig({
+      plugins: [napkinInlineTarget],
+      rules: [
+        {
+          name: "user-inline-rule",
+          tool: "bash",
+          field: "command",
+          pattern: /./,
+          reason: "r",
+        },
+      ],
+    });
+    assert.equal(cfgInline.plugins?.length, 1);
+    // napkin-self ships BOTH the rule and the exemption targeting it.
+    const cfgSelf = defineConfig({ plugins: [napkinSelf] });
+    assert.equal(cfgSelf.plugins?.length, 1);
+  });
+
+  it("flags EACH offending plugin element when several plugins ship orphan targets", () => {
+    const cfg = defineConfig({
+      plugins: [
+        // @ts-expect-error — napkin's targets need the git plugin listed.
+        napkinLike,
+        // @ts-expect-error — "no-such-rule" is shipped by nobody.
+        napkinPartial,
+      ],
+    });
+    assert.equal(cfg.plugins?.length, 2);
+
+    // Per-element isolation: BOTH tuple positions carry their own
+    // `__steeringExemption` message (element 1 names napkin's two
+    // targets; element 2 names just its own).
+    type _TwoFlagged = PluginExemptionsCheck<
+      readonly [typeof napkinLike, typeof napkinPartial],
+      readonly []
+    > extends infer C
+      ? C extends { plugins?: infer PL }
+        ? PL
+        : never
+      : never;
+    type _TwoMsgs = _TwoFlagged extends readonly [infer E1, infer E2]
+      ? [
+          E1 extends { __steeringExemption: infer M1 } ? M1 : never,
+          E2 extends { __steeringExemption: infer M2 } ? M2 : never,
+        ]
+      : never;
+    type _PinTwo = Equal<
+      _TwoMsgs,
+      [
+        | "exemption target 'no-main-commit' not found in this config; install the plugin that ships it"
+        | "exemption target 'no-main-commit-github' not found in this config; install the plugin that ships it",
+        "exemption target 'no-such-rule' not found in this config; install the plugin that ships it",
+      ]
+    >;
+    const _pinTwo: _PinTwo = true;
+    void _pinTwo;
+  });
+
+  it("skips plugins annotated `: Plugin` (widened rule — can't verify, never false-positive)", () => {
+    // The bare annotation widens `exemptions[].rule` to `string`, so
+    // the check can't verify the target — it skips instead of
+    // flagging. Runtime `exemption-orphan` backstop still covers these.
+    const widened: Plugin = {
+      name: "widened",
+      exemptions: [{ rule: "no-such-rule-anywhere", when: { cwd: "/vault/" } }],
+    };
+    const cfg = defineConfig({ plugins: [widened] });
+    assert.equal(cfg.plugins?.length, 1);
+  });
+
+  it("keeps disabledPlugins consistent: disabling a LISTED plugin doesn't orphan its rules' targets", () => {
+    // git stays in the plugins tuple, so its rules stay in the
+    // rule-name universe (and in the runtime merged universe — a
+    // disabled plugin still contributes its rules/exemptions there).
+    // No orphan, no false positive.
+    const cfg = defineConfig({
+      plugins: [napkinLike, shippedGitPlugin],
+      disabledPlugins: ["git"],
+    });
+    assert.equal(cfg.plugins?.length, 2);
   });
 });

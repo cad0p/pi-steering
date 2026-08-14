@@ -222,12 +222,22 @@ describe("fidelity: hasTrustRequiringProjectResourcesMirror vs pi's real one", (
     assertResourcesParity(proj, true, ".pi/skills/");
   });
 
-  it("ancestor .agents/skills -> true", () => {
-    // Project at <home>/proj with <home>/proj/.agents/skills/ — NOT
-    // the excluded $HOME/.agents/skills.
+  it("cwd-level .agents/skills -> true", () => {
+    // Skills dir at the query path itself — NOT the excluded
+    // $HOME/.agents/skills.
     const proj = newProj("ancestor-skills");
     mkdirSync(join(proj, ".agents", "skills"), { recursive: true });
-    assertResourcesParity(proj, true, "ancestor .agents/skills");
+    assertResourcesParity(proj, true, "cwd-level .agents/skills");
+  });
+
+  it("ancestor .agents/skills (parent holds it, query child) -> true", () => {
+    // Pins the parent-loop of the resources walk: the skills dir sits
+    // at an ANCESTOR of the queried cwd.
+    const parent = newProj("ancestor-skills-parent");
+    mkdirSync(join(parent, ".agents", "skills"), { recursive: true });
+    const child = join(parent, "child");
+    mkdirSync(child, { recursive: true });
+    assertResourcesParity(child, true, "ancestor .agents/skills");
   });
 
   it("$HOME/.agents/skills own -> false (excluded)", () => {
@@ -288,6 +298,16 @@ describe("fidelity: trustStoreGetMirror vs pi's ProjectTrustStore.get", () => {
     const proj = newProj("store-null");
     writeTrustStore({ [proj]: null });
     assertStoreParity(proj, null, "null entry");
+  });
+
+  it("null skipped: parent true + child null, query child -> true", () => {
+    // Pins the null-skip semantics: a null entry must NOT stop the
+    // ancestor walk, otherwise this row would return null.
+    const parent = newProj("store-nullskip");
+    const child = join(parent, "child");
+    mkdirSync(child, { recursive: true });
+    writeTrustStore({ [parent]: true, [child]: null });
+    assertStoreParity(child, true, "null-skip");
   });
 
   it("parent-walk: entry at parent dir, query child -> parent's value", () => {

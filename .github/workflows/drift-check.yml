@@ -24,7 +24,13 @@ jobs:
         id: check
         run: bash .github/scripts/drift-check.sh
       - name: Report (PR or drift issue)
-        if: always()
+        # Only reacts to the drift-check step itself: a `skipped`/
+        # `cancelled` outcome means an upstream step (bump/install) failed
+        # or the run was cancelled — an infra problem, not drift — the
+        # failing step already failed the job loudly and we file nothing
+        # (D6). The `failure` branch below is the ONLY place this step
+        # may exit 1.
+        if: always() && (steps.check.outcome == 'success' || steps.check.outcome == 'failure')
         run: |
           set -euo pipefail
           NEW=$(node -p "require('./node_modules/@earendil-works/pi-coding-agent/package.json').version")
@@ -45,11 +51,14 @@ jobs:
             # Loud-failure contract: a failed run files (or comments on
             # the existing open) [drift] issue. Dedupe by open-title
             # search so repeated drift weeks comment instead of stacking
-            # duplicate issues. This step is the ONLY one allowed to
-            # exit 1 — script failures surface as the `check` failure.
-            # The body is built in a file so the block scalar's leading
-            # whitespace can't leak into the rendered markdown (4-space
-            # indents would render the summary as a code block).
+            # duplicate issues. The body is built in a file so the block
+            # scalar's leading whitespace can't leak into the rendered
+            # markdown (4-space indents would render the summary as a
+            # code block).
+            if [ ! -f .drift-summary.md ]; then
+              echo "drift-check failed without a summary file — see the run log" >&2
+              exit 1
+            fi
             {
               echo "Weekly drift check FAILED against pi $NEW."
               echo

@@ -31,6 +31,11 @@ jobs:
         # (D6). The `failure` branch below is the ONLY place this step
         # may exit 1.
         if: always() && (steps.check.outcome == 'success' || steps.check.outcome == 'failure')
+        env:
+          # gh does not auto-detect GITHUB_TOKEN inside Actions; without
+          # this the Report step dies with "set the GH_TOKEN environment
+          # variable" (exit 4) and drift/bump notifications never fire.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           NEW=$(node -p "require('./node_modules/@earendil-works/pi-coding-agent/package.json').version")

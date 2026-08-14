@@ -14,7 +14,10 @@
  *     effective plugins / rules / observers / disables. The project
  *     layer is gated on pi's project-trust formula (mirrored here,
  *     non-UI: trust.json / no trust-requiring resources → trusted);
- *     the global layer always loads.
+ *     the global layer always loads. The mirror is cross-checked
+ *     against pi's real trust machinery by a live-oracle fidelity
+ *     test + a weekly upstream drift workflow that files `[drift]`
+ *     issues on any mismatch (see the mirror section below).
  *
  * Exit codes:
  *   0 - success

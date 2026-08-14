@@ -42,6 +42,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] — pre-publish (v0.1.x)
 
+### Added
+
+- Mirror-fidelity test cross-checking the CLI trust mirror against pi's real `trust-manager` (always-on in CI); weekly upstream drift workflow — bumps pi, runs the full suite, auto-files `[drift]` issues on mismatch ([#42](https://github.com/cad0p/pi-steering/issues/42)).
+
 ### Changed
 
 - Monorepo split (2026-08-10): this repo is now `cad0p/pi-steering` (renamed from `pi-steering-hooks`); `unbash-walker`, `pi-steering-commit-format`, and `pi-steering-flags` moved to their own repos. The git plugin is now **opt-in** — `DEFAULT_PLUGINS` is empty; declare `plugins: [gitPlugin]` (import from `pi-steering/plugins/git`) to register it. This restores compile-time typo-checking on `disabledRules` / `disabledPlugins` for configs that declare their plugins (runtime defaults and type-level visibility can no longer diverge).

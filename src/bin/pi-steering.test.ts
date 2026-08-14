@@ -914,6 +914,55 @@ describe("pi-steering list: diagnostics on stderr", () => {
     );
   });
 
+  it("a plugin-shipped orphan exemption exits 1 with an error-class stderr line", async () => {
+    // Severity split at CLI level: a plugin explicitly shipping a
+    // carve-out targeting a rule missing from the merged universe is
+    // error-class — the full orphan list is printed inline, then the
+    // CLI exits 1 (CI-grep audience).
+    writeSteeringDirConfig(
+      scratch,
+      `export default {
+				plugins: [
+					{
+						name: "napkin",
+						exemptions: [
+							{ rule: "no-such-rule", when: { cwd: /\\/vault\\// } },
+						],
+					},
+				],
+			};`,
+    );
+    const r = await runCli({ cwd: scratch }, "list");
+    assert.equal(r.code, 1);
+    assert.match(
+      r.stderr,
+      /\[pi-steering\] \[error\] exemption for rule "no-such-rule" \(plugin "napkin"\)/,
+      `expected plugin-shipped orphan as error-class on stderr; got: ${r.stderr}`,
+    );
+  });
+
+  it("a config-written orphan exemption stays warning-class: exit 0 + warning line", async () => {
+    // Config-written orphans keep the fail-soft path — the CLI prints
+    // the warning line but exits 0, mirroring the warning-only stream
+    // contract above. Pins the plugin/config severity split end-to-end
+    // at CLI level.
+    writeSteeringDirConfig(
+      scratch,
+      `export default {
+				exemptions: [
+					{ rule: "no-such-rule", when: { cwd: /\\/vault\\// } },
+				],
+			};`,
+    );
+    const r = await runCli({ cwd: scratch }, "list");
+    assert.equal(r.code, 0);
+    assert.match(
+      r.stderr,
+      /\[pi-steering\] \[warning\] exemption for rule "no-such-rule" \(config\)/,
+      `expected config-written orphan as warning-class on stderr; got: ${r.stderr}`,
+    );
+  });
+
   it("flags a malformed user-config rule name with an invalid-name diagnostic and exits 1", async () => {
     // User-config rule names are validated only at session-start build time
     // (via the evaluator's build-time throw). Without this CLI pass,

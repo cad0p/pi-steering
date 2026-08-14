@@ -942,6 +942,12 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
   });
 
   it("flags plugin exemptions too (plugin bucket)", () => {
+    // Plugin-shipped orphans are ERROR-class: a plugin explicitly
+    // shipping a carve-out targeting a rule missing from the merged
+    // universe is a broken plugin/config contract and must fail every
+    // surface (runtime always throws, CLI exits 1, loadHarness
+    // short-circuits). Message text is byte-identical to the
+    // config-bucket variant.
     const plugin: Plugin = {
       name: "napkin",
       exemptions: [{ rule: "no-such-rule", when: { cwd: "/v/" } }],
@@ -953,6 +959,62 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
     );
     const d = diagnostics.find((d) => d.kind === "exemption-orphan");
     assert.ok(d, "expected exemption-orphan diagnostic");
+    assert.equal(d?.type, "error");
     assert.match(d!.message, /\(plugin "napkin"\)/);
+  });
+
+  it("both severities coexist in one pipeline run (config → warning, plugin → error)", () => {
+    // The severity split is per-bucket, not per-run: a config-written
+    // orphan stays fail-soft (warning) while a plugin-shipped orphan
+    // in the same layers hard-errors — exactly two exemption-orphan
+    // diagnostics, one of each type.
+    const plugin: Plugin = {
+      name: "napkin",
+      exemptions: [{ rule: "no-such-plugin", when: { cwd: "/v/" } }],
+    };
+    const layers: SteeringConfig[] = [
+      {
+        plugins: [plugin],
+        exemptions: [{ rule: "no-such-config", when: { cwd: "/v/" } }],
+      },
+    ];
+    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    const orphans = diagnostics.filter((d) => d.kind === "exemption-orphan");
+    assert.equal(orphans.length, 2);
+    const configOrphan = orphans.find((d) => /\(config\)/.test(d.message));
+    const pluginOrphan = orphans.find((d) =>
+      /\(plugin "napkin"\)/.test(d.message),
+    );
+    assert.ok(configOrphan, "expected the config-bucket orphan");
+    assert.ok(pluginOrphan, "expected the plugin-bucket orphan");
+    assert.equal(configOrphan.type, "warning");
+    assert.equal(pluginOrphan.type, "error");
+  });
+
+  it("does NOT flag a plugin-shipped exemption targeting a rule shipped only by a DISABLED plugin (inert, silent)", () => {
+    // Plugin-bucket counterpart of the config-bucket disabled-plugin
+    // test: the universe includes disabled plugins' rules, so even a
+    // plugin-shipped exemption targeting a disabled-plugin-only rule
+    // is inert, silent, and NOT orphaned — the severity split must
+    // not make by-design disables loud.
+    const exemptingPlugin: Plugin = {
+      name: "napkin",
+      exemptions: [{ rule: "no-main-commit", when: { cwd: "/v/" } }],
+    };
+    const shippingPlugin: Plugin = {
+      name: "git",
+      rules: [mkRule("no-main-commit")],
+    };
+    const layers: SteeringConfig[] = [
+      {
+        plugins: [exemptingPlugin, shippingPlugin],
+        disabledPlugins: ["git"],
+      },
+    ];
+    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    assert.equal(
+      diagnostics.some((d) => d.kind === "exemption-orphan"),
+      false,
+    );
   });
 });

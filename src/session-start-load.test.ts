@@ -465,6 +465,36 @@ describe("session_start: throws on diagnostics", () => {
     );
   });
 
+  it("throws on plugin-shipped exemption-orphan even with failOnWarnings: false (error-class)", async () => {
+    // The severity split: a plugin explicitly shipping a carve-out
+    // that targets a rule missing from the merged universe is
+    // error-class, so the runtime ALWAYS throws — `failOnWarnings`
+    // only softens warning-class diagnostics. The fail-soft
+    // console.warn path applies solely to config-written orphans
+    // (pinned by the two tests above).
+    writeSteeringSingleFileConfig(
+      tmpHome,
+      `export default {
+				disableDefaults: true,
+				failOnWarnings: false,
+				plugins: [
+					{
+						name: "napkin",
+						exemptions: [
+							{ rule: "no-such-rule", when: { cwd: "/vault/" } },
+						],
+					},
+				],
+			};`,
+    );
+    const mock = makeMockPi();
+    await register(mock.api as ExtensionAPI);
+    await expectSessionStartThrow(mock, tmpHome, [
+      /\[error\]/,
+      /exemption for rule "no-such-rule" \(plugin "napkin"\)/,
+    ]);
+  });
+
   it("throws on rule-collision", async () => {
     writeSteeringSingleFileConfig(
       tmpHome,

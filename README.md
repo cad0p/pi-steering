@@ -18,7 +18,7 @@ Use it when:
 pi install npm:@cad0p/pi-steering
 ```
 
-Requires **Node `>=22.19.0`** (see `package.json#engines`; the same floor as pi itself). Configs are loaded and transpiled by the bundled [jiti](https://github.com/unjs/jiti) runtime — no `tsx` / `ts-node` needed.
+Requires **Node `>=22.19.0`** (see `package.json#engines`; the same floor as pi itself). The project-layer trust gate (see [Security](#security)) needs **pi `>=0.79.1`** — the release that added `ctx.isProjectTrusted()` (peer floor in `package.json#peerDependencies`). On older pi the gate is inert (project layer loads as before) with a `console.info` breadcrumb at session start. Configs are loaded and transpiled by the bundled [jiti](https://github.com/unjs/jiti) runtime — no `tsx` / `ts-node` needed.
 
 ### Local install (during the PoC)
 
@@ -890,6 +890,10 @@ One-shot CLI contexts (`pi config`, `pi list`) never fire `session_start`, so th
 Implication: running pi inside a directory hierarchy whose steering configs you don't trust is equivalent to running `node -e '…'` with that same file. Symlinked config directories are followed — a symlinked `.pi/steering/` landing in an unexpected directory executes as if it had been placed there directly.
 
 Only run pi in directory hierarchies whose steering configs you trust.
+
+### Project trust gate
+
+The project layer loads **only when the project is trusted** — pi-steering adopts pi's RESOLVED project-trust decision rather than asking its own question. Trusted means: the directory has no trust-requiring pi resources, or pi's trust store (`<agentDir>/trust.json`, `~/.pi/agent/trust.json`) holds a `true` entry for it (or an ancestor) — resolved via pi's startup trust prompt, `pi --project-trust-override`, or the trust store. Untrusted projects skip the project layer with an info-class breadcrumb (`[pi-steering] [info] …project layer skipped`); the **global layer always loads**, so global steering keeps working in untrusted trees. Steering-only projects (no `.pi/settings.json`, `.pi/extensions`, …) are **never gated** — pi auto-trusts them, so the gate is inert there. The approval path is pi's own trust flow (prompt / store / override); pi-steering never prompts, never writes trust.json, and never resolves trust itself. `pi-steering list` mirrors the same non-UI formula and reports `projectLayerTrusted` in its JSON output.
 
 ### Plugin trust
 

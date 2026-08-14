@@ -173,11 +173,18 @@ export interface CustomEntry {
  * tests that want cross-handler `findEntries` visibility pass
  * `host.entries` (from {@link makeTrackedHost}) here so the host's
  * `appendEntry` writes show up on subsequent reads.
+ *
+ * Optional `projectTrusted`: when provided, `isProjectTrusted()` is
+ * attached returning that value (drives the bridge's project-layer
+ * trust gate); when absent the method is absent, so the bridge's
+ * `ctx.isProjectTrusted?.() ?? true` fallback path (gate inert) is
+ * exercised.
  */
 export function makeCtx(
   cwd: string,
   entries: ReadonlyArray<CustomEntry> = [],
   notify?: NotifyRecorder,
+  projectTrusted?: boolean,
 ): ExtensionContext {
   return {
     cwd,
@@ -199,6 +206,11 @@ export function makeCtx(
             },
           },
         }
+      : {}),
+    // Only attach `isProjectTrusted` when a decision is provided —
+    // absence exercises the bridge's `?.() ?? true` fallback.
+    ...(projectTrusted !== undefined
+      ? { isProjectTrusted: () => projectTrusted }
       : {}),
   } as ExtensionContext;
 }
@@ -237,17 +249,23 @@ export interface SessionStartMock {
  * (the lazy design builds the runtime inside the handler, so the
  * promise must settle before firing tool calls). Pass an optional
  * {@link NotifyRecorder} to capture `ui.notify` calls from the
- * strict-mode error surface.
+ * strict-mode error surface, and an optional `projectTrusted` to
+ * drive the bridge's project-layer trust gate (absent → `makeCtx`
+ * leaves `isProjectTrusted` off, exercising the fallback).
  */
 export async function fireSessionStart(
   mock: SessionStartMock,
   cwd: string,
   reason = "startup",
   notify?: NotifyRecorder,
+  projectTrusted?: boolean,
 ): Promise<void> {
   const h = mock.handlers.session_start;
   if (!h) throw new Error("session_start handler not registered");
-  await h({ type: "session_start", reason }, makeCtx(cwd, [], notify));
+  await h(
+    { type: "session_start", reason },
+    makeCtx(cwd, [], notify, projectTrusted),
+  );
 }
 
 // ---------------------------------------------------------------------------

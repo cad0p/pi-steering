@@ -773,6 +773,116 @@ describe("loader: loadConfigs", () => {
 });
 
 // ---------------------------------------------------------------------------
+// loadConfigs — project-layer trust gate
+// ---------------------------------------------------------------------------
+
+describe("loader: project-layer trust gate", () => {
+  let tmp: string;
+  useIsolatedHome("pi-steering-v2-trustgate-", (t) => {
+    tmp = t;
+  });
+
+  it("skips the project layer with an info diagnostic when untrusted and a project config exists", async () => {
+    const proj = join(tmp, "proj");
+    mkdirSync(proj, { recursive: true });
+    writeConfig(
+      join(proj, ".pi", "steering.ts"),
+      configModule("{ disabledRules: ['project'] }"),
+    );
+    writeConfig(
+      join(tmp, ".pi", "agent", "steering", "index.ts"),
+      configModule("{ disabledRules: ['global'] }"),
+    );
+    const { layers, diagnostics } = await loadConfigs(proj, {
+      projectLayerTrusted: false,
+    });
+    // Global layer only — the project layer was skipped entirely.
+    assert.deepEqual(
+      layers.map((l) => l.disabledRules?.[0]),
+      ["global"],
+    );
+    // Exactly one info-class diagnostic, shape-pinned.
+    assert.deepEqual(diagnostics, [
+      {
+        type: "info",
+        kind: "layer-project-untrusted",
+        path: join(proj, ".pi", "steering"),
+        message:
+          "project layer skipped (project untrusted); global layer still applies",
+      },
+    ]);
+  });
+
+  it("emits NO diagnostic when untrusted and no project config exists", async () => {
+    // No .pi/steering dir → no breadcrumb (E2E "no .pi/steering dir →
+    // no prompt" analog): an untrusted project without a config
+    // candidate produces zero noise.
+    const cwd = join(tmp, "empty");
+    mkdirSync(cwd, { recursive: true });
+    const { layers, diagnostics } = await loadConfigs(cwd, {
+      projectLayerTrusted: false,
+    });
+    assert.deepEqual(layers, []);
+    assert.deepEqual(diagnostics, []);
+  });
+
+  it("does not crash on a deleted cwd under the gate", async () => {
+    // The gate probes via existsSync only (findConfigFile), so a
+    // deleted cwd yields file: null and no diagnostic — same
+    // existsSync-safety as the ungated path.
+    const gone = join(tmp, "gone");
+    mkdirSync(gone, { recursive: true });
+    rmSync(gone, { recursive: true, force: true });
+    const { layers, diagnostics } = await loadConfigs(gone, {
+      projectLayerTrusted: false,
+    });
+    assert.deepEqual(layers, []);
+    assert.deepEqual(diagnostics, []);
+  });
+
+  it("trusted (true) and omitted behave byte-identically to today", async () => {
+    const proj = join(tmp, "proj");
+    mkdirSync(proj, { recursive: true });
+    writeConfig(
+      join(proj, ".pi", "steering.ts"),
+      configModule("{ disabledRules: ['project'] }"),
+    );
+    writeConfig(
+      join(tmp, ".pi", "agent", "steering", "index.ts"),
+      configModule("{ disabledRules: ['global'] }"),
+    );
+    const baseline = await loadConfigs(proj);
+    const explicitTrusted = await loadConfigs(proj, {
+      projectLayerTrusted: true,
+    });
+    assert.deepEqual(explicitTrusted, baseline);
+    // Gate inert: both project and global layers present, no info
+    // diagnostic.
+    assert.deepEqual(
+      baseline.layers.map((l) => l.disabledRules?.[0]),
+      ["project", "global"],
+    );
+    assert.deepEqual(baseline.diagnostics, []);
+  });
+
+  it("loads the global layer even when the project layer is skipped", async () => {
+    const proj = join(tmp, "proj");
+    mkdirSync(proj, { recursive: true });
+    writeConfig(
+      join(proj, ".pi", "steering.ts"),
+      configModule("{ disabledRules: ['project'] }"),
+    );
+    writeConfig(
+      join(tmp, ".pi", "agent", "steering", "index.ts"),
+      configModule("{ disabledRules: ['global'] }"),
+    );
+    const { layers } = await loadConfigs(proj, { projectLayerTrusted: false });
+    assert.equal(layers.length, 1);
+    assert.equal(layers[0]?.disabledRules?.[0], "global");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildConfig — merge semantics
 // ---------------------------------------------------------------------------
 
@@ -1440,6 +1550,34 @@ describe("loader: loadSteeringConfig", () => {
       ),
       `expected an invalid-name diagnostic for the malformed user-config rule; got: ${JSON.stringify(diagnostics)}`,
     );
+  });
+
+  it("forwards projectLayerTrusted opts to the loader (trust-gate parity)", async () => {
+    // Embedder parity (D5): `loadSteeringConfig(cwd, defaults?, opts?)`
+    // must gate the project layer exactly like `loadConfigs` — an
+    // embedder building its own bridge or pre-flight sees the same
+    // diagnostic stream as the production runtime.
+    const proj = join(tmp, "proj");
+    mkdirSync(proj, { recursive: true });
+    writeConfig(
+      join(proj, ".pi", "steering.ts"),
+      configModule("{ disabledRules: ['project'] }"),
+    );
+    writeConfig(
+      join(tmp, ".pi", "agent", "steering", "index.ts"),
+      configModule("{ disabledRules: ['global'] }"),
+    );
+    const { config, diagnostics } = await loadSteeringConfig(proj, undefined, {
+      projectLayerTrusted: false,
+    });
+    // Only the global layer's disabledRules survived the gate.
+    assert.deepEqual(config.disabledRules, ["global"]);
+    const hit = diagnostics.find((d) => d.kind === "layer-project-untrusted");
+    assert.ok(
+      hit,
+      `expected layer-project-untrusted diagnostic; got: ${JSON.stringify(diagnostics)}`,
+    );
+    assert.equal(hit.type, "info");
   });
 });
 

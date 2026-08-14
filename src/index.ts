@@ -35,7 +35,11 @@ import { buildSessionRuntime } from "./internal/session-runtime.ts";
  *                         tool calls it spawns.
  *   - `session_start`   — lazily build the runtime on the first event,
  *                         anchored on the session's `ctx.cwd` (NOT the
- *                         process launch cwd). Build failures surface
+ *                         process launch cwd). The project layer is
+ *                         gated on pi's RESOLVED project-trust decision
+ *                         (`ctx.isProjectTrusted()`, captured before the
+ *                         await; absent → gate inert); the global layer
+ *                         always loads. Build failures surface
  *                         per the strict-mode contract: an aggregate
  *                         diagnostic throw renders the full body via
  *                         `console.error` + an in-chat `ui.notify`
@@ -72,7 +76,22 @@ export default function register(
     if (runtime !== null) return; // safety net; fresh instance per session anyway
     const ui = ctx.ui; // capture BEFORE await (getter asserts active)
     try {
-      runtime = await build(ctx.cwd, host);
+      // Capture pi's resolved project-trust decision BEFORE the await
+      // (same D3 pattern as `ui` — the getter must run against the
+      // live session context). `?.() ?? true` keeps the gate inert
+      // when the API is absent (pi < 0.79.1, test mocks): the project
+      // layer then loads exactly as before. The peer floor is
+      // `>=0.79.1` (the release that added `ctx.isProjectTrusted()`);
+      // the breadcrumb makes the inert fallback observable instead of
+      // silent, so an old-pi install doesn't quietly lose the gate.
+      if (typeof ctx.isProjectTrusted !== "function") {
+        console.info(
+          "[pi-steering] ctx.isProjectTrusted() unavailable (pi >=0.79.1 " +
+            "required) — project-layer trust gate inert; project layer loads",
+        );
+      }
+      const projectLayerTrusted = ctx.isProjectTrusted?.() ?? true;
+      runtime = await build(ctx.cwd, host, { projectLayerTrusted });
     } catch (err) {
       if (
         !(err instanceof Error) ||

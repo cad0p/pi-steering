@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       '@cad0p/unbash-walker':
-        specifier: ^0.1.0-0
+        specifier: 0.1.0-20260816.0
         version: 0.1.0-20260816.0
       '@earendil-works/pi-coding-agent':
         specifier: '>=0.79.1'

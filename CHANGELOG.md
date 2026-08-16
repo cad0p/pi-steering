@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Weekly upstream drift check for the trust gate — mirror-fidelity test + drift workflow ([#42](https://github.com/cad0p/pi-steering/pull/42)) ([#43](https://github.com/cad0p/pi-steering/pull/43))
 - Compile-time detection of orphan plugin exemptions ([#29](https://github.com/cad0p/pi-steering/pull/29)) ([#46](https://github.com/cad0p/pi-steering/pull/46))
 - Escalate plugin-shipped exemption orphans to error-class at merge (closes #48)
+- Resolved-by-default Word.text — predicates validate what executes (closes #51)
 
 ### 🐛 Bug Fixes
 

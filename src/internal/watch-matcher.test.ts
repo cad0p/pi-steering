@@ -43,7 +43,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ObserverWatch, ToolResultEvent } from "../schema.ts";
-import { matchesWatch } from "./watch-matcher.ts";
+import { extractRefTextsForBash, matchesWatch } from "./watch-matcher.ts";
 
 // ---------------------------------------------------------------------------
 // Synthetic-event constructor
@@ -321,6 +321,115 @@ describe("matchesWatch: ground-truth semantics", () => {
         synthesizedSuccessBashEvent("sync"),
       ),
       false,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractRefTextsForBash — env-resolved per-ref text (issue #51)
+// ---------------------------------------------------------------------------
+
+describe("extractRefTextsForBash: env-resolved ref text (issue #51)", () => {
+  function bashResult(command: string): ToolResultEvent {
+    return {
+      toolName: "bash",
+      input: { command },
+      output: [{ type: "text", text: "" }],
+      exitCode: 0,
+    };
+  }
+
+  it("returns null for non-bash events", () => {
+    assert.equal(
+      extractRefTextsForBash({
+        toolName: "read",
+        input: { path: "/x" },
+        output: undefined,
+      }),
+      null,
+    );
+  });
+
+  it("returns null when the command is missing or empty", () => {
+    assert.equal(extractRefTextsForBash(bashResult("")), null);
+  });
+
+  it("static commands render identically to raw refToText", () => {
+    const texts = extractRefTextsForBash(bashResult("git push origin main"));
+    assert.deepEqual(texts, ["git push origin main"]);
+  });
+
+  it("chain-assigned $VAR resolves against the walk's env", () => {
+    const texts = extractRefTextsForBash(
+      bashResult('T="feat: x (closes #12)" && gh pr create --title "$T"'),
+    );
+    assert.ok(texts);
+    // The bare-assignment ref renders as its own (empty) ref; the gh
+    // ref resolves `$T` via the walk's chain env (value-mode).
+    const gh = texts.find((t) => t.startsWith("gh pr create"));
+    assert.equal(gh, "gh pr create --title feat: x (closes #12)");
+  });
+
+  it("process substitution word expands its inner $VAR in the ref text", () => {
+    const texts = extractRefTextsForBash(
+      bashResult(
+        "BODY=/vault/repo/prs/note.md && gh pr create --body-file=<(perl -0777 -pe '<BODY_STRIP>' \"$BODY\")",
+      ),
+    );
+    assert.ok(texts);
+    const gh = texts.find((t) => t.startsWith("gh pr create"));
+    assert.equal(
+      gh,
+      "gh pr create --body-file= <(perl -0777 -pe '<BODY_STRIP>' \"/vault/repo/prs/note.md\")",
+    );
+  });
+
+  it("prefix overlay: same-ref prefix assignments resolve event-side too", () => {
+    // Parity with the evaluator's rule side (shared effectiveEnvForRef):
+    // a same-ref prefix assignment binds for the command's own words on
+    // the watch side as well.
+    const texts = extractRefTextsForBash(
+      bashResult(
+        'BODY=/vault/repo/prs/note.md gh pr create --body-file "$BODY"',
+      ),
+    );
+    assert.ok(texts);
+    const gh = texts.find((t) => t.startsWith("gh pr create"));
+    assert.equal(gh, "gh pr create --body-file /vault/repo/prs/note.md");
+  });
+
+  it("unresolvable vars stay raw (fail-closed)", () => {
+    const texts = extractRefTextsForBash(
+      bashResult('gh pr create --title "$UNDEF"'),
+    );
+    assert.deepEqual(texts, ["gh pr create --title $UNDEF"]);
+  });
+
+  it("wrapper inner refs without walk state fall back to raw refToText", () => {
+    // `sh -c '…'` inner refs come from wrapper expansion, not the
+    // outer AST the walk covers — no walk state → raw fallback
+    // (identical to the evaluator's per-ref fallback).
+    const texts = extractRefTextsForBash(
+      bashResult("sh -c 'BODY=/x && echo \"$BODY\"'"),
+    );
+    assert.ok(texts);
+    const inner = texts.find((t) => t.startsWith("echo"));
+    assert.equal(inner, "echo $BODY", "no walk state → raw refToText");
+  });
+
+  it("matchesWatch inputMatches.command sees the resolved ref text", () => {
+    const event = bashResult(
+      'T="feat: x (closes #12)" && gh pr create --title "$T"',
+    );
+    assert.equal(
+      matchesWatch({ inputMatches: { command: /closes #\d+/ } }, event),
+      true,
+      "watch pattern matches the RESOLVED title (raw '$T' would not)",
+    );
+    assert.equal(
+      matchesWatch({ inputMatches: { command: /--title \$T/ } }, event),
+      false,
+      "watch pattern on the RAW variable no longer matches",
     );
   });
 });

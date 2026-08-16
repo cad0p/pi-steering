@@ -6887,3 +6887,308 @@ describe("buildEvaluator: exemption registry", () => {
     assert.equal(res, undefined);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Resolved-by-default Word.text (issue #51) — predicates validate what executes
+// ---------------------------------------------------------------------------
+
+describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
+  function captureInputRule(seen: PredicateContext[]): Rule {
+    return {
+      name: "peek-resolved",
+      tool: "bash",
+      field: "command",
+      pattern: /./,
+      reason: "peek-resolved",
+      when: {
+        condition: (ctx) => {
+          seen.push(ctx);
+          return false; // never fires; only capture the ctx
+        },
+      },
+    };
+  }
+
+  /** Narrow a captured ctx's input args to the shape the tests read. */
+  function argsOf(
+    seen: PredicateContext[],
+    basename: string,
+  ): ReadonlyArray<{
+    text?: string;
+    value?: string;
+    rawText?: string;
+    parts?: ReadonlyArray<{ type: string; text?: string }>;
+  }> {
+    const input = seen.map((s) => s.input).find((i) => i.basename === basename);
+    assert.ok(input, `expected a ${basename} ref`);
+    return (input.args ?? []) as ReadonlyArray<{
+      text?: string;
+      value?: string;
+      rawText?: string;
+      parts?: ReadonlyArray<{ type: string; text?: string }>;
+    }>;
+  }
+
+  it("acceptance e2e: chain-assigned BODY + process substitution resolve in args", async () => {
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(
+      bashEvent(
+        'BODY=/vault/repo/prs/note.md && gh pr create --title "feat: x (closes #12)" --body-file=<(perl -0777 -pe \'<BODY_STRIP>\' "$BODY")',
+      ),
+      makeCtx("/r"),
+      0,
+    );
+    const args = argsOf(seen, "gh");
+    assert.equal(args.length, 6);
+    // --title: text quote-preserving, value unquoted — both resolved.
+    const title = args[3]!;
+    assert.equal(title.text, '"feat: x (closes #12)"');
+    assert.equal(title.value, "feat: x (closes #12)");
+    // --body-file= is its own word (the process substitution parses
+    // as a separate word) — static, unchanged.
+    assert.equal(args[4]!.text, "--body-file=");
+    assert.equal(args[4]!.value, "--body-file=");
+    // The process-substitution word: inner $BODY expanded, quotes
+    // preserved; value stays the lexical token (fd path unknowable).
+    const ps = args[5]!;
+    assert.equal(
+      ps.text,
+      "<(perl -0777 -pe '<BODY_STRIP>' \"/vault/repo/prs/note.md\")",
+    );
+    assert.equal(ps.value, "<(perl -0777 -pe '<BODY_STRIP>' \"$BODY\")");
+    assert.equal(ps.rawText, "<(perl -0777 -pe '<BODY_STRIP>' \"$BODY\")");
+  });
+
+  it("acceptance e2e: pattern rule fires on the resolved --title value", async () => {
+    // The title is written literally, so the keyword pattern fires on
+    // the resolved command surface (`command` now carries resolved
+    // values — see the chain-assigned variant below for the
+    // resolution-dependent case).
+    const evaluator = buildEvaluator(
+      {
+        rules: [
+          {
+            name: "title-keyword",
+            tool: "bash",
+            field: "command",
+            pattern: "closes #\\d+",
+            reason: "title keyword",
+          },
+        ],
+      },
+      resolve(),
+      makeHost(),
+    );
+    const res = await evaluator.evaluate(
+      bashEvent(
+        'BODY=/vault/repo/prs/note.md && gh pr create --title "feat: x (closes #12)" --body-file=<(perl -0777 -pe \'<BODY_STRIP>\' "$BODY")',
+      ),
+      makeCtx("/r"),
+      0,
+    );
+    assert.ok(res && res.block === true);
+    assert.match(res!.reason!, /\[steering:title-keyword@user\]/);
+  });
+
+  it("rawText exposes the raw source when text is resolved", async () => {
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(
+      bashEvent('BODY=/vault/note.md && echo "$BODY"'),
+      makeCtx("/r"),
+      0,
+    );
+    // `echo` is the ref NAME — the suffix holds just the word.
+    const args = argsOf(seen, "echo");
+    assert.equal(args.length, 1);
+    assert.equal(args[0]!.text, '"/vault/note.md"');
+    assert.equal(args[0]!.value, "/vault/note.md");
+    assert.equal(args[0]!.rawText, '"$BODY"');
+  });
+
+  it("unresolvable words stay raw: text === raw source, value === lexical", async () => {
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(
+      bashEvent(
+        'gh pr create --title "$UNDEF" --body-file="$(cmd)" --body "${X:-d}"',
+      ),
+      makeCtx("/r"),
+      0,
+    );
+    const args = argsOf(seen, "gh");
+    const undef = args[3]!;
+    assert.equal(undef.text, '"$UNDEF"');
+    assert.equal(undef.value, "$UNDEF");
+    const cmdSub = args[4]!;
+    assert.equal(cmdSub.text, '--body-file="$(cmd)"');
+    assert.equal(cmdSub.value, "--body-file=$(cmd)");
+    const modifier = args[6]!;
+    assert.equal(modifier.text, '"${X:-d}"');
+    assert.equal(modifier.value, "${X:-d}");
+  });
+
+  it("~ resolves via seeded HOME (prefix overlay keeps it deterministic)", async () => {
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(
+      bashEvent("HOME=/home/pier gh pr create --body-file ~/note.md"),
+      makeCtx("/r"),
+      0,
+    );
+    const args = argsOf(seen, "gh");
+    assert.equal(args[3]!.text, "/home/pier/note.md");
+    assert.equal(args[3]!.value, "/home/pier/note.md");
+    assert.equal(args[3]!.rawText, "~/note.md");
+  });
+
+  it("prefix overlay: same-ref prefix assignments resolve the ref's words", async () => {
+    // NEW behavior — the walker's env snapshot does NOT include the
+    // ref's own prefix (one-shot scope); the effective env overlays it.
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(
+      bashEvent('BODY=/vault/note.md gh pr create --body-file="$BODY"'),
+      makeCtx("/r"),
+      0,
+    );
+    const args = argsOf(seen, "gh");
+    const bodyFile = args[2]!;
+    assert.equal(bodyFile.text, '--body-file="/vault/note.md"');
+    assert.equal(bodyFile.value, "--body-file=/vault/note.md");
+    assert.equal(bodyFile.rawText, '--body-file="$BODY"');
+  });
+
+  it("unresolvable prefix RHS leaves the var unexpanded (fail-closed)", async () => {
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(
+      bashEvent('BODY=$(cmd) gh pr create --body-file="$BODY"'),
+      makeCtx("/r"),
+      0,
+    );
+    const args = argsOf(seen, "gh");
+    assert.equal(args[2]!.text, '--body-file="$BODY"');
+    assert.equal(args[2]!.value, "--body-file=$BODY");
+  });
+
+  it("command field resolves: pattern fires on a chain-assigned $T title", async () => {
+    // Resolution-dependent: the RAW command text contains `"$T"` —
+    // the keyword pattern `closes #\d+` only matches because `command`
+    // carries the resolved title value.
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      {
+        rules: [
+          {
+            name: "title-keyword-resolved",
+            tool: "bash",
+            field: "command",
+            pattern: "closes #\\d+",
+            reason: "title keyword",
+            when: {
+              condition: (ctx) => {
+                seen.push(ctx);
+                return true;
+              },
+            },
+          },
+        ],
+      },
+      resolve(),
+      makeHost(),
+    );
+    const res = await evaluator.evaluate(
+      bashEvent('T="feat: x (closes #12)" gh pr create --title "$T"'),
+      makeCtx("/r"),
+      0,
+    );
+    assert.ok(res && res.block === true);
+    const ghCtx = seen.find((s) => s.input.basename === "gh");
+    assert.ok(ghCtx, "predicate ran for the gh ref");
+    assert.equal(
+      ghCtx.input.command,
+      "gh pr create --title feat: x (closes #12)",
+    );
+  });
+
+  it("parts stay RAW even when text/value are resolved", async () => {
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(
+      bashEvent('BODY=/vault/note.md && echo "$BODY"'),
+      makeCtx("/r"),
+      0,
+    );
+    const args = argsOf(seen, "echo");
+    assert.equal(args[0]!.text, '"/vault/note.md"', "text resolved");
+    assert.equal(args[0]!.value, "/vault/note.md", "value resolved");
+    // Raw AST parts: a DoubleQuoted part whose source still contains
+    // the unexpanded `$BODY`.
+    assert.equal(args[0]!.parts?.length, 1);
+    assert.equal(args[0]!.parts![0]!.type, "DoubleQuoted");
+    assert.equal(args[0]!.parts![0]!.text, '"$BODY"');
+  });
+
+  it("static words unchanged: existing value ?? text contract holds", async () => {
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(
+      bashEvent("git commit -m 'conventional: subject'"),
+      makeCtx("/r"),
+      0,
+    );
+    const args = argsOf(seen, "git");
+    assert.equal(args[0]!.value ?? args[0]!.text, "commit");
+    assert.equal(args[1]!.value ?? args[1]!.text, "-m");
+    assert.equal(args[2]!.value ?? args[2]!.text, "conventional: subject");
+    assert.equal(args[2]!.rawText, "'conventional: subject'");
+    assert.equal(args[2]!.text, "'conventional: subject'");
+  });
+
+  it("envAssignments stay RAW (A=$VAR verbatim) — unchanged contract", async () => {
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(bashEvent("A=$VAR run-me"), makeCtx("/r"), 0);
+    const input = seen[0]!.input;
+    assert.equal(input.envAssignments!.length, 1);
+    assert.equal(input.envAssignments![0]!.text, "A=$VAR");
+  });
+});

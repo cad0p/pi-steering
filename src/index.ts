@@ -215,6 +215,7 @@ export type {
   PredicateShape,
   PredicateToolInput,
   PredicateVerdict,
+  PredicateWord,
   ReasonFn,
   ReservedPredicateKey,
   Rule,

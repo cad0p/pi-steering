@@ -33,13 +33,15 @@
  */
 
 import {
+  envTracker,
   expandWrapperCommands,
   extractAllCommandsFromAST,
   parse as parseBash,
+  walk,
 } from "@cad0p/unbash-walker";
 import { matchesPattern } from "../evaluator-internals/predicates.ts";
 import type { ObserverWatch, Pattern, ToolResultEvent } from "../schema.ts";
-import { refToText } from "./ref-text.ts";
+import { refToText, refToTextResolved } from "./ref-text.ts";
 
 /**
  * True if the observer's `watch` filter accepts this event. No watch
@@ -152,9 +154,17 @@ function matchesInputField(
  * Returns `null` when the event isn't a bash tool_result, the raw
  * command is missing/non-string, or the walker throws while parsing
  * (hard-to-parse command — fall back to raw-only matching without
- * blowing up dispatch). Unlike the evaluator we don't walk trackers:
- * observers don't receive `walkerState`, so the parse+extract+expand
- * stages suffice.
+ * blowing up dispatch).
+ *
+ * Resolution: after parse+extract+expand, the command is walked with
+ * the ENV tracker only (no sessionCwd / plugin-composed trackers
+ * exist on this path; cwd is irrelevant for word resolution —
+ * `envTracker.initial` seeds `process.env`) and each ref is rendered
+ * through {@link refToTextResolved}, mirroring the evaluator's
+ * `command` surface so observer watch patterns match the same
+ * resolved strings rule patterns see for the same command
+ * (issue #51). Refs without walk state (e.g. process-substitution
+ * inners) fall back to raw {@link refToText}.
  *
  * Exported so the production dispatcher can memoize the parse across
  * observers on the same event (see `dispatchEventInner`'s
@@ -176,7 +186,11 @@ export function extractRefTextsForBash(
     const script = parseBash(command);
     const extracted = extractAllCommandsFromAST(script, command);
     const { commands: refs } = expandWrapperCommands(extracted);
-    return refs.map(refToText);
+    const walkResult = walk(script, {}, { env: envTracker }, refs);
+    return refs.map((ref) => {
+      const env = walkResult.get(ref)?.env;
+      return env !== undefined ? refToTextResolved(ref, env) : refToText(ref);
+    });
   } catch {
     // Don't let a parse error take down dispatch — a malformed
     // command still deserves a raw-match chance. Returning null

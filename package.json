@@ -73,7 +73,7 @@
 	"dependencies": {
 		"jiti": "^2.7.0",
 		"unbash": "^3.0.0",
-		"@cad0p/unbash-walker": "^0.1.0"
+		"@cad0p/unbash-walker": "^0.1.0-0"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": ">=0.79.1"

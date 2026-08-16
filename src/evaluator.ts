@@ -53,6 +53,7 @@ import {
   getBasename,
   type Modifier,
   parse as parseBash,
+  resolveWord,
   type Tracker,
   type Word,
   walk,
@@ -83,7 +84,10 @@ import {
   synthesizeSpeculativeEntries,
 } from "./evaluator-internals/speculative-synthesis.ts";
 import { mergeObserversUserFirst } from "./internal/merge-observers.ts";
-import { refToText } from "./internal/ref-text.ts";
+import {
+  refToTextResolved,
+  resolvePredicateWords,
+} from "./internal/ref-text.ts";
 import type { ResolvedPluginState } from "./plugin-merger.ts";
 import { validateName } from "./plugin-merger.ts";
 import type {
@@ -91,6 +95,7 @@ import type {
   Observer,
   PredicateContext,
   PredicateToolInput,
+  PredicateWord,
   Rule,
   SteeringConfig,
   TopLevelWhenClause,
@@ -430,8 +435,10 @@ function composeBuiltin<T>(
 
 /**
  * Walker-state snapshot per extracted bash command ref plus the
- * stringified `basename + args` text for regex testing, the basename
- * sugar, and the suffix `Word[]` for quote-aware structured access.
+ * stringified `basename + args` text for regex testing (ENV-RESOLVED
+ * per issue #51 — patterns match what executes), the basename
+ * sugar, and the suffix `PredicateWord[]` for quote-aware structured
+ * access (text/value resolved, rawText the source, parts raw).
  *
  * Built once per tool_call (in {@link prepareBashState}) so N rules
  * against M refs cost N×M regex tests — no N parses or N walks, and
@@ -441,9 +448,36 @@ interface BashRefState {
   readonly ref: CommandRef;
   readonly text: string;
   readonly basename: string;
-  readonly args: readonly Word[];
+  readonly args: readonly PredicateWord[];
   readonly envAssignments: readonly Word[];
   readonly walkerState: Readonly<WhenWalkerState>;
+}
+
+/**
+ * Effective env for a ref's word projection: the walker's per-ref env
+ * snapshot overlaid with the ref's OWN prefix assignments, in source
+ * order, each resolved against the RUNNING effective env. Mirrors the
+ * shell: a prefix assignment binds for the same command's words (the
+ * walker's envTracker scopes prefixes as one-shot and does NOT
+ * surface them in walkerState.env).
+ *
+ * Fail-closed: a prefix whose RHS the walker can't resolve statically
+ * (absent `$VAR`, command substitution, …) is SKIPPED — the var stays
+ * unexpanded, so downstream words referencing it keep their raw form
+ * (issue #51).
+ */
+function effectiveEnvForRef(
+  ref: CommandRef,
+  walkerEnv: EnvState,
+): Map<string, string> {
+  const env = new Map(walkerEnv);
+  for (const prefix of ref.node.prefix) {
+    if (prefix.name === undefined || prefix.value === undefined) continue;
+    const resolved = resolveWord(prefix.value, env);
+    if (resolved === undefined) continue; // fail-closed: var stays unexpanded
+    env.set(prefix.name, resolved);
+  }
+  return env;
 }
 
 /**
@@ -471,22 +505,36 @@ function prepareBashState(
     trackers,
     refs,
   );
-  const speculativeEvents: SpeculativeEventsByRef =
-    synthesizeSpeculativeEntries(refs, observers);
-  return refs.map((ref) => {
+  // Per-ref effective env + resolved command text (issue #51). The
+  // walker's per-ref env snapshot does NOT include the ref's own
+  // prefix assignments (one-shot scope), so overlay them here — the
+  // shell expands the command's words against its own prefix too.
+  const effective = refs.map((ref) => {
     const trackerState = walkResult.get(ref) ?? {
       cwd: sessionCwd,
       env: new Map<string, string>(),
     };
+    const env = effectiveEnvForRef(ref, trackerState.env as EnvState);
+    return { ref, trackerState, env, text: refToTextResolved(ref, env) };
+  });
+  // Thread per-ref resolved text into speculative synthesis so watch
+  // patterns match the resolved command line (same contract as rule
+  // patterns); refs missing from the map fall back to raw refToText.
+  const resolvedTexts = new Map(effective.map(({ ref, text }) => [ref, text]));
+  const speculativeEvents: SpeculativeEventsByRef =
+    synthesizeSpeculativeEntries(refs, observers, resolvedTexts);
+  return effective.map(({ ref, trackerState, env, text }) => {
     const events = speculativeEvents.get(ref) ?? {};
     return {
       ref,
-      text: refToText(ref),
+      text,
       basename: getBasename(ref),
-      // `node.suffix` is the quote-aware Word[] for the ref. Exposed
-      // to predicates via PredicateToolInput.args; the walker already
-      // parsed it so we just pass it through.
-      args: ref.node.suffix,
+      // Per-ref effective-env projection: text/value carry the
+      // ENV-RESOLVED runtime forms (text quote-preserving incl.
+      // process-substitution inner expansion; value the unquoted
+      // resolved value), rawText the original source, parts the RAW
+      // AST structure; unresolvable words stay raw (fail-closed).
+      args: resolvePredicateWords(ref, env),
       // `node.prefix` is unbash's AssignmentPrefix[] (shape:
       // `{ text, name, value, ... }`). Project into Word[] so
       // PredicateToolInput.envAssignments lines up with `.args` for

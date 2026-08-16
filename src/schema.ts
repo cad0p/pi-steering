@@ -1338,6 +1338,28 @@ export interface ToolResultEvent {
 // ---------------------------------------------------------------------------
 
 /**
+ * A bash suffix word as predicates see it: the {@link Word} shape
+ * with the env-resolved runtime forms on `text` / `value` and the
+ * original source on `rawText` (issue #51 — "resolved-by-default
+ * Word.text — predicates validate what executes").
+ *
+ * Resolution is against the ref's EFFECTIVE env (the walker's per-ref
+ * env snapshot overlaid with the ref's OWN prefix assignments, in
+ * source order). Fail-closed: any word the walker cannot resolve
+ * (absent `$VAR`, command substitution, parameter-expansion
+ * modifiers, …) keeps its raw forms, so predicates never
+ * pattern-match a fiction.
+ */
+export interface PredicateWord extends Word {
+  /**
+   * Original source token, exactly as written in the command
+   * (`"$BODY"`, `<(perl … "$BODY")`). Escape hatch for the rare
+   * consumer that genuinely matches variable names.
+   */
+  rawText: string;
+}
+
+/**
  * Tool input signature reduced to the fields a predicate may read.
  *
  * Predicates are tool-agnostic (the same predicate can gate bash, write,
@@ -1348,11 +1370,11 @@ export interface ToolResultEvent {
  * populated PER extracted command ref - a bash invocation of
  * `git push --force && ls` runs the predicate once per ref, with
  * `command: "git push --force"` (flattened for pattern matching),
- * `basename: "git"`, and `args: [<Word>, <Word>]` (suffix `Word[]`
- * with quote-aware `.value`). `rawCommand` and full AST node access
- * are deliberately NOT exposed - the wrapper context would be wrong
- * for inner refs, and AST walking belongs in plugin code that imports
- * unbash-walker directly.
+ * `basename: "git"`, and `args: [<PredicateWord>, <PredicateWord>]`
+ * (suffix `PredicateWord[]` — see {@link PredicateWord}). `rawCommand`
+ * and full AST node access are deliberately NOT exposed - the wrapper
+ * context would be wrong for inner refs, and AST walking belongs in
+ * plugin code that imports unbash-walker directly.
  */
 export interface PredicateToolInput {
   tool: "bash" | "write" | "edit";
@@ -1365,17 +1387,43 @@ export interface PredicateToolInput {
    */
   basename?: string;
   /**
-   * bash: suffix `Word[]` for the extracted ref - quote-aware
-   * structured access with `.value` giving the lexical value and
-   * `.text` the raw source. Prefer this over splitting `command`
+   * bash: suffix `PredicateWord[]` for the extracted ref - quote-aware
+   * structured access where `text` / `value` carry the ENV-RESOLVED
+   * runtime forms and {@link PredicateWord.rawText} exposes the
+   * original source (issue #51). Prefer this over splitting `command`
    * when the predicate needs to preserve quoting (e.g. reading a
    * `-m "conventional: subject"` message without munging spaces).
    *
-   * Sourced from `CommandRef.node.suffix` via unbash-walker; the
-   * walker already parses into Word[] so we expose it directly.
-   * Undefined for non-bash tools.
+   * Resolution semantics (words match what the shell actually
+   * executes):
+   *   - `text` - TEXT-mode resolution (`resolveWordText`):
+   *     quote-preserving — `"$BODY"` → `"/vault/…"` — recursing
+   *     INTO process substitutions: `<(perl … "$BODY")` →
+   *     `<(perl … "/vault/…")` (inner variables expand, quotes
+   *     stay).
+   *   - `value` - VALUE-mode resolution (`resolveWord`): the unquoted
+   *     runtime value — `"$BODY"` → `/vault/…`. For process
+   *     substitutions value-mode is unresolvable (the fd path is
+   *     unknowable), so `value` stays the raw lexical token while
+   *     `text` carries the expanded inner command.
+   *   - `rawText` - the original source token, exactly as written.
+   *   - `parts` - the RAW AST word-part structure, never resolved
+   *     (plugins doing their own shell-grammar work parse this).
+   *
+   * Fail-closed: any word the walker cannot resolve (absent `$VAR`,
+   * command substitution, parameter-expansion modifiers, multi-command
+   * process substitutions, …) stays raw — `text` falls back to the
+   * source token and `value` to the lexical value — so predicates
+   * never pattern-match a fiction.
+   *
+   * Sourced from `CommandRef.node.suffix` via unbash-walker and
+   * projected per-ref against the ref's effective env (the walker's
+   * per-ref env snapshot overlaid with the ref's own prefix
+   * assignments, in source order — so `BODY=/x gh … --body-file="$BODY"`
+   * resolves within the same ref). Static words are byte-identical to
+   * the pre-resolution surface. Undefined for non-bash tools.
    */
-  args?: readonly Word[];
+  args?: readonly PredicateWord[];
   /**
    * bash: shell env-assignment prefix for the extracted ref -
    * `AWS_PROFILE=dev aws s3 ls` exposes `[W("AWS_PROFILE=dev")]`

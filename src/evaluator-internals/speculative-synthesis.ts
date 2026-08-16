@@ -14,8 +14,16 @@
  * later `happened` evaluations merge with real entries via timestamp
  * ordering.
  *
- * Pure function of `(refs, observers)`. The evaluator wires the
- * output into per-ref `walkerState.events` before running predicates.
+ * Pure function of `(refs, observers, resolvedTexts)`. The evaluator
+ * wires the output into per-ref `walkerState.events` before running
+ * predicates.
+ *
+ * `resolvedTexts` is the per-ref ENV-RESOLVED command text (issue #51
+ * — the same strings rule patterns match). Observer watch patterns
+ * therefore match what the ref will actually execute: a producer
+ * `T="feat: x" gh pr create --title "$T"` matches a watch on the
+ * resolved `--title "feat: x"`. Refs absent from the map fall back
+ * to the raw {@link refToText} form.
  *
  * ## Timestamp convention
  *
@@ -116,6 +124,7 @@ export type SpeculativeEventsByRef = ReadonlyMap<
 export function synthesizeSpeculativeEntries(
   refs: readonly CommandRef[],
   observers: readonly Observer[],
+  resolvedTexts: ReadonlyMap<CommandRef, string>,
 ): SpeculativeEventsByRef {
   const result = new Map<CommandRef, SyntheticEventsByType>();
 
@@ -169,7 +178,11 @@ export function synthesizeSpeculativeEntries(
     // is redundant for `happened`'s presence + latest-timestamp
     // verdict. Clone the chain before extending: earlier consumer
     // refs hold frozen references to the old map.
-    const refText = refToText(ref);
+    //
+    // Resolved text first (the evaluator computes it once in
+    // prepareBashState); raw refToText is the fallback for refs the
+    // caller couldn't resolve (e.g. no walk state).
+    const refText = resolvedTexts.get(ref) ?? refToText(ref);
     let next: Record<string, readonly SyntheticEntry[]> | null = null;
     for (const [customType, observersForType] of observersByWrite) {
       for (const obs of observersForType) {

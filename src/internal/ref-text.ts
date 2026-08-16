@@ -11,6 +11,7 @@
 
 import {
   type CommandRef,
+  type EnvState,
   getBasename,
   getCommandArgs,
   resolveWord,
@@ -28,6 +29,41 @@ import type { PredicateWord } from "../schema.ts";
  */
 export function refToText(ref: CommandRef): string {
   return `${getBasename(ref)} ${getCommandArgs(ref).join(" ")}`.trim();
+}
+
+/**
+ * Effective env for a ref's word projection: the walker's per-ref env
+ * snapshot overlaid with the ref's OWN prefix assignments, in source
+ * order, each resolved against the RUNNING effective env (locked plan
+ * decision — a self-referential chain like `A=1 B=$A cmd` resolves
+ * `B` against the just-assigned `A`; real bash would expand all RHS
+ * against the pre-command env, but the sequential form is what
+ * authors mean and is documented in the release migration note).
+ *
+ * Shared by the evaluator (rule/pattern surface) and the
+ * watch-matcher (observer watch surface) so both sides resolve the
+ * SAME string for the same command (issue #51). The walker's
+ * envTracker scopes prefixes as one-shot and does NOT surface them in
+ * walkerState.env — this overlay is where the shell's "a prefix
+ * assignment binds for the same command's words" behavior lives.
+ *
+ * Fail-closed: a prefix whose RHS the walker can't resolve statically
+ * (absent `$VAR`, command substitution, …) is SKIPPED — the var stays
+ * unexpanded, so downstream words referencing it keep their raw form
+ * (issue #51).
+ */
+export function effectiveEnvForRef(
+  ref: CommandRef,
+  walkerEnv: EnvState,
+): Map<string, string> {
+  const env = new Map(walkerEnv);
+  for (const prefix of ref.node.prefix) {
+    if (prefix.name === undefined || prefix.value === undefined) continue;
+    const resolved = resolveWord(prefix.value, env);
+    if (resolved === undefined) continue; // fail-closed: var stays unexpanded
+    env.set(prefix.name, resolved);
+  }
+  return env;
 }
 
 /**

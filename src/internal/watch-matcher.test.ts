@@ -384,6 +384,20 @@ describe("extractRefTextsForBash: env-resolved ref text (issue #51)", () => {
     );
   });
 
+  it("prefix overlay: same-ref prefix assignments resolve event-side too", () => {
+    // Parity with the evaluator's rule side (shared effectiveEnvForRef):
+    // a same-ref prefix assignment binds for the command's own words on
+    // the watch side as well.
+    const texts = extractRefTextsForBash(
+      bashResult(
+        'BODY=/vault/repo/prs/note.md gh pr create --body-file "$BODY"',
+      ),
+    );
+    assert.ok(texts);
+    const gh = texts.find((t) => t.startsWith("gh pr create"));
+    assert.equal(gh, "gh pr create --body-file /vault/repo/prs/note.md");
+  });
+
   it("unresolvable vars stay raw (fail-closed)", () => {
     const texts = extractRefTextsForBash(
       bashResult('gh pr create --title "$UNDEF"'),

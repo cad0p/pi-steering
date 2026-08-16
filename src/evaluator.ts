@@ -53,7 +53,6 @@ import {
   getBasename,
   type Modifier,
   parse as parseBash,
-  resolveWord,
   type Tracker,
   type Word,
   walk,
@@ -85,6 +84,7 @@ import {
 } from "./evaluator-internals/speculative-synthesis.ts";
 import { mergeObserversUserFirst } from "./internal/merge-observers.ts";
 import {
+  effectiveEnvForRef,
   refToTextResolved,
   resolvePredicateWords,
 } from "./internal/ref-text.ts";
@@ -451,33 +451,6 @@ interface BashRefState {
   readonly args: readonly PredicateWord[];
   readonly envAssignments: readonly Word[];
   readonly walkerState: Readonly<WhenWalkerState>;
-}
-
-/**
- * Effective env for a ref's word projection: the walker's per-ref env
- * snapshot overlaid with the ref's OWN prefix assignments, in source
- * order, each resolved against the RUNNING effective env. Mirrors the
- * shell: a prefix assignment binds for the same command's words (the
- * walker's envTracker scopes prefixes as one-shot and does NOT
- * surface them in walkerState.env).
- *
- * Fail-closed: a prefix whose RHS the walker can't resolve statically
- * (absent `$VAR`, command substitution, …) is SKIPPED — the var stays
- * unexpanded, so downstream words referencing it keep their raw form
- * (issue #51).
- */
-function effectiveEnvForRef(
-  ref: CommandRef,
-  walkerEnv: EnvState,
-): Map<string, string> {
-  const env = new Map(walkerEnv);
-  for (const prefix of ref.node.prefix) {
-    if (prefix.name === undefined || prefix.value === undefined) continue;
-    const resolved = resolveWord(prefix.value, env);
-    if (resolved === undefined) continue; // fail-closed: var stays unexpanded
-    env.set(prefix.name, resolved);
-  }
-  return env;
 }
 
 /**

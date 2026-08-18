@@ -666,7 +666,7 @@ describe("buildObserverDispatcher: appendEntry + findEntries", () => {
     assert.equal(host.appended.length, 1);
     assert.equal(seenAcross.length, 1);
     // Observer appendEntry auto-tags with the current agentLoopIndex so
-    // rules using `when.happened` can filter by scope. The reader sees
+    // rules using `when.missing` can filter by scope. The reader sees
     // the tagged shape via findEntries.
     assert.deepEqual(seenAcross[0]!.data, { n: 1, _agentLoopIndex: 7 });
   });

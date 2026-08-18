@@ -247,14 +247,14 @@ describe("defineConfig: type-level checks", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ADR §8 generic constraints — disabledRules / disabledPlugins / writes ↔ happened.
+// ADR §8 generic constraints — disabledRules / disabledPlugins / writes ↔ missing.
 // ---------------------------------------------------------------------------
 //
 // These tests pin the ADR §8 compile-time contract:
 //
 //   - `disabledRules` typed against union of registered rule names
 //   - `disabledPlugins` typed against union of registered plugin names
-//   - `when.happened.event` typed against union of declared `writes`
+//   - `when.missing.event` typed against union of declared `writes`
 //
 // Same `@ts-expect-error` strategy as above: if the type machinery
 // stops enforcing the constraint, the directive itself errors at
@@ -332,7 +332,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
     assert.equal(cfg.disabledPlugins?.length, 1);
   });
 
-  it("when.happened.event rejects strings outside the writes union", () => {
+  it("when.missing.event rejects strings outside the writes union", () => {
     const cfg = defineConfig({
       rules: [
         {
@@ -343,7 +343,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
           reason: "r",
           writes: ["allowed-type"],
           when: {
-            happened: {
+            missing: {
               // @ts-expect-error — "forbidden-type" not in writes union.
               event: "forbidden-type",
               in: "agent_loop",
@@ -355,7 +355,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
     assert.equal(cfg.rules?.length, 1);
   });
 
-  it("when.happened.event accepts strings in the rule's own writes union", () => {
+  it("when.missing.event accepts strings in the rule's own writes union", () => {
     const cfg = defineConfig({
       rules: [
         {
@@ -365,14 +365,14 @@ describe("defineConfig: type constraints (ADR §8)", () => {
           pattern: /./,
           reason: "r",
           writes: ["self-type"],
-          when: { happened: { event: "self-type", in: "agent_loop" } },
+          when: { missing: { event: "self-type", in: "agent_loop" } },
         },
       ],
     });
     assert.equal(cfg.rules?.[0]?.name, "r");
   });
 
-  it("when.happened.event accepts strings from an inline observer's writes", () => {
+  it("when.missing.event accepts strings from an inline observer's writes", () => {
     const observer = {
       name: "obs",
       writes: ["sync-done"],
@@ -387,14 +387,14 @@ describe("defineConfig: type constraints (ADR §8)", () => {
           field: "command",
           pattern: /./,
           reason: "r",
-          when: { happened: { event: "sync-done", in: "agent_loop" } },
+          when: { missing: { event: "sync-done", in: "agent_loop" } },
         },
       ],
     });
-    assert.equal(cfg.rules?.[0]?.when?.happened?.event, "sync-done");
+    assert.equal(cfg.rules?.[0]?.when?.missing?.event, "sync-done");
   });
 
-  it("when.happened.event accepts strings from a plugin rule's writes", () => {
+  it("when.missing.event accepts strings from a plugin rule's writes", () => {
     const plugin = {
       name: "p",
       rules: [
@@ -417,14 +417,14 @@ describe("defineConfig: type constraints (ADR §8)", () => {
           field: "command",
           pattern: /./,
           reason: "r",
-          when: { happened: { event: "plugin-type", in: "agent_loop" } },
+          when: { missing: { event: "plugin-type", in: "agent_loop" } },
         },
       ],
     });
-    assert.equal(cfg.rules?.[0]?.when?.happened?.event, "plugin-type");
+    assert.equal(cfg.rules?.[0]?.when?.missing?.event, "plugin-type");
   });
 
-  it("when.happened.event accepts strings from a plugin observer's writes", () => {
+  it("when.missing.event accepts strings from a plugin observer's writes", () => {
     const plugin = {
       name: "p",
       observers: [
@@ -445,12 +445,12 @@ describe("defineConfig: type constraints (ADR §8)", () => {
           pattern: /./,
           reason: "r",
           when: {
-            happened: { event: "plugin-obs-type", in: "agent_loop" },
+            missing: { event: "plugin-obs-type", in: "agent_loop" },
           },
         },
       ],
     });
-    assert.equal(cfg.rules?.[0]?.when?.happened?.event, "plugin-obs-type");
+    assert.equal(cfg.rules?.[0]?.when?.missing?.event, "plugin-obs-type");
   });
 
   it("G10 — Plugin.predicates accepts typed-arg handlers without a cast", () => {
@@ -494,7 +494,7 @@ describe("defineConfig: bare-annotation footgun (ADR §8 authoring pattern)", ()
   //     This is the "no typo detection" footgun.
   //   - `writes` arrays: bare annotation widens `readonly ["x"]` to
   //     `readonly string[]`, which can't project string literals, so
-  //     `AllWrites` collapses to `never`. EVERY `when.happened.event`
+  //     `AllWrites` collapses to `never`. EVERY `when.missing.event`
   //     reference is rejected. This is the "can't use writes at all"
   //     failure — louder, but still a footgun if you don't know why.
 
@@ -543,7 +543,7 @@ describe("defineConfig: bare-annotation footgun (ADR §8 authoring pattern)", ()
           // `AllWrites` to `never`. "sync-done" is rejected even
           // though it IS in the runtime value — type info was lost
           // at annotation time.
-          when: { happened: { event: "sync-done", in: "agent_loop" } },
+          when: { missing: { event: "sync-done", in: "agent_loop" } },
         },
       ],
     });
@@ -565,11 +565,11 @@ describe("defineConfig: bare-annotation footgun (ADR §8 authoring pattern)", ()
           field: "command",
           pattern: /./,
           reason: "r",
-          when: { happened: { event: "sync-done", in: "agent_loop" } },
+          when: { missing: { event: "sync-done", in: "agent_loop" } },
         },
       ],
     });
-    assert.equal(cfg.rules?.[0]?.when?.happened?.event, "sync-done");
+    assert.equal(cfg.rules?.[0]?.when?.missing?.event, "sync-done");
   });
 });
 
@@ -985,7 +985,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
     assert.equal(cfg.exemptions?.length, 1);
   });
 
-  it("exemptions[].when.happened.event narrows against the writes union", () => {
+  it("exemptions[].when.missing.event narrows against the writes union", () => {
     const cfg = defineConfig({
       rules: [
         {
@@ -1000,13 +1000,13 @@ describe("defineConfig: exemption typing + runtime copy", () => {
       exemptions: [
         {
           rule: "consumer",
-          when: { happened: { event: "sync-done", in: "session" } },
+          when: { missing: { event: "sync-done", in: "session" } },
         },
         {
           rule: "consumer",
           when: {
             // @ts-expect-error — "forbidden-type" not in writes union.
-            happened: { event: "forbidden-type", in: "session" },
+            missing: { event: "forbidden-type", in: "session" },
           },
         },
       ],
@@ -1051,7 +1051,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
     assert.equal(cfg.exemptions?.length, 2);
   });
 
-  it("exemptions[].when accepts every modifier-free form (bare, array, pattern, condition, happened, not:)", () => {
+  it("exemptions[].when accepts every modifier-free form (bare, array, pattern, condition, missing, not:)", () => {
     const cfg = defineConfig({
       rules: [
         {
@@ -1072,10 +1072,10 @@ describe("defineConfig: exemption typing + runtime copy", () => {
         { rule: "no-force-push", when: { cwd: { pattern: /x/ } } },
         // condition function leaf.
         { rule: "no-force-push", when: { condition: () => true } },
-        // happened leaf (writes-narrowed event).
+        // missing leaf (writes-narrowed event).
         {
           rule: "no-force-push",
-          when: { happened: { event: "sync-done", in: "session" } },
+          when: { missing: { event: "sync-done", in: "session" } },
         },
         // not: block without onUnknown.
         { rule: "no-force-push", when: { not: { cwd: /x/ } } },

@@ -9,7 +9,7 @@
  *
  *   - the observer-dispatcher (production fire path — decides which
  *     observers see a concrete tool_result).
- *   - the evaluator's `when.happened` tool_call-scope speculative-
+ *   - the evaluator's `when.missing` tool_call-scope speculative-
  *     allow (synthesizes a minimal successful bash event representing
  *     "this prior `&&` ref is about to run and succeed", then asks
  *     the same question).

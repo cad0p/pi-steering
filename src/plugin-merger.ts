@@ -440,7 +440,7 @@ export function resolvePlugins(
             `tracker name "events" is reserved: plugin "${plugin.name}" ` +
             "registers a tracker under that name but the evaluator uses " +
             "it on `walkerState` for speculative-entry synthesis consumed " +
-            "by the built-in `when.happened` predicate. Rename the tracker.",
+            "by the built-in `when.missing` predicate. Rename the tracker.",
         });
         continue;
       }

@@ -838,7 +838,7 @@ describe("mockContext", () => {
   });
 
   // ---- toolCallEvents: walkerState.events surface for tool_call-
-  // ---- scope `when.happened` and plugin predicates over synthesized entries
+  // ---- scope `when.missing` and plugin predicates over synthesized entries
 
   it("toolCallEvents default: walkerState has no `events` key when the option is omitted", () => {
     // Matches the production shape for non-bash candidates or configs
@@ -853,7 +853,7 @@ describe("mockContext", () => {
   });
 
   it("toolCallEvents threads through to ctx.walkerState.events", () => {
-    // Surface-level: plugin authors drive `when.happened` with `in: "tool_call"`
+    // Surface-level: plugin authors drive `when.missing` with `in: "tool_call"`
     // in isolation by passing `toolCallEvents`. The option merges
     // into walkerState under the reserved `events` key, same shape
     // the walker-level synthesis pass produces in production.
@@ -1596,9 +1596,9 @@ describe("mockExtensionContext", () => {
       reason: "needs mark",
       noOverride: true,
       when: {
-        // Default `when.happened` semantic: fires when the type has
+        // Default `when.missing` semantic: fires when the type has
         // NOT been written in the scope (ADR §5).
-        happened: { event: "test-passed", in: "agent_loop" },
+        missing: { event: "test-passed", in: "agent_loop" },
       },
     };
     const observer: Observer = {

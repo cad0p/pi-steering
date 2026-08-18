@@ -1084,11 +1084,10 @@ describe("buildEvaluator: when.cwd array form", () => {
   });
 });
 
-describe("buildEvaluator: when.happened", () => {
-  // "Fires when NOT happened." — the mental model is inverted from
-  // the rule author's perspective (they say "block cr unless sync
-  // has happened"). The engine reads: no entry of the type in the
-  // given scope → predicate matches → rule fires (block).
+describe("buildEvaluator: when.missing", () => {
+  // "Fires while missing." — the rule author's model ("block cr
+  // unless sync is present") now matches the engine: no entry of
+  // the type in the given scope → predicate matches → rule fires.
   const sessionEntry = (
     customType: string,
     data: Record<string, unknown>,
@@ -1110,7 +1109,7 @@ describe("buildEvaluator: when.happened", () => {
       field: "command",
       pattern: "^cr\\b",
       reason: "sync first",
-      when: { happened: { event: "ws-sync-done", in: "agent_loop" } },
+      when: { missing: { event: "ws-sync-done", in: "agent_loop" } },
     };
     // No entries anywhere → rule fires.
     const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
@@ -1129,7 +1128,7 @@ describe("buildEvaluator: when.happened", () => {
       field: "command",
       pattern: "^cr\\b",
       reason: "sync first",
-      when: { happened: { event: "ws-sync-done", in: "agent_loop" } },
+      when: { missing: { event: "ws-sync-done", in: "agent_loop" } },
     };
     const ctx = makeCtx("/r", [
       sessionEntry("ws-sync-done", { _agentLoopIndex: 5 }),
@@ -1146,7 +1145,7 @@ describe("buildEvaluator: when.happened", () => {
       field: "command",
       pattern: "^cr\\b",
       reason: "sync first",
-      when: { happened: { event: "ws-sync-done", in: "agent_loop" } },
+      when: { missing: { event: "ws-sync-done", in: "agent_loop" } },
     };
     const ctx = makeCtx("/r", [
       sessionEntry("ws-sync-done", { _agentLoopIndex: 3 }, undefined, "a"),
@@ -1164,7 +1163,7 @@ describe("buildEvaluator: when.happened", () => {
       field: "command",
       pattern: "^cr\\b",
       reason: "once-per-session",
-      when: { happened: { event: "welcome-shown", in: "session" } },
+      when: { missing: { event: "welcome-shown", in: "session" } },
     };
     const ctx = makeCtx("/r", [
       sessionEntry("welcome-shown", { _agentLoopIndex: 0 }),
@@ -1181,7 +1180,7 @@ describe("buildEvaluator: when.happened", () => {
       field: "command",
       pattern: "^cr\\b",
       reason: "once-per-session",
-      when: { happened: { event: "welcome-shown", in: "session" } },
+      when: { missing: { event: "welcome-shown", in: "session" } },
     };
     const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
     const fires = await evaluator.evaluate(
@@ -1192,7 +1191,7 @@ describe("buildEvaluator: when.happened", () => {
     assert.ok(fires);
   });
 
-  it("not.happened: inverts — fires when event HAS happened in agent loop", async () => {
+  it("not.missing: inverts — fires when event IS PRESENT in agent loop", async () => {
     const rule: Rule = {
       name: "no-cr-twice",
       tool: "bash",
@@ -1200,11 +1199,11 @@ describe("buildEvaluator: when.happened", () => {
       pattern: "^cr\\b",
       reason: "no-cr-twice",
       when: {
-        not: { happened: { event: "cr-attempted", in: "agent_loop" } },
+        not: { missing: { event: "cr-attempted", in: "agent_loop" } },
       },
     };
-    // Entry tagged with the current agent loop → happened predicate
-    // says NOT-happened=false (so happened did happen) → nested clause
+    // Entry tagged with the current agent loop → missing predicate
+    // says NOT-missing=false (so missing did happen) → nested clause
     // is false → not flips to true → rule fires.
     const ctx = makeCtx("/r", [
       sessionEntry("cr-attempted", { _agentLoopIndex: 5 }),
@@ -1214,7 +1213,7 @@ describe("buildEvaluator: when.happened", () => {
     assert.ok(fires);
   });
 
-  it("not.happened: skips — when event has NOT happened in agent loop", async () => {
+  it("not.missing: skips — when event is missing in agent loop", async () => {
     const rule: Rule = {
       name: "no-cr-twice",
       tool: "bash",
@@ -1222,7 +1221,7 @@ describe("buildEvaluator: when.happened", () => {
       pattern: "^cr\\b",
       reason: "no-cr-twice",
       when: {
-        not: { happened: { event: "cr-attempted", in: "agent_loop" } },
+        not: { missing: { event: "cr-attempted", in: "agent_loop" } },
       },
     };
     const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
@@ -1242,7 +1241,7 @@ describe("buildEvaluator: when.happened", () => {
       pattern: "^cr\\b",
       reason: "bad",
       // @ts-expect-error — deliberately malformed for runtime check
-      when: { happened: "not-an-object" },
+      when: { missing: "not-an-object" },
     };
     const warnings = captureWarnings();
     try {
@@ -1263,9 +1262,7 @@ describe("buildEvaluator: when.happened", () => {
       // error message (so operators can locate + fix the bug).
       assert.ok(
         warnings.some((w) =>
-          /predicate threw for rule "bad"@user.*when\.happened expected/.test(
-            w,
-          ),
+          /predicate threw for rule "bad"@user.*when\.missing expected/.test(w),
         ),
         `no matching warning in:\n${warnings.join("\n")}`,
       );
@@ -1285,7 +1282,7 @@ describe("buildEvaluator: when.happened", () => {
       pattern: "^cr\\b",
       reason: "legacy",
       // @ts-expect-error — "turn" is the removed PoC scope name
-      when: { happened: { event: "ws-sync-done", in: "turn" } },
+      when: { missing: { event: "ws-sync-done", in: "turn" } },
     };
     const warnings = captureWarnings();
     try {
@@ -1302,7 +1299,7 @@ describe("buildEvaluator: when.happened", () => {
       assert.equal(result, undefined);
       assert.ok(
         warnings.some((w) =>
-          /predicate threw for rule "legacy-turn"@user.*when\.happened\.in must be.*"agent_loop", "session", or "tool_call"/.test(
+          /predicate threw for rule "legacy-turn"@user.*when\.missing\.in must be.*"agent_loop", "session", or "tool_call"/.test(
             w,
           ),
         ),
@@ -1321,7 +1318,7 @@ describe("buildEvaluator: when.happened", () => {
       pattern: "^cr\\b",
       reason: "typo",
       // @ts-expect-error — camelCase is not a valid scope
-      when: { happened: { event: "ws-sync-done", in: "agentLoop" } },
+      when: { missing: { event: "ws-sync-done", in: "agentLoop" } },
     };
     const warnings = captureWarnings();
     try {
@@ -1338,7 +1335,7 @@ describe("buildEvaluator: when.happened", () => {
       assert.equal(result, undefined);
       assert.ok(
         warnings.some((w) =>
-          /predicate threw for rule "typo"@user.*when\.happened\.in must be.*"agent_loop", "session", or "tool_call"/.test(
+          /predicate threw for rule "typo"@user.*when\.missing\.in must be.*"agent_loop", "session", or "tool_call"/.test(
             w,
           ),
         ),
@@ -1349,11 +1346,11 @@ describe("buildEvaluator: when.happened", () => {
     }
   });
 
-  it("untagged entries are treated as 'not happened this loop' (G5)", async () => {
+  it("untagged entries are treated as 'missing from this loop' (G5)", async () => {
     // Simulates a pre-feature entry (hand-written session JSONL,
     // or a plugin that bypassed the wrapper): `data` has no
     // `_agentLoopIndex` key. The agent_loop filter must NOT treat
-    // undefined as a match, so the rule's `when.happened` predicate
+    // undefined as a match, so the rule's `when.missing` predicate
     // still fires (rule blocks).
     const rule: Rule = {
       name: "cr-needs-sync",
@@ -1361,7 +1358,7 @@ describe("buildEvaluator: when.happened", () => {
       field: "command",
       pattern: "^cr\\b",
       reason: "sync first",
-      when: { happened: { event: "legacy", in: "agent_loop" } },
+      when: { missing: { event: "legacy", in: "agent_loop" } },
     };
     const ctx = makeCtx("/r", [
       sessionEntry("legacy", { foo: "bar" }), // no _agentLoopIndex
@@ -1373,13 +1370,88 @@ describe("buildEvaluator: when.happened", () => {
       "untagged entries must not satisfy agent_loop scope",
     );
   });
+
+  // TEMP (issue #55): behavior-equivalence guard for the rename.
+  // Pairs the new `missing` spelling against the legacy `happened`
+  // spelling (smuggled via `as unknown as Rule` — the schema no
+  // longer types it) across representative gate + latch configs and
+  // three entry contexts, asserting byte-identical verdicts. REMOVE
+  // together with the legacy normalize in the cleanup commit.
+  it("TEMP equivalence: legacy `happened` spelling yields identical verdicts (issue #55)", async () => {
+    type When = NonNullable<Rule["when"]>;
+    const gateRule = (when: When): Rule => ({
+      name: "cr-needs-sync",
+      tool: "bash",
+      field: "command",
+      pattern: "^cr\\b",
+      reason: "sync first",
+      when,
+    });
+    const latchRule = (when: When): Rule => ({
+      name: "no-cr-twice",
+      tool: "bash",
+      field: "command",
+      pattern: "^cr\\b",
+      reason: "no cr twice",
+      when,
+    });
+
+    const contexts = [
+      { name: "absent", ctx: makeCtx("/r") },
+      {
+        name: "current-loop",
+        ctx: makeCtx("/r", [
+          sessionEntry("ws-sync-done", { _agentLoopIndex: 5 }),
+        ]),
+      },
+      {
+        name: "prior-loop",
+        ctx: makeCtx("/r", [
+          sessionEntry("ws-sync-done", { _agentLoopIndex: 3 }),
+        ]),
+      },
+    ] as const;
+
+    const run = async (when: When) => {
+      const verdicts = [];
+      for (const { ctx } of contexts) {
+        const gate = buildEvaluator(
+          { rules: [gateRule(when)] },
+          resolve(),
+          makeHost(),
+        );
+        const latch = buildEvaluator(
+          { rules: [latchRule(when)] },
+          resolve(),
+          makeHost(),
+        );
+        const gateFired =
+          (await gate.evaluate(bashEvent("cr review"), ctx, 5)) !== undefined;
+        const latchFired =
+          (await latch.evaluate(bashEvent("cr review"), ctx, 5)) !== undefined;
+        verdicts.push([gateFired, latchFired]);
+      }
+      return verdicts;
+    };
+
+    const spelledMissing: When = {
+      missing: { event: "ws-sync-done", in: "agent_loop" },
+    };
+    const spelledHappened = {
+      happened: { event: "ws-sync-done", in: "agent_loop" },
+    } as unknown as When;
+
+    const newVerdicts = await run(spelledMissing);
+    const legacyVerdicts = await run(spelledHappened);
+    assert.deepEqual(legacyVerdicts, newVerdicts);
+  });
 });
 
-describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
+describe("buildEvaluator: when.missing.since (temporal ordering)", () => {
   // `since` acts as an invalidation sentinel. Rule fires when the
   // most-recent `event` entry in scope is NOT strictly newer than
   // the most-recent `since` entry in scope. Absent / never-written
-  // `since` degrades to simple-happened semantics.
+  // `since` degrades to simple-presence semantics.
   const sessionEntry = (
     customType: string,
     data: Record<string, unknown>,
@@ -1394,7 +1466,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
     parentId: null,
   });
 
-  it("same loop, event after since → happened (rule does NOT fire)", async () => {
+  it("same loop, event after since → present (rule does NOT fire)", async () => {
     const rule: Rule = {
       name: "needs-fresh-sync",
       tool: "bash",
@@ -1402,7 +1474,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
       pattern: "^cr\\b",
       reason: "sync first",
       when: {
-        happened: {
+        missing: {
           event: "ws-sync-done",
           in: "agent_loop",
           since: "upstream-failed",
@@ -1436,7 +1508,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
       pattern: "^cr\\b",
       reason: "sync first",
       when: {
-        happened: {
+        missing: {
           event: "ws-sync-done",
           in: "agent_loop",
           since: "upstream-failed",
@@ -1462,7 +1534,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
     assert.ok(res && res.block === true, "rule must fire when event is stale");
   });
 
-  it("event present, since never written → happened (rule does NOT fire)", async () => {
+  it("event present, since never written → present (rule does NOT fire)", async () => {
     const rule: Rule = {
       name: "needs-fresh-sync",
       tool: "bash",
@@ -1470,7 +1542,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
       pattern: "^cr\\b",
       reason: "sync first",
       when: {
-        happened: {
+        missing: {
           event: "ws-sync-done",
           in: "agent_loop",
           since: "upstream-failed",
@@ -1490,7 +1562,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
     assert.equal(
       res,
       undefined,
-      "never-written since degrades to simple-happened",
+      "never-written since degrades to simple-presence",
     );
   });
 
@@ -1502,7 +1574,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
       pattern: "^cr\\b",
       reason: "sync first",
       when: {
-        happened: {
+        missing: {
           event: "ws-sync-done",
           in: "agent_loop",
           since: "upstream-failed",
@@ -1529,7 +1601,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
       pattern: "^cr\\b",
       reason: "sync first",
       when: {
-        happened: {
+        missing: {
           event: "ws-sync-done",
           in: "agent_loop",
           since: "upstream-failed",
@@ -1548,14 +1620,14 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
     const res = await evaluator.evaluate(bashEvent("cr review"), ctx, 5);
     assert.ok(
       res && res.block === true,
-      "no event means happened=false regardless of since",
+      "no event means missing=true regardless of since",
     );
   });
 
   it("cross-loop: since in prior loop, event in current loop (agent_loop scope)", async () => {
     // The `since` entry from loop 4 is OUT of current-loop scope, so
     // the agent_loop filter drops it. From loop-5's perspective
-    // `since` is "never written" → simple-happened semantics.
+    // `since` is "never written" → simple-presence semantics.
     const rule: Rule = {
       name: "needs-fresh-sync",
       tool: "bash",
@@ -1563,7 +1635,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
       pattern: "^cr\\b",
       reason: "sync first",
       when: {
-        happened: {
+        missing: {
           event: "ws-sync-done",
           in: "agent_loop",
           since: "upstream-failed",
@@ -1601,7 +1673,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
       pattern: "^cr\\b",
       reason: "welcome",
       when: {
-        happened: {
+        missing: {
           event: "welcome-shown",
           in: "session",
           since: "policy-updated",
@@ -1629,7 +1701,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
       pattern: "^cr\\b",
       reason: "bad",
       when: {
-        happened: {
+        missing: {
           event: "ws-sync-done",
           in: "agent_loop",
           // @ts-expect-error — deliberate runtime type violation.
@@ -1652,7 +1724,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
       // Predicate throw is isolated (S1) — no block verdict.
       assert.equal(res, undefined);
       assert.ok(
-        warnings.some((w) => /when\.happened\.since must be a string/.test(w)),
+        warnings.some((w) => /when\.missing\.since must be a string/.test(w)),
         `no matching warning in:\n${warnings.join("\n")}`,
       );
     } finally {
@@ -1661,7 +1733,7 @@ describe("buildEvaluator: when.happened.since (temporal ordering)", () => {
   });
 });
 
-describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () => {
+describe("buildEvaluator: `&&`-chain speculative allow via when.missing", () => {
   // When the current bash tool_call contains a prior `&&`-chained ref
   // that matches an observer writing the required event, the engine
   // speculatively treats the event as "about to happen" and declines
@@ -1689,7 +1761,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
     field: "command",
     pattern: /^cr\b/,
     reason: "sync first",
-    when: { happened: { event: SYNC_DONE_EVENT, in: "agent_loop" } },
+    when: { missing: { event: SYNC_DONE_EVENT, in: "agent_loop" } },
   };
 
   it("allows `sync && cr` — prior && ref matches the sync observer", async () => {
@@ -1813,7 +1885,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
     );
     assert.ok(
       res && res.block === true,
-      "with no observers, fall back to simple happened check",
+      "with no observers, fall back to simple missing check",
     );
   });
 
@@ -1898,7 +1970,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
   });
 
   it("combines with since — speculative allow also applies when event is stale", async () => {
-    // Event previously happened but since-sentinel made it stale.
+    // Event previously present but since-sentinel made it stale.
     // Prior && ref matches → the new sync is "about to happen" and
     // freshens the state. Speculative allow, rule skips.
     const ruleWithSince: Rule = {
@@ -1908,7 +1980,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
       pattern: /^cr\b/,
       reason: "sync first",
       when: {
-        happened: {
+        missing: {
           event: SYNC_DONE_EVENT,
           in: "agent_loop",
           since: "upstream-failed",
@@ -2178,7 +2250,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
     //
     // Post-unification, speculative entries carry AST-ordered timestamps
     // (baseline + 1 + index), so the synthetic X at ts=baseline+1 is
-    // older than synthetic Y at ts=baseline+2. `when.happened: { event:
+    // older than synthetic Y at ts=baseline+2. `when.missing: { event:
     // X, since: Y }` correctly reads X as stale and fires the rule.
     const EVENT_X = "chain-two-writes-x" as const;
     const EVENT_Y = "chain-two-writes-y" as const;
@@ -2209,7 +2281,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
       pattern: /^cr\b/,
       reason: "X is stale (Y written after)",
       when: {
-        happened: {
+        missing: {
           event: EVENT_X,
           in: "agent_loop",
           since: EVENT_Y,
@@ -2235,7 +2307,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
   it("allows `A && B && cr` when the since-type matches NEITHER prior ref's observer", async () => {
     // Regression guard for the inverse scenario. If only X's observer
     // is registered (no one writes Y), A's write of X makes the event
-    // fresh AND the invalidator is absent in scope — happened degrades
+    // fresh AND the invalidator is absent in scope — missing degrades
     // to simple-presence semantics, rule does NOT fire. Confirms the
     // unification still grants allow when there's no cross-type
     // invalidator in play.
@@ -2258,7 +2330,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
       pattern: /^cr\b/,
       reason: "X is stale (Y written after)",
       when: {
-        happened: {
+        missing: {
           event: EVENT_X,
           in: "agent_loop",
           since: EVENT_Y_ABSENT,
@@ -2286,7 +2358,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
     // Mirror of the blocks-case above. Same observers, same rule, but
     // the command chain is AST-REVERSED: Y-writer first, X-writer second.
     // Synthetic Y at ts=baseline+1, synthetic X at ts=baseline+2 → X is
-    // AST-newer than Y → `happened: { event: X, since: Y }` reads X as
+    // AST-newer than Y → `missing: { event: X, since: Y }` reads X as
     // FRESH (written after the since-invalidator) → rule does NOT fire.
     //
     // This case is the integration-layer guard for the strict-ordering
@@ -2326,7 +2398,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
       pattern: /^cr\b/,
       reason: "X is stale (Y written after)",
       when: {
-        happened: {
+        missing: {
           event: EVENT_X,
           in: "agent_loop",
           since: EVENT_Y,
@@ -2351,13 +2423,13 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.happened", () =>
   });
 });
 
-describe("buildEvaluator: when.happened with in='tool_call'", () => {
-  // `tool_call` scope narrows `happened` to the speculative-only
+describe("buildEvaluator: when.missing with in='tool_call'", () => {
+  // `tool_call` scope narrows `missing` to the speculative-only
   // timeline: real (session-persisted) entries are ignored entirely.
   // Fires when the speculative event is absent from THIS tool_call's
   // `&&`-chain; does NOT fire when a prior chained ref writes the
   // event. Use for "must be chained directly before" semantics, vs
-  // `agent_loop`'s "must have happened anywhere this loop".
+  // `agent_loop`'s "must have missing anywhere this loop".
 
   it("event in chain: `sync && cr` — synthetic write satisfies tool_call presence", async () => {
     const EVENT = "chain-only-sync" as const;
@@ -2378,7 +2450,7 @@ describe("buildEvaluator: when.happened with in='tool_call'", () => {
       pattern: /^cr\b/,
       reason: "sync must be chained directly before cr",
       when: {
-        happened: { event: EVENT, in: "tool_call" },
+        missing: { event: EVENT, in: "tool_call" },
       },
     };
     const evaluator = buildEvaluator(
@@ -2394,7 +2466,7 @@ describe("buildEvaluator: when.happened with in='tool_call'", () => {
     assert.equal(
       res,
       undefined,
-      "speculative sync in chain → tool_call happened → rule does NOT fire",
+      "speculative sync in chain → tool_call missing → rule does NOT fire",
     );
   });
 
@@ -2417,7 +2489,7 @@ describe("buildEvaluator: when.happened with in='tool_call'", () => {
       pattern: /^cr\b/,
       reason: "sync must be chained directly before cr",
       when: {
-        happened: { event: EVENT, in: "tool_call" },
+        missing: { event: EVENT, in: "tool_call" },
       },
     };
     const evaluator = buildEvaluator(
@@ -2440,7 +2512,7 @@ describe("buildEvaluator: when.happened with in='tool_call'", () => {
     // The defining characteristic of tool_call vs agent_loop:
     // real (persisted) entries from PRIOR tool_calls are ignored.
     // With in: "agent_loop" the same fixture would NOT fire because
-    // sync already happened this loop. With in: "tool_call", only
+    // sync already missing this loop. With in: "tool_call", only
     // speculative entries in the CURRENT chain count.
     const EVENT = "chain-only-sync" as const;
     const observer: Observer = {
@@ -2460,7 +2532,7 @@ describe("buildEvaluator: when.happened with in='tool_call'", () => {
       pattern: /^cr\b/,
       reason: "sync must be chained directly before cr",
       when: {
-        happened: { event: EVENT, in: "tool_call" },
+        missing: { event: EVENT, in: "tool_call" },
       },
     };
     const host = makeHost();
@@ -2517,7 +2589,7 @@ describe("buildEvaluator: when.happened with in='tool_call'", () => {
       pattern: /^cr\b/,
       reason: "X stale (Y written after)",
       when: {
-        happened: { event: EVENT_X, in: "tool_call", since: EVENT_Y },
+        missing: { event: EVENT_X, in: "tool_call", since: EVENT_Y },
       },
     };
     const evaluator = buildEvaluator(
@@ -4239,7 +4311,7 @@ describe("buildEvaluator: override comments", () => {
 
   it("audit entry carries the current _agentLoopIndex (F3)", async () => {
     // Override entries go through `shared.appendEntry` (the wrapped
-    // path) so rules using `when.happened: { event:
+    // path) so rules using `when.missing: { event:
     // "steering-override", in: "agent_loop" }` can see them. This
     // test just pins the shape — the agent_loop / session behaviours
     // follow.
@@ -4260,10 +4332,10 @@ describe("buildEvaluator: override comments", () => {
     assert.equal(data["rule"], "no-force-push");
   });
 
-  it('when.happened { event: "steering-override", in: "agent_loop" } filters overrides by current loop (F3)', async () => {
+  it('when.missing { event: "steering-override", in: "agent_loop" } filters overrides by current loop (F3)', async () => {
     // Loop 7: override is consumed for no-force-push. A DIFFERENT rule
-    // gates on `happened: { steering-override, agent_loop }` — after the
-    // override lands in loop 7 it should observe "happened" in loop 7
+    // gates on `missing: { steering-override, agent_loop }` — after the
+    // override lands in loop 7 it should observe "missing" in loop 7
     // (predicate returns false → rule skips) but NOT in loop 8
     // (predicate returns true → rule fires).
     const host = makeHost();
@@ -4284,7 +4356,7 @@ describe("buildEvaluator: override comments", () => {
       pattern: "^echo",
       reason: "canary",
       when: {
-        happened: { event: "steering-override", in: "agent_loop" },
+        missing: { event: "steering-override", in: "agent_loop" },
       },
     };
     const evaluator = buildEvaluator(
@@ -4300,7 +4372,7 @@ describe("buildEvaluator: override comments", () => {
     );
     assert.equal(r1, undefined, "override accepted, no block");
 
-    // Loop 7: canary sees the override → "happened" is true → predicate
+    // Loop 7: canary sees the override → "missing" is true → predicate
     // returns false → rule skips.
     const r2 = await evaluator.evaluate(
       bashEvent("echo hi"),
@@ -4322,7 +4394,7 @@ describe("buildEvaluator: override comments", () => {
     );
   });
 
-  it('when.happened { event: "steering-override", in: "session" } sees overrides across loops (F3)', async () => {
+  it('when.missing { event: "steering-override", in: "session" } sees overrides across loops (F3)', async () => {
     // Session scope ignores the `_agentLoopIndex` tag — any override
     // ever consumed in the session suppresses the canary regardless
     // of which loop produced it.
@@ -4341,7 +4413,7 @@ describe("buildEvaluator: override comments", () => {
       field: "command",
       pattern: "^echo",
       reason: "canary",
-      when: { happened: { event: "steering-override", in: "session" } },
+      when: { missing: { event: "steering-override", in: "session" } },
     };
     const evaluator = buildEvaluator(
       { defaultNoOverride: false, rules: [overridableRule, canaryRule] },
@@ -4688,7 +4760,7 @@ describe("buildEvaluator: walker reuse + exec cache", () => {
             hasCode: (r as unknown as { code?: number }).code !== undefined,
           };
           // Rule fires only when exitCode === 42, which
-          // implicitly proves the rename happened.
+          // implicitly proves the rename took effect.
           return r.exitCode === 42;
         },
       },
@@ -4870,10 +4942,10 @@ describe("buildEvaluator: findEntries", () => {
     assert.equal(after, 1, "post-write read must see the new entry");
   });
 
-  it("cross-rule: rule A's onFire write is visible to rule B's when.happened (S2/E1)", async () => {
+  it("cross-rule: rule A's onFire write is visible to rule B's when.missing (S2/E1)", async () => {
     // Rule A fires and writes "A-fired" via onFire. Rule B's
-    // when.happened reads "A-fired" with `in: "agent_loop"` and fires
-    // only when the write is NOT present (the built-in `happened`
+    // when.missing reads "A-fired" with `in: "agent_loop"` and fires
+    // only when the write is NOT present (the built-in `missing`
     // semantics). Pre-S2 the cached read in rule B saw the pre-write
     // snapshot and wrongly fired.
     const ruleA: Rule = {
@@ -4891,7 +4963,7 @@ describe("buildEvaluator: findEntries", () => {
       field: "command",
       pattern: "^echo",
       reason: "b fires only if A has not fired this loop",
-      when: { happened: { event: "A-fired", in: "agent_loop" } },
+      when: { missing: { event: "A-fired", in: "agent_loop" } },
     };
     const host = makeHost();
     const ctx = makeCtx("/r", host.entries);
@@ -4915,11 +4987,11 @@ describe("buildEvaluator: findEntries", () => {
     assert.equal(host.appended[0]!.type, "A-fired");
   });
 
-  it("the override-audit write in an earlier rule is visible to a later rule's when.happened (S2/E1)", async () => {
+  it("the override-audit write in an earlier rule is visible to a later rule's when.missing (S2/E1)", async () => {
     // A rule-level `noOverride: false` rule writes a
     // `steering-override` audit entry when the agent supplies an
     // override comment. A later rule can gate on that via
-    // `when.happened: { event: "steering-override", in: "agent_loop" }`.
+    // `when.missing: { event: "steering-override", in: "agent_loop" }`.
     // Pre-S2, the later rule's cached findEntries read from before the
     // override wrote would miss the audit entry.
     const overridable: Rule = {
@@ -4931,9 +5003,9 @@ describe("buildEvaluator: findEntries", () => {
       noOverride: false,
     };
     // A second rule that fires ONLY when no steering-override has
-    // happened in this agent loop. With S2 in place, the override
+    // been recorded in this agent loop. With S2 in place, the override
     // written by `overridable` invalidates the cache — so this rule
-    // sees the fresh entry and its `when.happened` returns false.
+    // sees the fresh entry and its `when.missing` returns false.
     // Pre-S2, the cached read would miss the override write and this
     // rule would wrongly fire.
     const gate: Rule = {
@@ -4943,7 +5015,7 @@ describe("buildEvaluator: findEntries", () => {
       pattern: /^git\s+push/,
       reason: "gate",
       when: {
-        happened: { event: "steering-override", in: "agent_loop" },
+        missing: { event: "steering-override", in: "agent_loop" },
       },
     };
     const host = makeHost();
@@ -4957,7 +5029,7 @@ describe("buildEvaluator: findEntries", () => {
     // comment addressing `overridable`. The evaluator:
     //   1. Evaluates `overridable` → fires → override comment accepted
     //      → writes steering-override audit entry → returns "overridden".
-    //   2. Continues to `gate` → when.happened reads steering-override
+    //   2. Continues to `gate` → when.missing reads steering-override
     //      — with S2, sees the fresh audit entry → predicate returns
     //      false → rule does NOT fire.
     const result = await evaluator.evaluate(
@@ -6023,7 +6095,7 @@ describe("buildEvaluator: user rule-name validation (S3)", () => {
   });
 });
 
-describe("buildEvaluator: when.happened.notIn (scope subtraction)", () => {
+describe("buildEvaluator: when.missing.notIn (scope subtraction)", () => {
   const sessionEntry = (
     customType: string,
     data: Record<string, unknown>,
@@ -6058,7 +6130,7 @@ describe("buildEvaluator: when.happened.notIn (scope subtraction)", () => {
     pattern: /^cr\b/,
     reason: "diff first, in a prior tool_call",
     when: {
-      happened: {
+      missing: {
         event: DESC_READ_EVENT,
         in: "agent_loop",
         notIn: "tool_call",
@@ -6082,7 +6154,7 @@ describe("buildEvaluator: when.happened.notIn (scope subtraction)", () => {
     assert.ok(fires, "no diff in any prior tool_call → rule fires");
   });
 
-  it("allows when event happened in a prior tool_call in same agent loop", async () => {
+  it("allows when event is present in a prior tool_call in same agent loop", async () => {
     const evaluator = buildEvaluator(
       { rules: [descCheck], observers: [descObserver] },
       resolve(),
@@ -6138,9 +6210,9 @@ describe("buildEvaluator: when.happened.notIn (scope subtraction)", () => {
     tool: "bash",
     field: "command",
     pattern: /^cr\b/,
-    reason: "must have happened in a prior loop",
+    reason: "must have been recorded in a prior loop",
     when: {
-      happened: {
+      missing: {
         event: DESC_READ_EVENT,
         in: "session",
         notIn: "agent_loop",
@@ -6189,7 +6261,7 @@ describe("buildEvaluator: when.happened.notIn (scope subtraction)", () => {
       pattern: /^cr\b/,
       reason: "stale after invalidator",
       when: {
-        happened: {
+        missing: {
           event: DESC_READ_EVENT,
           in: "agent_loop",
           since: INVAL,
@@ -6234,7 +6306,7 @@ describe("buildEvaluator: when.happened.notIn (scope subtraction)", () => {
       pattern: /^cr\b/,
       reason: "x",
       when: {
-        happened: {
+        missing: {
           event: DESC_READ_EVENT,
           in: "agent_loop",
           notIn: notIn as never,
@@ -6273,7 +6345,7 @@ describe("buildEvaluator: when.happened.notIn (scope subtraction)", () => {
   it('treats legacy "turn" as unknown-scope inside notIn', async () => {
     await assertWarnMatches(
       mkBadRule("turn"),
-      /when\.happened\.notIn must be.*"agent_loop", "session", or "tool_call"/,
+      /when\.missing\.notIn must be.*"agent_loop", "session", or "tool_call"/,
     );
   });
 
@@ -6282,7 +6354,7 @@ describe("buildEvaluator: when.happened.notIn (scope subtraction)", () => {
     // object). Authors passing that shape get a clear error.
     await assertWarnMatches(
       mkBadRule({ in: "tool_call" }),
-      /when\.happened\.notIn must be.*"agent_loop", "session", or "tool_call"/,
+      /when\.missing\.notIn must be.*"agent_loop", "session", or "tool_call"/,
     );
   });
 });
@@ -6725,7 +6797,7 @@ describe("buildEvaluator: exemption registry", () => {
     assert.equal(onFireRan, false);
   });
 
-  it("happened-leaf exemption: matches when the event has NOT happened (built-in inversion)", async () => {
+  it("missing-leaf exemption: matches when the event is missing (built-in inversion)", async () => {
     const prior = [
       {
         type: "custom" as const,
@@ -6742,14 +6814,14 @@ describe("buildEvaluator: exemption registry", () => {
         exemptions: [
           {
             rule: "no-main-commit",
-            when: { happened: { event: "vault-ready", in: "session" } },
+            when: { missing: { event: "vault-ready", in: "session" } },
           },
         ],
       },
       resolve(),
       makeHost(),
     );
-    // No prior entry: `happened` is true (event has NOT happened) ->
+    // No prior entry: `missing` is true (event is missing) ->
     // exemption matches -> no block.
     assert.equal(
       await evaluator.evaluate(
@@ -6759,7 +6831,7 @@ describe("buildEvaluator: exemption registry", () => {
       ),
       undefined,
     );
-    // Prior entry present: `happened` is false -> exemption does not
+    // Prior entry present: `missing` is false -> exemption does not
     // match -> rule blocks.
     const blocks = await evaluator.evaluate(
       bashEvent("git commit -m x"),

@@ -4,7 +4,7 @@ AST-backed steering rules for [pi](https://github.com/earendil-works/pi) agents,
 
 ## What this is
 
-A deterministic guardrail layer that sits between your pi agent and the tools it invokes. You declare TypeScript rules that gate `bash` / `write` / `edit` tool calls; the engine parses every command with [`unbash-walker`](https://github.com/cad0p/unbash-walker), walks a per-call tracker state, matches against your rules, and returns a block verdict before pi executes. Observers record state from `tool_result` events so later rules can say "this must have happened first".
+A deterministic guardrail layer that sits between your pi agent and the tools it invokes. You declare TypeScript rules that gate `bash` / `write` / `edit` tool calls; the engine parses every command with [`unbash-walker`](https://github.com/cad0p/unbash-walker), walks a per-call tracker state, matches against your rules, and returns a block verdict before pi executes. Observers record state from `tool_result` events so later rules can say "this must be done first".
 
 Use it when:
 
@@ -154,7 +154,7 @@ This fails at `tsc --noEmit` time — rule / plugin / observer names are threade
 
 Three orthogonal axes, three distinct word families. Keep them straight and the docs / rules / errors all line up.
 
-**Time scope** (`TopLevelWhenClause.happened.in`):
+**Time scope** (`TopLevelWhenClause.missing.in`):
 
 - **`agent_loop`** — the current user prompt plus every tool call it spawns. Bumped on pi's `agent_start` event. Most common scope for workflow rules.
 - **`session`** — the entire pi session across all agent loops. Persisted in the session JSONL, survives restarts.
@@ -219,8 +219,8 @@ User prompt sent to pi.
                           synthesized events under the reserved `events` key)
         agentLoopIndex  = N+1
    f. Test rule.pattern / requires / unless against ref.text.
-      Run when.cwd / when.branch / when.happened / plugin predicates.
-      `when.happened` merges real entries (ctx.findEntries) with
+      Run when.cwd / when.branch / when.missing / plugin predicates.
+      `when.missing` merges real entries (ctx.findEntries) with
       synthesized speculative ones (walkerState.events) by timestamp
       — one unified latest-entry comparison.
    g. First rule that ALL predicates pass on wins.
@@ -240,7 +240,7 @@ User prompt sent to pi.
           OR any ref.text (wrapper-aware, ADR §12).
         - `observer.onResult(event, observerCtx)` fires.
         - observerCtx.appendEntry(type, data) writes an entry —
-          auto-tagged with _agentLoopIndex for `when.happened` filtering.
+          auto-tagged with _agentLoopIndex for `when.missing` filtering.
 ```
 
 The important bits worth stressing:
@@ -298,7 +298,7 @@ type TopLevelWhenClause<Writes extends string = string> = {
   // Built-in non-registry leaves (lifted onto BuiltInWhenLeavesOuter):
   cwd?: Pattern | Pattern[]
       | { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };
-  happened?: {
+  missing?: {
     event: Writes;
     in: "agent_loop" | "session" | "tool_call";
     since?: Writes;     // optional invalidation sentinel
@@ -327,7 +327,7 @@ type TopLevelWhenClause<Writes extends string = string> = {
 Built-ins:
 
 - **`cwd`** — rule fires only when the command's effective cwd matches. For bash, this is the per-ref cwd from the walker (so `cd ~/personal && git commit` evaluates against `~/personal`). Dynamic targets — `cd "$WS_DIR/pkg"`, `cd ~/proj` — resolve through the walker's env tracker (seeded from `process.env.{HOME, USER, PWD}` plus any bare assignments, `export`s, or `unset`s in the same chain). Intractable targets (`cd $(pwd)`, `cd $UNDEFINED`) surface as the `"unknown"` sentinel; apply `onUnknown: "allow" | "block"` (default `"block"`, fail-closed) to choose. For write/edit, it's the session cwd.
-- **`happened`** — fires when an entry of `event` has NOT occurred in `in` scope. `"agent_loop"` filters by `_agentLoopIndex === ctx.agentLoopIndex` (one user prompt + its tool calls); `"session"` scans the whole session JSONL; `"tool_call"` considers only speculative entries synthesized for THIS tool_call's `&&`-chain. Optional `since` acts as an invalidation sentinel — see "Temporal ordering with `happened.since`" below. Optional `notIn` subtracts a narrower scope from `in` (e.g. `{ in: "agent_loop", notIn: "tool_call" }` means "happened in a prior tool_call in this loop", blocking the same-tool_call speculative bypass). `notIn` is set subtraction, distinct from the clause-level `not` (boolean negation). Synthesizes speculative entries across `&&` bash chains — see "`&&`-chain speculative allow" below.
+- **`missing`** — fires while an entry of `event` is missing in `in` scope. `"agent_loop"` filters by `_agentLoopIndex === ctx.agentLoopIndex` (one user prompt + its tool calls); `"session"` scans the whole session JSONL; `"tool_call"` considers only speculative entries synthesized for THIS tool_call's `&&`-chain. Optional `since` acts as an invalidation sentinel — see "Temporal ordering with `missing.since`" below. Optional `notIn` subtracts a narrower scope from `in` (e.g. `{ in: "agent_loop", notIn: "tool_call" }` means "recorded in a prior tool_call in this loop", blocking the same-tool_call speculative bypass). `notIn` is set subtraction, distinct from the clause-level `not` (boolean negation). Synthesizes speculative entries across `&&` bash chains — see "`&&`-chain speculative allow" below.
 - **`not`** — boolean NOT over an inner predicate block. One level only (no `not: not: ...` recursion). Inside `not:`, leaf-level `onUnknown:` is forbidden; the block-level `onUnknown:` modifier projects walker-unknown verdicts (default `"block"` = fail-CLOSED, rule fires).
 - **`condition`** — escape hatch for one-off logic. Prefer plugin predicates when the logic is reusable. Throws (sync or rejected promise) are caught and treated as `"unknown"` → default `"block"` policy fires the rule fail-CLOSED. Authors needing fail-OPEN wrap inside `not: { condition: fn, onUnknown: "allow" }` OR catch the throw inside the callback body.
 
@@ -401,14 +401,14 @@ const myPredicate: PredicateHandler = (args, ctx) => {
 {
   name: "commit-description-check",
   pattern: /^git\s+commit\b/,
-  when: { happened: { event: "description-reviewed", in: "agent_loop" } },
+  when: { missing: { event: "description-reviewed", in: "agent_loop" } },
   reason: "Re-read the commit message first.",
   writes: ["description-reviewed"],
   onFire: (ctx) => ctx.appendEntry("description-reviewed", {}),
 }
 ```
 
-First commit per agent loop blocks + self-marks. Second commit in the same loop: the self-mark satisfies `when.happened`, commit passes.
+First commit per agent loop blocks + self-marks. Second commit in the same loop: the self-mark satisfies `when.missing`, commit passes.
 
 `onFire` errors are caught, logged, and the block still returns. The block already passed every predicate; a broken self-mark should not invalidate it.
 
@@ -455,24 +455,24 @@ export default defineConfig({
     // `event` is type-narrowed to the union of all declared `writes`
     // across plugins + user observers. A typo like "ws-sync-don" is
     // rejected by the compiler.
-    when: { happened: { event: "ws-sync-done", in: "agent_loop" } },
+    when: { missing: { event: "ws-sync-done", in: "agent_loop" } },
     reason: "Run sync first.",
   }],
 });
 ```
 
-When you skip declaring `writes`, the observer's produced events stay out of the `AllWrites` union and `when.happened.event` references to them are rejected as typos. The failure mode biases toward catching real typos (a plugin typo producing a non-firing rule turns into a compile error) at the cost of requiring each producer to enumerate its events once.
+When you skip declaring `writes`, the observer's produced events stay out of the `AllWrites` union and `when.missing.event` references to them are rejected as typos. The failure mode biases toward catching real typos (a plugin typo producing a non-firing rule turns into a compile error) at the cost of requiring each producer to enumerate its events once.
 
-### Temporal ordering with `happened.since`
+### Temporal ordering with `missing.since`
 
-Sometimes "X happened" isn't enough — a later event should invalidate it. `happened.since` adds an optional invalidation sentinel:
+Sometimes "X occurred" isn't enough — a later event should invalidate it. `missing.since` adds an optional invalidation sentinel:
 
 ```ts
 {
   name: "cr-needs-fresh-sync",
   pattern: /^cr\b/,
   when: {
-    happened: {
+    missing: {
       event: "ws-sync-done",
       in: "agent_loop",
       since: "upstream-failed",
@@ -482,7 +482,7 @@ Sometimes "X happened" isn't enough — a later event should invalidate it. `hap
 }
 ```
 
-Semantics: the event counts as "happened" only if its most-recent entry in scope is strictly newer than the most-recent `since` entry. If `since` has never been written in scope, the clause degrades to the simple presence check — so adding `since` is safe even when the invalidator isn't in play yet.
+Semantics: the event counts as present only if its most-recent entry in scope is strictly newer than the most-recent `since` entry. If `since` has never been written in scope, the clause degrades to the simple presence check — so adding `since` is safe even when the invalidator isn't in play yet.
 
 Contrast with a hand-rolled `condition:` handler doing the same comparison: `since` is declarative, cross-checked at compile time (both `event` and `since` are constrained to the `Writes` union), and shared across rules without duplicating helper code. Reach for `condition` only when the comparison isn't "my event after their event" — e.g. counting, content matching, or quorum across multiple invalidators.
 
@@ -496,9 +496,9 @@ sync && cr --description notes.md
 
 The naive evaluation path blocks this chain: the evaluator runs BEFORE execution, so when it sees `cr`, the observer hasn't written `ws-sync-done` yet. Rule fires, block, retry, same block — an infinite loop.
 
-pi-steering resolves this via a walker-level **speculative-entry synthesis pass**. For every ref in an unconditionally-`&&`-reachable segment, every observer declaring `writes: [event]` and matching the ref (via the shared `watch` filter) contributes a synthetic entry into the next ref's `walkerState.events[event]`. The built-in `when.happened` then merges these synthetic entries with real session entries by timestamp — so a speculative `ws-sync-done` entry satisfies the rule exactly as a real one would, and the chain is allowed.
+pi-steering resolves this via a walker-level **speculative-entry synthesis pass**. For every ref in an unconditionally-`&&`-reachable segment, every observer declaring `writes: [event]` and matching the ref (via the shared `watch` filter) contributes a synthetic entry into the next ref's `walkerState.events[event]`. The built-in `when.missing` then merges these synthetic entries with real session entries by timestamp — so a speculative `ws-sync-done` entry satisfies the rule exactly as a real one would, and the chain is allowed.
 
-`&&` short-circuits on the prior's failure, so the speculative decision is safe: either the prior succeeds (and writes the event, retroactively justifying the allow), or it fails and the current ref never runs. Synthetic entries carry `speculative: true` so plugin predicates wanting pure historical semantics can filter them out; the built-in `happened` treats real and speculative entries identically.
+`&&` short-circuits on the prior's failure, so the speculative decision is safe: either the prior succeeds (and writes the event, retroactively justifying the allow), or it fails and the current ref never runs. Synthetic entries carry `speculative: true` so plugin predicates wanting pure historical semantics can filter them out; the built-in `missing` treats real and speculative entries identically.
 
 **Which joiners qualify:**
 
@@ -525,7 +525,7 @@ const crNeedsSync = {
   name: "cr-needs-sync",
   tool: "bash", field: "command",
   pattern: /^cr\b/,
-  when: { happened: { event: "ws-sync-done", in: "agent_loop" } },
+  when: { missing: { event: "ws-sync-done", in: "agent_loop" } },
   reason: "Run `sync` first.",
 } as const satisfies Rule;
 
@@ -548,7 +548,7 @@ export default defineConfig({
       tool: "bash", field: "command",
       pattern: /^npm\s+publish/,
       observer: "description-read",               // ← typo-checked against plugin + inline observers
-      when: { happened: { event: "doc-read", in: "agent_loop" } },  // ← event literal checked against writes
+      when: { missing: { event: "doc-read", in: "agent_loop" } },  // ← event literal checked against writes
       reason: "Read the release notes before publishing.",
     },
   ],
@@ -697,7 +697,7 @@ export default defineConfig({
 });
 ```
 
-`as const satisfies Rule` preserves literal types so `defineConfig`'s cross-reference checks (on `happened.event`, `observer`, etc.) still run on the replacement. No need to restate `pattern` / `when` / `observer` / `onFire` — the spread carries them through.
+`as const satisfies Rule` preserves literal types so `defineConfig`'s cross-reference checks (on `missing.event`, `observer`, etc.) still run on the replacement. No need to restate `pattern` / `when` / `observer` / `onFire` — the spread carries them through.
 
 Changing more than the reason (tightening the pattern, scoping by cwd, swapping the observer) works the same way: spread the original, then override the fields you want to change.
 
@@ -724,7 +724,7 @@ export default defineConfig({
 
 **Accumulation, not replacement.** Exemptions attach by target name to whichever rule wins that name after `disabledRules` filtering — the winning rule's body doesn't matter, only its name. Config-layer exemptions UNION across layers (project + global both apply, no inner-wins), and plugin-shipped exemptions (`Plugin.exemptions`) stack on top. Multiple exemptions for the same rule are OR-ed: ANY matching clause exempts. Duplicates are idempotent; there is no collision concept.
 
-Inside `defineConfig`, `exemptions[].rule` is typo-checked against the same rule-name union as `disabledRules`, and `when.happened.event` narrows against the config's `writes` union. Plugin-shipped exemption targets get the same universe, cross-checked from the `plugins` tuple: a plugin whose carve-outs target a rule shipped by a plugin you didn't list fails to compile with a per-plugin `__steeringExemption` error (the runtime `exemption-orphan` backstop still covers plugins annotated `: Plugin`, whose widened `rule: string` silently skips the check — plugin-shipped orphans are error-class, so the session always throws regardless of `failOnWarnings` and the CLI exits 1; `satisfies` / JSON / JS config-written orphans stay warning-class and remain fail-soft).
+Inside `defineConfig`, `exemptions[].rule` is typo-checked against the same rule-name union as `disabledRules`, and `when.missing.event` narrows against the config's `writes` union. Plugin-shipped exemption targets get the same universe, cross-checked from the `plugins` tuple: a plugin whose carve-outs target a rule shipped by a plugin you didn't list fails to compile with a per-plugin `__steeringExemption` error (the runtime `exemption-orphan` backstop still covers plugins annotated `: Plugin`, whose widened `rule: string` silently skips the check — plugin-shipped orphans are error-class, so the session always throws regardless of `failOnWarnings` and the CLI exits 1; `satisfies` / JSON / JS config-written orphans stay warning-class and remain fail-soft).
 
 **Fail-closed is STRICT — no escape hatch.** Exemption clauses evaluate with an "allow"-default projection — the OPPOSITE default from rule `when:` clauses. A predicate that can't resolve (walker-unknown cwd, a throwing handler, an unregistered predicate key) counts as "does not match", so the guard still fires. Exemptions are always fail-closed: an unknown walker value never exempts; the target rule's own `onUnknown` policy decides. `onUnknown` cannot be written inside an exemption (compile error; rejected at load if smuggled via `as any` / plain JS). A carve-out — even one shipped by a third-party plugin — can never weaken the guard's fail-closed posture.
 
@@ -902,16 +902,16 @@ The project layer loads **only when the project is trusted** — pi-steering ado
 Plugins register predicates (`when.<key>` handlers), observers, and `onFire` hooks — all of which **run arbitrary code during the evaluator's hot path**. A malicious or buggy plugin can:
 
 - Shell out via `ctx.exec` (with the same privileges as pi).
-- Forge session entries via `ctx.appendEntry`, which later rules consult via `when.happened`.
+- Forge session entries via `ctx.appendEntry`, which later rules consult via `when.missing`.
 - Throw in unexpected places — predicate-runtime throws fail open (the rule never fires). Session-start load failures throw with strict mode; see "Strict mode + load failures" below for the opt-out.
 
 A malicious plugin can trivially defeat any guardrail ship with your config. Review plugin source before adding it to `plugins: [...]` the same way you'd review any third-party dependency.
 
 ### Session JSONL trust
 
-`when.happened` reads entries tagged via `appendEntry`. The write path (`createAppendEntry`) is engine-controlled — every write gets the current `_agentLoopIndex` stamped on it automatically, and names go through name validation.
+`when.missing` reads entries tagged via `appendEntry`. The write path (`createAppendEntry`) is engine-controlled — every write gets the current `_agentLoopIndex` stamped on it automatically, and names go through name validation.
 
-The **read path (`findEntries`) treats every tagged entry in the session JSONL as authentic**. Entries written OUTSIDE the engine (direct JSONL writes by another pi extension, hand-edited session files, a `pi.appendEntry` call from non-steering code) can forge type tags and trick `when.happened` into thinking an event occurred when it didn't — bypassing rules that gate on that event.
+The **read path (`findEntries`) treats every tagged entry in the session JSONL as authentic**. Entries written OUTSIDE the engine (direct JSONL writes by another pi extension, hand-edited session files, a `pi.appendEntry` call from non-steering code) can forge type tags and trick `when.missing` into thinking an event occurred when it didn't — bypassing rules that gate on that event.
 
 This is the out-of-band trust boundary. Within the steering engine, the invariant holds; cross-extension and external writes are outside the engine's reach.
 
@@ -951,15 +951,15 @@ Beyond the tag shape, the contents are plugin-authored. A plugin shipping a rule
 
 ## Performance notes
 
-### `when.happened` scaling
+### `when.missing` scaling
 
-The built-in `when.happened` predicate filters session entries by `customType` via `ctx.findEntries`. Cost is **O(N_session_entries) per unique `customType` per tool_call** — entries are scanned on first read per customType and cached for the rest of the phase (the shared session-entry cache invalidates on writes, see the ADR).
+The built-in `when.missing` predicate filters session entries by `customType` via `ctx.findEntries`. Cost is **O(N_session_entries) per unique `customType` per tool_call** — entries are scanned on first read per customType and cached for the rest of the phase (the shared session-entry cache invalidates on writes, see the ADR).
 
-Example: a 5000-entry session with 6 distinct `when.happened` rules costs roughly 600 µs per tool_call on findEntries alone. Typical sessions (< 500 entries) are fine; long-running multi-day sessions may notice the overhead as the JSONL grows.
+Example: a 5000-entry session with 6 distinct `when.missing` rules costs roughly 600 µs per tool_call on findEntries alone. Typical sessions (< 500 entries) are fine; long-running multi-day sessions may notice the overhead as the JSONL grows.
 
 Future versions will add a session-manager-side index keyed by `customType`, moving the cost from O(N) to O(entries-of-that-type). For now, if you hit the scaling edge, consider:
 
-- Consolidating `when.happened` rules that share a `type`.
+- Consolidating `when.missing` rules that share a `type`.
 - Rotating / truncating the session JSONL between work sessions.
 
 ## Further reading

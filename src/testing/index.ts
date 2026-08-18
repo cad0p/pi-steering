@@ -401,7 +401,7 @@ export interface PriorEntryOptions {
   /**
    * Agent-loop index to stamp on the payload. The engine's live
    * `appendEntry` wrapper stamps this automatically on every write;
-   * fixture entries must reproduce the same shape so `when.happened:
+   * fixture entries must reproduce the same shape so `when.missing:
    * { in: "agent_loop" }` scope filtering works identically whether
    * the entry was written at runtime or seeded into the mock.
    *
@@ -447,8 +447,8 @@ export interface PriorEntryOptions {
  *       priorEntry("ws-sync-done", {}, { agentLoopIndex: 5 }),
  *     ],
  *   });
- *   // `when.happened: { event: "ws-sync-done", in: "agent_loop" }`
- *   // now sees the entry as "happened in the current loop".
+ *   // `when.missing: { event: "ws-sync-done", in: "agent_loop" }`
+ *   // now sees the entry as present in the current loop.
  */
 export function priorEntry(
   customType: string,
@@ -540,7 +540,7 @@ export interface MockContextOptions {
    * customType; timestamps parsed from the ISO string to epoch-ms,
    * matching the production shape.
    *
-   * For rules that use `when.happened: { in: "agent_loop" }` (or
+   * For rules that use `when.missing: { in: "agent_loop" }` (or
    * `in: "session"` with the same-loop filter), construct entries
    * via {@link priorEntry} so the engine's reserved
    * `_agentLoopIndex` tag is stamped correctly — hand-rolled
@@ -551,14 +551,14 @@ export interface MockContextOptions {
   readonly entries?: ReadonlyArray<MockEntry>;
 
   /**
-   * Per-ref speculative events the built-in `when.happened` predicate
+   * Per-ref speculative events the built-in `when.missing` predicate
    * reads from `ctx.walkerState.events` (see
    * {@link PredicateContext.walkerState}'s reserved `events` key).
    * Keys are the `customType` event literals; values are the
    * synthetic entries for that type. When provided, overwrites any
    * `events` entry on the caller's {@link walkerState}.
    *
-   * Use this to drive `when.happened` with `in: "tool_call"` (or any plugin
+   * Use this to drive `when.missing` with `in: "tool_call"` (or any plugin
    * predicate that introspects `walkerState.events`) in isolation
    * without wiring up `loadHarness` + a full bash event. The shape
    * matches what the walker-level synthesis pass produces in
@@ -610,7 +610,7 @@ export function mockContext(
   // `{ value, _agentLoopIndex }`. Without this, a rule author testing
   // their self-mark pattern via `mockContext` would see un-tagged
   // entries that would never have been written that way in
-  // production, and a follow-up `when.happened: { in: "agent_loop" }`
+  // production, and a follow-up `when.missing: { in: "agent_loop" }`
   // simulation would disagree with the real engine.
   const bufferingHost = bufferingAppendHost(buffer);
 
@@ -722,7 +722,7 @@ export function mockObserverContext(
 //
 //   - Drive a multi-call sequence where earlier `appendEntry` writes
 //     must be visible to later `findEntries` reads (self-marking rules,
-//     `when.happened` gating, observer → rule handoff).
+//     `when.missing` gating, observer → rule handoff).
 //   - Assert the exact shape of `appendEntry` writes (audit entries,
 //     tracker state) without going through a shorthand expectation.
 //   - Compose a custom {@link EvaluatorHost} for an existing
@@ -1150,7 +1150,7 @@ function resolveToolResultEvent(
  * });
  * ```
  *
- * Chain-aware predicates (e.g. the built-in `happened` with its
+ * Chain-aware predicates (e.g. the built-in `missing` with its
  * `&&`-chain speculative allow) read per-ref synthetic events from
  * `ctx.walkerState.events`. Populate `toolCallEvents` (or set
  * `walkerState` directly) in {@link MockContextOptions} to simulate

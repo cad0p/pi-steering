@@ -209,15 +209,15 @@ describe("schema: shape smoke tests", () => {
     assert.deepEqual(obs.writes, ["ws-sync-done", "ws-sync-failed"]);
   });
 
-  it("WhenClause.happened accepts the { event, in } shape", () => {
+  it("WhenClause.missing accepts the { event, in } shape", () => {
     const loop: WhenClause = {
-      happened: { event: "ws-sync-done", in: "agent_loop" },
+      missing: { event: "ws-sync-done", in: "agent_loop" },
     };
     const session: WhenClause = {
-      happened: { event: "welcome-shown", in: "session" },
+      missing: { event: "welcome-shown", in: "session" },
     };
-    assert.equal(loop.happened?.event, "ws-sync-done");
-    assert.equal(session.happened?.in, "session");
+    assert.equal(loop.missing?.event, "ws-sync-done");
+    assert.equal(session.missing?.in, "session");
   });
 
   it("SteeringConfig accepts every top-level field", () => {

@@ -7,12 +7,12 @@
  * Demonstrates `Rule.onFire` + self-marking (ADR §6, §14):
  *
  *   - Pattern `/^git\s+commit\b/` matches any commit command.
- *   - `when.happened: { event: DESCRIPTION_REVIEWED_EVENT, in: "agent_loop" }`
+ *   - `when.missing: { event: DESCRIPTION_REVIEWED_EVENT, in: "agent_loop" }`
  *     fires when the reminder entry has NOT been written this loop.
  *   - `onFire: markDescriptionReviewed` writes that entry when the
  *     rule blocks. First commit per agent loop → blocks with the
  *     reminder, self-marks. Second commit in the same loop → the
- *     entry is now present, `when.happened` no longer fires, commit
+ *     entry is now present, `when.missing` no longer fires, commit
  *     is allowed.
  *
  * ## Encapsulation (ADR §14)
@@ -69,7 +69,7 @@ export const commitDescriptionCheck = {
   field: "command",
   pattern: /^git\s+commit\b/,
   when: {
-    happened: { event: DESCRIPTION_REVIEWED_EVENT, in: "agent_loop" },
+    missing: { event: DESCRIPTION_REVIEWED_EVENT, in: "agent_loop" },
   },
   reason:
     "Re-read the commit description before committing. This reminder fires once per agent loop — your next commit in this loop will go through.",

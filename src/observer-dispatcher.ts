@@ -5,7 +5,7 @@
  * v2 observer dispatcher.
  *
  * Observers are the `tool_result` side of the steering engine: rules
- * decide "can this run" pre-execution; observers record "what happened"
+ * decide "can this run" pre-execution; observers record what occurred
  * post-execution. Typical use is to `appendEntry` into pi's session
  * JSONL so later predicates can gate on prior turn state (the
  * "description was read in a PRIOR turn" idiom from the ADR).
@@ -176,7 +176,7 @@ async function dispatchEventInner(
   const entryCache = createSessionEntryCache();
   const findEntries = createFindEntries(ctx, entryCache);
   // Shared appendEntry: auto-tags writes with `_agentLoopIndex` so
-  // `when.happened: { in: "agent_loop" }` can filter by agent-loop
+  // `when.missing: { in: "agent_loop" }` can filter by agent-loop
   // scope. Safe to hoist out of the loop: the wrapper is stateless.
   const appendEntry = createAppendEntry(host, agentLoopIndex, entryCache);
 

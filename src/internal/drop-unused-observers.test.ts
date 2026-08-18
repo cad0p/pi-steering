@@ -16,15 +16,15 @@ function mkObserver(name: string, writes?: readonly string[]): Observer {
   return writes === undefined ? base : { ...base, writes };
 }
 
-/** Minimal Rule with a specific `happened` shape. */
-function mkRuleWithHappened(name: string, event: string, since?: string): Rule {
+/** Minimal Rule with a specific `missing` shape. */
+function mkRuleWithMissing(name: string, event: string, since?: string): Rule {
   return {
     name,
     tool: "bash",
     field: "command",
     pattern: /^x/,
     when: {
-      happened: since
+      missing: since
         ? { event, in: "agent_loop", since }
         : { event, in: "agent_loop" },
     },
@@ -32,8 +32,8 @@ function mkRuleWithHappened(name: string, event: string, since?: string): Rule {
   };
 }
 
-/** Rule with no happened at all. */
-function mkRuleNoHappened(name: string): Rule {
+/** Rule with no missing at all. */
+function mkRuleNoMissing(name: string): Rule {
   return {
     name,
     tool: "bash",
@@ -44,9 +44,9 @@ function mkRuleNoHappened(name: string): Rule {
 }
 
 describe("dropUnusedObservers", () => {
-  it("keeps observer whose write is consumed by a rule's happened.event", () => {
+  it("keeps observer whose write is consumed by a rule's missing.event", () => {
     const observers = [mkObserver("a", ["X"])];
-    const rules = [mkRuleWithHappened("r1", "X")];
+    const rules = [mkRuleWithMissing("r1", "X")];
     const { kept, dropped } = dropUnusedObservers(observers, rules);
     assert.equal(kept.length, 1);
     assert.equal(kept[0]?.name, "a");
@@ -55,7 +55,7 @@ describe("dropUnusedObservers", () => {
 
   it("drops observer whose writes are not consumed", () => {
     const observers = [mkObserver("a", ["X"])];
-    const rules = [mkRuleNoHappened("r1")];
+    const rules = [mkRuleNoMissing("r1")];
     const { kept, dropped } = dropUnusedObservers(observers, rules);
     assert.equal(kept.length, 0);
     assert.equal(dropped.length, 1);
@@ -66,7 +66,7 @@ describe("dropUnusedObservers", () => {
 
   it("keeps observer when at least one of its writes is consumed", () => {
     const observers = [mkObserver("a", ["X", "Y"])];
-    const rules = [mkRuleWithHappened("r1", "X")];
+    const rules = [mkRuleWithMissing("r1", "X")];
     const { kept, dropped } = dropUnusedObservers(observers, rules);
     assert.equal(kept.length, 1);
     assert.equal(dropped.length, 0);
@@ -74,7 +74,7 @@ describe("dropUnusedObservers", () => {
 
   it("keeps observer with `writes: undefined` (conservative)", () => {
     const observers = [mkObserver("a", undefined)];
-    const rules = [mkRuleNoHappened("r1")];
+    const rules = [mkRuleNoMissing("r1")];
     const { kept, dropped } = dropUnusedObservers(observers, rules);
     assert.equal(kept.length, 1);
     assert.equal(dropped.length, 0);
@@ -82,15 +82,15 @@ describe("dropUnusedObservers", () => {
 
   it("keeps observer with empty `writes: []` (conservative parity)", () => {
     const observers = [mkObserver("a", [])];
-    const rules = [mkRuleNoHappened("r1")];
+    const rules = [mkRuleNoMissing("r1")];
     const { kept, dropped } = dropUnusedObservers(observers, rules);
     assert.equal(kept.length, 1);
     assert.equal(dropped.length, 0);
   });
 
-  it("keeps observer whose write is consumed only by happened.since", () => {
+  it("keeps observer whose write is consumed only by missing.since", () => {
     const observers = [mkObserver("a", ["X"])];
-    const rules = [mkRuleWithHappened("r1", "Y", /* since */ "X")];
+    const rules = [mkRuleWithMissing("r1", "Y", /* since */ "X")];
     const { kept, dropped } = dropUnusedObservers(observers, rules);
     assert.equal(kept.length, 1);
     assert.equal(dropped.length, 0);
@@ -102,7 +102,7 @@ describe("dropUnusedObservers", () => {
       mkObserver("unused", ["Z"]),
       mkObserver("undeclared"),
     ];
-    const rules = [mkRuleWithHappened("r1", "X")];
+    const rules = [mkRuleWithMissing("r1", "X")];
     const { kept, dropped } = dropUnusedObservers(observers, rules);
     assert.deepEqual(kept.map((o) => o.name).sort(), [
       "consumed",
@@ -114,9 +114,9 @@ describe("dropUnusedObservers", () => {
     );
   });
 
-  it("drops everything when no rule uses `when.happened`", () => {
+  it("drops everything when no rule uses `when.missing`", () => {
     const observers = [mkObserver("a", ["X"]), mkObserver("b", ["Y", "Z"])];
-    const rules = [mkRuleNoHappened("r1"), mkRuleNoHappened("r2")];
+    const rules = [mkRuleNoMissing("r1"), mkRuleNoMissing("r2")];
     const { kept, dropped } = dropUnusedObservers(observers, rules);
     assert.equal(kept.length, 0);
     assert.equal(dropped.length, 2);

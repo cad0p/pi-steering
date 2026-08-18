@@ -176,7 +176,7 @@ describe("RESERVED_PREDICATE_KEYS: type \u2194 runtime sync pin", () => {
     assert.equal(isReservedPredicateKey("cwd"), false);
     assert.equal(isReservedPredicateKey("branch"), false);
     assert.equal(isReservedPredicateKey("commitsAhead"), false);
-    assert.equal(isReservedPredicateKey("happened"), false);
+    assert.equal(isReservedPredicateKey("missing"), false);
     assert.equal(isReservedPredicateKey("condition"), false);
   });
 
@@ -394,13 +394,13 @@ describe("validateWhenClauseShape: nested-not: rejection", () => {
 // ---------------------------------------------------------------------------
 
 describe("BuiltInWhenLeaves: shape pin", () => {
-  it("BuiltInWhenLeaves contains exactly { happened, condition, cwd }", () => {
+  it("BuiltInWhenLeaves contains exactly { missing, condition, cwd }", () => {
     // Compile-only assertion. If a future change adds a new built-in
     // non-registry leaf (e.g., `tool?:`) without updating the pin, this
     // fails to typecheck — forces a deliberate decision rather than
     // silently widening the surface that ships with the engine itself.
     type _BuiltInShape = keyof BuiltInWhenLeaves extends
-      | "happened"
+      | "missing"
       | "condition"
       | "cwd"
       ? true
@@ -413,16 +413,16 @@ describe("BuiltInWhenLeaves: shape pin", () => {
   it("BuiltInWhenLeavesOuter and BuiltInWhenLeavesInner share the same key set", () => {
     // Outer/Inner split formalizes the leaf-level `onUnknown:` ban
     // inside `not:` (parity with registry-driven inner predicates).
-    // Both flavors carry `happened?:`, `condition?:`, `cwd?:`; only
+    // Both flavors carry `missing?:`, `condition?:`, `cwd?:`; only
     // `cwd:`'s spread shape differs.
     type _OuterKeys = keyof BuiltInWhenLeavesOuter extends
-      | "happened"
+      | "missing"
       | "condition"
       | "cwd"
       ? true
       : false;
     type _InnerKeys = keyof BuiltInWhenLeavesInner extends
-      | "happened"
+      | "missing"
       | "condition"
       | "cwd"
       ? true

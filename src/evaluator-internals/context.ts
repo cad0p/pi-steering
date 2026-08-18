@@ -103,7 +103,7 @@ export function createExecCache(
  * Key under which the engine auto-injects the current `agentLoopIndex`
  * into every entry written via `PredicateContext.appendEntry` or
  * `ObserverContext.appendEntry`. Rules using
- * `when.happened: { in: "agent_loop" }` filter session entries by
+ * `when.missing: { in: "agent_loop" }` filter session entries by
  * comparing this key against `ctx.agentLoopIndex`.
  *
  * Part of the on-disk session-JSONL format, exposed as a public
@@ -189,7 +189,7 @@ export function createAppendEntry(
     // S2/E1: drop the cached read for this customType so a later
     // `findEntries(customType)` call from the same phase re-materializes
     // the list and sees the write we just made. Without this, a rule's
-    // `onFire` that writes + a later rule's `when.happened` that reads
+    // `onFire` that writes + a later rule's `when.missing` that reads
     // see inconsistent snapshots within one tool_call.
     findEntriesCache?.delete(customType);
   };
@@ -216,7 +216,7 @@ export function createAppendEntry(
  * Cross-rule write visibility (S2/E1): when the same phase also uses
  * a paired {@link createAppendEntry} with the SAME cache map, a write
  * during rule A's `onFire` invalidates the cached read for that
- * customType so rule B's `when.happened` predicate sees the fresh
+ * customType so rule B's `when.missing` predicate sees the fresh
  * entry. Callers that want this consistency pass in a shared cache
  * via the optional `cache` parameter; callers that omit it get the
  * old per-closure snapshot behaviour (pre-S2), which is sound only
@@ -270,7 +270,7 @@ export function createFindEntries(
  *      `appendEntry` invalidates that type's cached list, so the next
  *      read re-scans the session JSONL and observes the write. Without
  *      this, a rule's `onFire` appending X followed by a later rule's
- *      `when.happened: { event: X }` would read a stale pre-write
+ *      `when.missing: { event: X }` would read a stale pre-write
  *      snapshot.
  *
  * Consumers who don't need write-through-reads (tests, one-shot

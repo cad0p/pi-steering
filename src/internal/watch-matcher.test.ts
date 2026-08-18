@@ -10,7 +10,7 @@
  *
  *   1. The production dispatcher ({@link matchesWatch} applied to a
  *      real `ToolResultEvent` arriving from pi).
- *   2. The evaluator's `when.happened` with `in: "tool_call"` speculative-allow
+ *   2. The evaluator's `when.missing` with `in: "tool_call"` speculative-allow
  *      (synthesizes a minimal successful bash event from a prior
  *      `&&` ref and calls {@link matchesWatch}).
  *

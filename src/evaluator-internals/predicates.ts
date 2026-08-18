@@ -114,7 +114,7 @@ export function isReservedPredicateKey(
  * The `not:` operator field itself counts as a leaf at the outer
  * `when:` level (it produces a verdict via Kleene composition of the
  * inner not-block); only modifier keys are stripped. Built-in
- * non-registry keys (`condition`, `happened`, `cwd`) count as leaves;
+ * non-registry keys (`condition`, `missing`, `cwd`) count as leaves;
  * plugin-registered predicates count as leaves regardless of whether
  * the plugin is currently loaded — the unknown-predicate check fires
  * later via {@link UnknownPredicateError}.
@@ -175,14 +175,14 @@ export function validateWhenClauseShape(
     throw new Error(
       `[pi-steering] ${path} contains no predicate leaves; ` +
         `a clause must contain at least one predicate (cwd:, branch:, ` +
-        `commitsAhead:, condition:, happened:, not:, etc.). Modifier keys ` +
+        `commitsAhead:, condition:, missing:, not:, etc.). Modifier keys ` +
         `(${MODIFIER_KEYS.join(", ")}) alone are not enough — add a leaf ` +
         `or remove the empty clause.`,
     );
   }
   // Recurse into the `not:` block. `condition:` is a function leaf,
   // no recursion. Other plugin keys can carry nested objects (e.g.
-  // the built-in `happened` shape) but those aren't when-clauses, so
+  // the built-in `missing` shape) but those aren't when-clauses, so
   // recursion is scoped to the `not:` operator only.
   const notBlock = (block as { not?: unknown }).not;
   if (
@@ -230,7 +230,7 @@ export function validateWhenClauseShape(
  *     (`cwd: { pattern: /x/, onUnknown: ... }`, plugin spread forms
  *     `{ value: ..., onUnknown: ... }`).
  *
- * `condition` (function) and `happened` (`{ event, in, since?,
+ * `condition` (function) and `missing` (`{ event, in, since?,
  * notIn? }`) values are skipped — they cannot carry `onUnknown`.
  *
  * This is the runtime half of the strict fail-closed enforcement
@@ -257,7 +257,7 @@ export function validateExemptionWhenClauseShape(
  * mode to reject the leaf-object-form placement of `onUnknown` in
  * exemption clauses.
  *
- * Functions (`condition`) and `happened` shapes (`{ event, in, ... }`
+ * Functions (`condition`) and `missing` shapes (`{ event, in, ... }`
  * — no `pattern` / `value` key) are not object-form leaves and are
  * skipped.
  */
@@ -487,12 +487,12 @@ function evaluateCwd(value: unknown, walkerCwd: string): PredicateVerdict {
 }
 
 /**
- * Built-in `when.happened` predicate. Merges real session entries
+ * Built-in `when.missing` predicate. Merges real session entries
  * (from `ctx.findEntries`, scope-filtered) with speculative entries
  * (from `ctx.walkerState.events[event]`, produced by the walker-level
  * synthesis pass — see {@link synthesizeSpeculativeEntries}) and
- * returns **true when the unified timeline says the event has NOT
- * happened** — i.e. the rule should fire.
+ * returns **true when the unified timeline says the event is
+ * missing** — i.e. the rule should fire.
  *
  * Single pipeline: the merge via timestamp ordering collapses the
  * prior two-path structure (specialized tool_call-scope speculative-
@@ -515,9 +515,9 @@ function evaluateCwd(value: unknown, walkerCwd: string): PredicateVerdict {
  * the type is newer than any scope subset too).
  *
  * Inversion is handled by the caller via `when.not`. Authors wanting
- * "fires when the event HAS happened" wrap this clause in `not:`.
+ * "fires when the event IS PRESENT" wrap this clause in `not:`.
  */
-function evaluateHappened(
+function evaluateMissing(
   value: unknown,
   ctx: PredicateContext,
   ruleName: string,
@@ -529,7 +529,7 @@ function evaluateHappened(
     !("in" in value)
   ) {
     throw new Error(
-      `[pi-steering] Rule "${ruleName}": when.happened ` +
+      `[pi-steering] Rule "${ruleName}": when.missing ` +
         `expected { event: string; in: "agent_loop" | "session" | "tool_call"; since?: string; notIn?: "agent_loop" | "session" | "tool_call" }; ` +
         `got ${JSON.stringify(value)}`,
     );
@@ -554,14 +554,14 @@ function evaluateHappened(
   if (scope !== "agent_loop" && scope !== "session" && scope !== "tool_call") {
     throw new Error(
       `[pi-steering] Rule "${ruleName}": ` +
-        `when.happened.in must be "agent_loop", "session", or "tool_call"; ` +
+        `when.missing.in must be "agent_loop", "session", or "tool_call"; ` +
         `got ${JSON.stringify(scope)}`,
     );
   }
   if (since !== undefined && typeof since !== "string") {
     throw new Error(
       `[pi-steering] Rule "${ruleName}": ` +
-        `when.happened.since must be a string if present; ` +
+        `when.missing.since must be a string if present; ` +
         `got ${JSON.stringify(since)}`,
     );
   }
@@ -579,20 +579,20 @@ function evaluateHappened(
     ) {
       throw new Error(
         `[pi-steering] Rule "${ruleName}": ` +
-          `when.happened.notIn must be "agent_loop", "session", or "tool_call"; ` +
+          `when.missing.notIn must be "agent_loop", "session", or "tool_call"; ` +
           `got ${JSON.stringify(notIn)}`,
       );
     }
     if (notIn === scope) {
       throw new Error(
         `[pi-steering] Rule "${ruleName}": ` +
-          `when.happened.in and when.happened.notIn are identical (${JSON.stringify(scope)}); subtraction is empty. Remove the "notIn" modifier.`,
+          `when.missing.in and when.missing.notIn are identical (${JSON.stringify(scope)}); subtraction is empty. Remove the "notIn" modifier.`,
       );
     }
     if (SCOPE_ORDER[notIn] > SCOPE_ORDER[scope]) {
       throw new Error(
         `[pi-steering] Rule "${ruleName}": ` +
-          `when.happened.notIn (${JSON.stringify(notIn)}) is a superset of when.happened.in (${JSON.stringify(scope)}); subtraction is empty. Adjust the scopes.`,
+          `when.missing.notIn (${JSON.stringify(notIn)}) is a superset of when.missing.in (${JSON.stringify(scope)}); subtraction is empty. Adjust the scopes.`,
       );
     }
     innerScope = notIn;
@@ -606,7 +606,7 @@ function evaluateHappened(
     return true;
   }
   if (sinceValue === undefined) {
-    // Simple presence check: event happened → rule does NOT fire.
+    // Simple presence check: event is present → rule does NOT fire.
     return false;
   }
   const sinceLatest = latestTimestampSubtracted(
@@ -617,10 +617,10 @@ function evaluateHappened(
   );
   if (sinceLatest === null) {
     // Invalidator never written in the (subtracted) timeline →
-    // degrade to simple-happened semantics (event wins).
+    // degrade to simple-presence semantics (event wins).
     return false;
   }
-  // Both present. Event counts as happened iff its latest entry
+  // Both present. Event counts as present iff its latest entry
   // is strictly newer than the invalidator's.
   return eventLatest <= sinceLatest;
 }
@@ -646,7 +646,7 @@ function evaluateHappened(
  * subtracts all speculative entries. For real entries, the inner
  * scope's membership predicate gates which are excluded.
  *
- * Invariant (enforced by {@link evaluateHappened}'s validation):
+ * Invariant (enforced by {@link evaluateMissing}'s validation):
  * `innerScope === null` OR `SCOPE_ORDER[innerScope] <= SCOPE_ORDER[outer]`
  * AND `innerScope !== outer`. Callers passing anything else get a
  * configuration error before arriving here.
@@ -705,7 +705,7 @@ function speculativeEntriesFor(
 }
 
 /**
- * Scope nesting order used for superset detection in happened.notIn
+ * Scope nesting order used for superset detection in missing.notIn
  * validation. `tool_call ⊂ agent_loop ⊂ session`; a higher number
  * means a broader scope.
  */
@@ -946,6 +946,17 @@ async function evaluateNotBlock(
   onUnknownDefault: "allow" | "block" = "block",
   ignoreExplicitModifiers = false,
 ): Promise<boolean> {
+  // TEMP (issue #55 migration commit): legacy `happened` inside a
+  // `not:` block — map onto `missing`. REMOVE in the cleanup commit.
+  const legacyHappened = (block as { happened?: unknown }).happened;
+  if (legacyHappened !== undefined) {
+    block = { ...block } as TopLevelWhenClauseNoRecurse<string>;
+    delete (block as { happened?: unknown }).happened;
+    if (!("missing" in block)) {
+      (block as { missing?: unknown }).missing = legacyHappened;
+    }
+  }
+
   // Read block-level `onUnknown:` modifier. Default fail-CLOSED
   // (or the exemption-evaluation override via `onUnknownDefault`).
   // STRICT exemption evaluation ignores the explicit modifier
@@ -974,10 +985,10 @@ async function evaluateNotBlock(
       continue;
     }
 
-    // Built-in: happened — boolean leaf, no walker-unknown semantics
+    // Built-in: missing — boolean leaf, no walker-unknown semantics
     // (it consults session entries / speculative entries).
-    if (key === "happened") {
-      verdicts.push(evaluateHappened(value, ctx, ruleName));
+    if (key === "missing") {
+      verdicts.push(evaluateMissing(value, ctx, ruleName));
       continue;
     }
 
@@ -1036,7 +1047,7 @@ async function evaluateNotBlock(
  *                    the spread form projects to a definite boolean via
  *                    {@link projectVerdict} (default `"block"` =
  *                    fail-CLOSED).
- *   - `happened`   — built-in (session-entry-scoped), consumes
+ *   - `missing`   — built-in (session-entry-scoped), consumes
  *                    `ctx.findEntries` + `ctx.agentLoopIndex`. Boolean.
  *   - `not`        — nested `not:` block; dispatched to
  *                    {@link evaluateNotBlock} which composes leaves with
@@ -1091,7 +1102,7 @@ async function evaluateNotBlock(
  * behavior is byte-identical).
  *
  * Escapes `evaluateWhen` does NOT swallow (`UnknownPredicateError`,
- * `evaluateHappened` shape throws, …) propagate to the caller — the
+ * `evaluateMissing` shape throws, …) propagate to the caller — the
  * exemption call site in the evaluator wraps the whole clause in its
  * own try/catch and treats a throw as "does not match" (S1).
  */
@@ -1106,6 +1117,18 @@ export async function evaluateWhen(
   ignoreExplicitModifiers = false,
 ): Promise<boolean> {
   if (!when) return true;
+
+  // TEMP (issue #55 migration commit): accept the legacy `happened`
+  // spelling while the rename lands — the equivalence test pairs
+  // both spellings. REMOVE in the cleanup commit.
+  const legacyHappened = (when as { happened?: unknown }).happened;
+  if (legacyHappened !== undefined) {
+    when = { ...when };
+    delete (when as { happened?: unknown }).happened;
+    if (!("missing" in when)) {
+      (when as { missing?: unknown }).missing = legacyHappened;
+    }
+  }
 
   for (const [key, value] of Object.entries(when)) {
     if (value === undefined) continue;
@@ -1129,9 +1152,9 @@ export async function evaluateWhen(
       continue;
     }
 
-    // Built-in: happened (session-entry presence check). Boolean.
-    if (key === "happened") {
-      if (!evaluateHappened(value, ctx, ruleName)) return false;
+    // Built-in: missing (session-entry presence check). Boolean.
+    if (key === "missing") {
+      if (!evaluateMissing(value, ctx, ruleName)) return false;
       continue;
     }
 

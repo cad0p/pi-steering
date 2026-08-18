@@ -264,7 +264,7 @@ async function tryExec(
  *   - `unknown` - the tracker observed a write it couldn't resolve
  *                  statically (e.g. `git checkout $VAR`). The walker
  *                  deliberately surfaces this to signal "a change
- *                  happened but I can't name the new value". Falling
+ *                  occurred but I can't name the new value". Falling
  *                  through to `exec` would return the PRE-write
  *                  value and silently defeat the walker's static
  *                  tracking - exactly the case it exists for.

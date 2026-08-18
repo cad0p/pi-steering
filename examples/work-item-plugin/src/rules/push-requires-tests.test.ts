@@ -114,7 +114,7 @@ describe("push-requires-tests", () => {
     );
 
     // Now the push should be allowed — the rule's
-    // `when.happened` finds the entry in the current agent loop.
+    // `when.missing` finds the entry in the current agent loop.
     const result = await harness.evaluate(
       {
         type: "tool_call",
@@ -128,7 +128,7 @@ describe("push-requires-tests", () => {
     assert.equal(result, undefined);
   });
 
-  it("re-blocks push after `git pull` stale-s the test entry (happened.since)", async () => {
+  it("re-blocks push after `git pull` stale-s the test entry (missing.since)", async () => {
     // Demonstrates the PR #4 `since` invalidation sentinel. The
     // rule is gated on `TEST_PASSED_EVENT` but `since: RETEST_REQUIRED_EVENT`
     // means a later pull stale-s the test state.

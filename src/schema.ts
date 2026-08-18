@@ -386,11 +386,11 @@ export type InnerValue<K extends PluginPredicateKey> =
  * surface on {@link TopLevelWhenClause} as typed fields.
  *
  * The `Writes` generic threads through {@link defineConfig} so that
- * `when.happened.event` / `when.happened.since` references are
+ * `when.missing.event` / `when.missing.since` references are
  * compile-time-checked against the union of declared `writes`
  * arrays across plugins + observers.
  *
- * Currently three non-registry leaves: `happened?:`, `condition?:`,
+ * Currently three non-registry leaves: `missing?:`, `condition?:`,
  * `cwd?:`. The shape is pinned in tests (a future widening — e.g.,
  * adding a new built-in `tool?:` leaf — fails the type-pin and
  * forces a deliberate decision).
@@ -422,9 +422,9 @@ export type InnerValue<K extends PluginPredicateKey> =
  */
 export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
   /**
-   * Rule fires when the given `event` has NOT happened in the given
-   * scope. Typical usage: "block `cr` unless sync has happened" -
-   * `happened: { event: "rds-ws-sync-done", in: "agent_loop" }`.
+   * Rule fires while the given `event` is MISSING in the given
+   * scope. Typical usage: "block `cr` while sync is missing" -
+   * `missing: { event: "rds-ws-sync-done", in: "agent_loop" }`.
    *
    * Scopes:
    *   - `"agent_loop"` - filter session entries by
@@ -443,26 +443,26 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
    *     observer writes the event.
    *
    * Inversion: place inside `not` to flip the clause-level boolean -
-   * `not: { happened: { event, in } }` fires when the event HAS
-   * happened. See ADR §5.
+   * `not: { missing: { event, in } }` fires when the event IS
+   * PRESENT. See ADR §5.
    *
    * Optional `since` sentinel (temporal ordering): when present,
-   * `event` is considered "happened" only if its most-recent entry
+   * `event` counts as present only if its most-recent entry
    * in scope is newer than the most-recent `since` entry in scope.
    * If `since` has never been written, the clause behaves as if
    * `since` were absent (simple presence check on `event`).
    *
-   * Use for invalidation semantics: "rule fires when sync has not
-   * happened in this agent_loop, OR the last sync is older than the
+   * Use for invalidation semantics: "rule fires while sync is
+   * missing from this agent_loop, OR the last sync is older than the
    * last upstream-fail." Pattern:
-   *   `happened: { event: SYNC_DONE_EVENT, in: "agent_loop",
+   *   `missing: { event: SYNC_DONE_EVENT, in: "agent_loop",
    *                since: UPSTREAM_FAILED_EVENT }`.
    *
    * Optional `notIn` (set subtraction over scopes): when present,
    * entries in `notIn` scope are excluded from the `in`-scoped entry
    * stream BEFORE the `ts_max` comparison runs. Typical use:
-   * `happened: { event, in: "agent_loop", notIn: "tool_call" }` -
-   * "happened in a prior tool_call in this agent loop". Excludes
+   * `missing: { event, in: "agent_loop", notIn: "tool_call" }` -
+   * "recorded in a prior tool_call in this agent loop". Excludes
    * same-tool_call speculative entries so `someCmd && guardedCmd`
    * can't bypass the rule via tool_call-scope speculative synthesis.
    *
@@ -484,7 +484,7 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
    * `defineConfig` the `Writes` parameter defaults to `string` so the
    * check is skipped.
    */
-  happened?: {
+  missing?: {
     event: Writes;
     in: "agent_loop" | "session" | "tool_call";
     since?: Writes;
@@ -553,7 +553,7 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
  * `& PredicateModifiers`, matching the constraint registry-driven
  * inner predicates already enforce via `InnerValue<K>`.
  *
- * `happened?:` and `condition?:` are identical to
+ * `missing?:` and `condition?:` are identical to
  * {@link BuiltInWhenLeavesOuter}; only `cwd:` differs. The engine
  * reads block-level `onUnknown:` inside `not:` regardless of leaf
  * shape, so this type formalizes that constraint at the authoring
@@ -564,8 +564,8 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
  *      Outer/Inner split, and the parallel outer-flavor type.
  */
 export interface BuiltInWhenLeavesInner<Writes extends string = string> {
-  /** Identical to {@link BuiltInWhenLeavesOuter.happened}. */
-  happened?: BuiltInWhenLeavesOuter<Writes>["happened"];
+  /** Identical to {@link BuiltInWhenLeavesOuter.missing}. */
+  missing?: BuiltInWhenLeavesOuter<Writes>["missing"];
 
   /** Identical to {@link BuiltInWhenLeavesOuter.condition}. */
   condition?: BuiltInWhenLeavesOuter<Writes>["condition"];
@@ -601,7 +601,7 @@ export type BuiltInWhenLeaves<Writes extends string = string> =
  * leaf-level field accepting the bare or spread form. The `not?:`
  * operator allows one level of negation (no recursion).
  *
- * Generic over `Writes` so the built-in `happened?:` leaf's `event` /
+ * Generic over `Writes` so the built-in `missing?:` leaf's `event` /
  * `since` references narrow to the union of declared `writes` strings
  * threaded through by {@link defineConfig}.
  *
@@ -657,7 +657,7 @@ export type TopLevelWhenClause<Writes extends string = string> = {
  * forms (NO leaf-level modifiers — modifiers live at this block's top
  * level via `& PredicateModifiers`). No nested `not:` (no recursion).
  *
- * Generic over `Writes` so the built-in `happened?:` leaf inherits
+ * Generic over `Writes` so the built-in `missing?:` leaf inherits
  * the same compile-time event-narrowing as the outer level.
  *
  * Same homomorphic-with-filter mapping shape as
@@ -715,15 +715,15 @@ export type ExemptionWhenClause<Writes extends string = string> = {
     ? never
     : K]?: InnerValue<K & PluginPredicateKey>;
 } & BuiltInWhenLeavesInner<Writes> & {
-    // `happened` / `condition` are re-declared to strip the
+    // `missing` / `condition` are re-declared to strip the
     // `| undefined` that `BuiltInWhenLeavesInner`'s indexed-access
-    // declarations (`BuiltInWhenLeavesOuter<Writes>["happened"]` /
+    // declarations (`BuiltInWhenLeavesOuter<Writes>["missing"]` /
     // `["condition"]`) leak under `exactOptionalPropertyTypes` —
     // the intersection of `X | undefined` (inner flavor) with `X`
     // (this declaration) resolves to `X`, keeping the type
     // assignable to {@link TopLevelWhenClause} at internal surfaces
     // (evaluator exemption map, finalizePluginState, validator).
-    happened?: Exclude<BuiltInWhenLeavesInner<Writes>["happened"], undefined>;
+    missing?: Exclude<BuiltInWhenLeavesInner<Writes>["missing"], undefined>;
     condition?: Exclude<BuiltInWhenLeavesInner<Writes>["condition"], undefined>;
     not?: Omit<TopLevelWhenClauseNoRecurse<Writes>, "onUnknown">;
   };
@@ -821,13 +821,13 @@ export interface WhenClause<Writes extends string = string> {
     | { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };
 
   /**
-   * @deprecated Use {@link TopLevelWhenClause}'s `happened?:` leaf
+   * @deprecated Use {@link TopLevelWhenClause}'s `missing?:` leaf
    *             (lifted onto {@link BuiltInWhenLeaves}). Retained for
    *             v1 JSON→v2 conversion compatibility only.
-   * @see BuiltInWhenLeaves.happened for the canonical semantics
+   * @see BuiltInWhenLeaves.missing for the canonical semantics
    *      (scopes, `since`, `notIn`, runtime errors).
    */
-  happened?: {
+  missing?: {
     event: Writes;
     in: "agent_loop" | "session" | "tool_call";
     since?: Writes;
@@ -919,7 +919,7 @@ export interface BaseRule<
    * Composable predicate block. See {@link TopLevelWhenClause}.
    *
    * `Writes` is the union of session-entry event literals the rule's
-   * `when.happened.event` is allowed to reference. Threaded through by
+   * `when.missing.event` is allowed to reference. Threaded through by
    * {@link defineConfig} from all declared `writes` arrays in scope.
    *
    * The five compile-time constraints from the not-block onUnknown
@@ -1019,9 +1019,9 @@ export interface BaseRule<
    * **Compile-time effect (via {@link defineConfig}):** the union of
    * all `writes` literals declared across plugin rules, plugin
    * observers, user rules, and user observers constrains the `event`
-   * field of every {@link BuiltInWhenLeavesOuter.happened} inside the same config.
+   * field of every {@link BuiltInWhenLeavesOuter.missing} inside the same config.
    * Declaring a write here makes it referenceable from
-   * `when.happened.event` anywhere in that config; omitting it leaves
+   * `when.missing.event` anywhere in that config; omitting it leaves
    * the string out of the union and downstream references to it are
    * rejected as typos.
    *
@@ -1036,7 +1036,7 @@ export interface BaseRule<
    * **Footgun: bare `: Rule` / `: Observer` / `: Plugin` annotations
    * widen the literal `writes` array to `readonly string[]`. The engine
    * can no longer project string-literal members, so `AllWrites`
-   * collapses to `never` - meaning EVERY `when.happened.event`
+   * collapses to `never` - meaning EVERY `when.missing.event`
    * reference in the config is rejected as a typo, not silently
    * accepted.
    *
@@ -1047,7 +1047,7 @@ export interface BaseRule<
    * **Opt-out:** authors who build their config via
    * `satisfies SteeringConfig` instead of `defineConfig` lose the
    * compile-time check - the `SteeringConfig` shape defaults the
-   * {@link Rule} generics to `string`, so `when.happened.event` is
+   * {@link Rule} generics to `string`, so `when.missing.event` is
    * unconstrained. `defineConfig` is the entry point that enforces.
    *
    * The wider warning - "name" / "plugin" literals widening to
@@ -1065,7 +1065,7 @@ export interface BaseRule<
    * (e.g. `cr-description-check` - first attempt per agent loop blocks
    * as reminder, self-marks via `onFire` so subsequent attempts pass).
    * Anything written via `ctx.appendEntry` gets auto-tagged with the
-   * current `_agentLoopIndex` so a follow-up `when.happened:
+   * current `_agentLoopIndex` so a follow-up `when.missing:
    * { in: "agent_loop" }` check can detect it.
    *
    * Timing guarantees:
@@ -1225,7 +1225,7 @@ export interface ObserverContext {
    * engine. Bumped on each `agent_start` pi event (one agent loop =
    * one user prompt + its tool calls). Observers writing session
    * entries get this tag auto-injected into the payload so rules
-   * using `when.happened` with `in: "agent_loop"` can filter by it.
+   * using `when.missing` with `in: "agent_loop"` can filter by it.
    */
   agentLoopIndex: number;
 
@@ -1271,9 +1271,9 @@ export interface Observer {
    * **Compile-time effect (via {@link defineConfig}):** the union of
    * all `writes` literals declared across plugin rules, plugin
    * observers, user rules, and user observers constrains the `event`
-   * field of every {@link BuiltInWhenLeavesOuter.happened} inside the same config.
+   * field of every {@link BuiltInWhenLeavesOuter.missing} inside the same config.
    * Declaring a write here makes it referenceable from
-   * `when.happened.event` anywhere in that config; omitting it leaves
+   * `when.missing.event` anywhere in that config; omitting it leaves
    * the string out of the union and downstream references to it are
    * rejected as typos.
    *
@@ -1282,7 +1282,7 @@ export interface Observer {
    * reusable observer constants, or declare them inline inside
    * `defineConfig({ observers: [...] })`. Bare `: Observer` annotations
    * widen `writes` to `readonly string[]` and collapse `AllWrites` to
-   * `never`, rejecting every `when.happened.event` reference.
+   * `never`, rejecting every `when.missing.event` reference.
    *
    * **Runtime effect:** none. `writes` is purely documentation +
    * type-level plumbing - the engine does NOT verify that `onResult`
@@ -1477,7 +1477,7 @@ export interface ExecResult {
 /**
  * Shape of the walker-state snapshot the evaluator populates on
  * {@link PredicateContext.walkerState} for bash rules. Consumed by
- * the built-in `when.cwd` / `when.happened` predicates and by
+ * the built-in `when.cwd` / `when.missing` predicates and by
  * plugin-authored predicates that read per-ref tracker state.
  *
  * All fields are read-only. The evaluator assembles a fresh object
@@ -1542,7 +1542,7 @@ export interface WhenWalkerState {
  *     pi `agent_start` event (one agent loop = one user prompt + its
  *     tool calls). Rules gate "since the user's last message" state
  *     by comparing entries' auto-tagged `_agentLoopIndex` against
- *     `ctx.agentLoopIndex`, which is what `when.happened` with
+ *     `ctx.agentLoopIndex`, which is what `when.missing` with
  *     `in: "agent_loop"` does internally.
  *   - `exec` - shell escape hatch. The evaluator memoizes results per
  *     `(cmd, args, cwd)` within a single tool_call; no cross-call cache.
@@ -1619,7 +1619,7 @@ export interface PredicateContext {
    * via continuous `&&` chains from observers' `writes:` declarations.
    * Each entry carries a `{ data, timestamp, speculative: true }`
    * shape; timestamps are in a reserved range (above any real entry)
-   * monotonic in AST order. The built-in `when.happened` predicate
+   * monotonic in AST order. The built-in `when.missing` predicate
    * merges these with real entries via timestamp comparison;
    * plugin-authored predicates can opt out by filtering
    * `e.speculative === true`. Trackers cannot claim the `events`
@@ -1672,7 +1672,7 @@ export interface PredicateContext {
  * ACCUMULATION mechanism. See the README "Exemptions" section.
  *
  * `Writes` is the union of session-entry event literals the clause's
- * `when.happened.event` is allowed to reference — threaded through by
+ * `when.missing.event` is allowed to reference — threaded through by
  * {@link defineConfig} identically to {@link Rule.when}.
  * `RuleName` is the compile-time rule-name union the target is
  * typo-checked against inside {@link defineConfig}; both default to
@@ -1965,7 +1965,7 @@ export interface SteeringConfig {
    *
    * Inside {@link defineConfig}, `rule` is typo-checked against the
    * `AllRuleNames` union (same machinery as {@link disabledRules})
-   * and `when.happened.event` narrows against the config's `writes`
+   * and `when.missing.event` narrows against the config's `writes`
    * union. See the README "Exemptions" section for the fail-closed
    * semantics (unknown predicate state counts as "does not match",
    * so a carve-out can never silently open a guard). `onUnknown` is

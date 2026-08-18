@@ -9,9 +9,9 @@
  *
  * Drops observers whose declared `writes` are unconsumed across both
  * plugin-merged and user-authored streams, using the union of all
- * rule `happened` references PLUS all exemption-clause top-level
- * `happened` references (O1 parity extension: an observer whose
- * writes feed ONLY an exemption's `happened` must survive the drop,
+ * rule `missing` references PLUS all exemption-clause top-level
+ * `missing` references (O1 parity extension: an observer whose
+ * writes feed ONLY an exemption's `missing` must survive the drop,
  * or the carve-out dies silently). Emits an `info`-level breadcrumb
  * per dropped observer so plugin authors debugging "why isn't my
  * observer firing?" have a trail to follow without it bubbling up as

@@ -413,7 +413,7 @@ describe("pi-steering list", () => {
 				observers: [
 					{
 						name: "obs1",
-						writes: ["thing-happened"],
+						writes: ["thing-done"],
 						onResult: () => {},
 					},
 				],
@@ -431,7 +431,7 @@ describe("pi-steering list", () => {
     assert.equal(parsed.plugins[0]?.source, "pi-steering/plugins/git");
     assert.equal(parsed.userRules[0]?.name, "u1");
     assert.equal(parsed.userObservers[0]?.name, "obs1");
-    assert.deepEqual(parsed.userObservers[0]?.writes, ["thing-happened"]);
+    assert.deepEqual(parsed.userObservers[0]?.writes, ["thing-done"]);
   });
 
   it("rejects an unknown --format value", async () => {
@@ -453,7 +453,7 @@ describe("pi-steering list", () => {
     assert.match(r.stdout, /--format=text\|json/);
   });
 
-  it("summarizes happened: predicate with its event", async () => {
+  it("summarizes missing: predicate with its event", async () => {
     writeSteeringDirConfig(
       scratch,
       `export default {
@@ -463,7 +463,7 @@ describe("pi-steering list", () => {
 						tool: "bash",
 						field: "command",
 						pattern: /^git push/,
-						when: { happened: { event: "tests-passed", in: "agent_loop" } },
+						when: { missing: { event: "tests-passed", in: "agent_loop" } },
 						reason: "no",
 					},
 				],
@@ -471,7 +471,7 @@ describe("pi-steering list", () => {
     );
     const r = await runCli({ cwd: scratch }, "list");
     assert.equal(r.code, 0);
-    assert.match(r.stdout, /when: happened:tests-passed/);
+    assert.match(r.stdout, /when: missing:tests-passed/);
   });
 
   it("marks disabled rules with '(disabled)' suffix in text output (F4)", async () => {
@@ -1077,7 +1077,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 						field: "command",
 						pattern: /^never$/,
 						reason: "r",
-						when: { happened: { event: "X" } },
+						when: { missing: { event: "X" } },
 					},
 				],
 			};`,
@@ -1117,7 +1117,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 						field: "command",
 						pattern: /^never$/,
 						reason: "r",
-						when: { happened: { event: "X" } },
+						when: { missing: { event: "X" } },
 					},
 				],
 			};`,

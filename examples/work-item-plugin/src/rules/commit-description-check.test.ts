@@ -60,7 +60,7 @@ describe("commit-description-check", () => {
     );
 
     // Second commit in the same loop — the reminder entry is now
-    // present, so `when.happened` no longer fires; the rule
+    // present, so `when.missing` no longer fires; the rule
     // passes.
     const second = await harness.evaluate(
       {
@@ -80,7 +80,7 @@ describe("commit-description-check", () => {
 
     // New agent loop (index bumps) — the entry's
     // `_agentLoopIndex` is 1, but this is loop 2, so
-    // `when.happened` filters it out and the reminder fires
+    // `when.missing` filters it out and the reminder fires
     // again.
     const nextLoop = await harness.evaluate(
       {

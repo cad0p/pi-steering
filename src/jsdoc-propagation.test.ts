@@ -24,7 +24,7 @@
  * underlying interface member is no longer reachable from the
  * synthesized symbol.
  *
- * Built-in non-registry leaves (`cwd:`, `happened:`, `condition:`)
+ * Built-in non-registry leaves (`cwd:`, `missing:`, `condition:`)
  * don't share this regression vector — their JSDoc propagates through
  * the trivial `interface property → property symbol` path on
  * `BuiltInWhenLeavesOuter` / `BuiltInWhenLeavesInner` and the

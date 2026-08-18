@@ -8,7 +8,7 @@
  * ## What this file demonstrates (commit-4 polish, ADR §5 `since`)
  *
  * Observers can write "invalidator" events whose presence stale-s an
- * earlier satisfied `happened` clause:
+ * earlier satisfied `missing` clause:
  *
  *   - `npm-test-tracker`       writes `TEST_PASSED_EVENT` on `npm test`
  *                               success.
@@ -16,7 +16,7 @@
  *                               on `git pull` success \u2014 the workspace
  *                               just changed; prior test state is stale.
  *   - `push-requires-tests` gates via
- *       `happened: { event: TEST_PASSED_EVENT, in: "agent_loop",
+ *       `missing: { event: TEST_PASSED_EVENT, in: "agent_loop",
  *                    since: RETEST_REQUIRED_EVENT }`
  *     which fires when the most-recent `TEST_PASSED_EVENT` is older
  *     than the most-recent `RETEST_REQUIRED_EVENT` (or the tests
@@ -38,7 +38,7 @@ import type {
  * Session-entry event written when `git pull` succeeds. Rules that
  * previously satisfied `TEST_PASSED_EVENT` become stale relative to
  * this event; `push-requires-tests` compares the two via
- * `happened.since` to require a re-run after any pull.
+ * `missing.since` to require a re-run after any pull.
  */
 export const RETEST_REQUIRED_EVENT = "example-retest-required" as const;
 
@@ -66,7 +66,7 @@ export function markRetestRequired(
  * The observer. `as const satisfies Observer` preserves the literal
  * `writes` tuple so `defineConfig` threads `RETEST_REQUIRED_EVENT`
  * into the `AllWrites` union \u2014 letting rules reference it from
- * `when.happened.since` with a compile-time typo check.
+ * `when.missing.since` with a compile-time typo check.
  */
 export const retestRequiredTracker = {
   name: "retest-required-tracker",

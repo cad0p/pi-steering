@@ -946,17 +946,6 @@ async function evaluateNotBlock(
   onUnknownDefault: "allow" | "block" = "block",
   ignoreExplicitModifiers = false,
 ): Promise<boolean> {
-  // TEMP (issue #55 migration commit): legacy `happened` inside a
-  // `not:` block — map onto `missing`. REMOVE in the cleanup commit.
-  const legacyHappened = (block as { happened?: unknown }).happened;
-  if (legacyHappened !== undefined) {
-    block = { ...block } as TopLevelWhenClauseNoRecurse<string>;
-    delete (block as { happened?: unknown }).happened;
-    if (!("missing" in block)) {
-      (block as { missing?: unknown }).missing = legacyHappened;
-    }
-  }
-
   // Read block-level `onUnknown:` modifier. Default fail-CLOSED
   // (or the exemption-evaluation override via `onUnknownDefault`).
   // STRICT exemption evaluation ignores the explicit modifier
@@ -1117,18 +1106,6 @@ export async function evaluateWhen(
   ignoreExplicitModifiers = false,
 ): Promise<boolean> {
   if (!when) return true;
-
-  // TEMP (issue #55 migration commit): accept the legacy `happened`
-  // spelling while the rename lands — the equivalence test pairs
-  // both spellings. REMOVE in the cleanup commit.
-  const legacyHappened = (when as { happened?: unknown }).happened;
-  if (legacyHappened !== undefined) {
-    when = { ...when };
-    delete (when as { happened?: unknown }).happened;
-    if (!("missing" in when)) {
-      (when as { missing?: unknown }).missing = legacyHappened;
-    }
-  }
 
   for (const [key, value] of Object.entries(when)) {
     if (value === undefined) continue;

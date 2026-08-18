@@ -11,12 +11,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  envTracker,
   expandWrapperCommands,
   extractAllCommandsFromAST,
   parse,
-  resolveWord,
-  walk,
 } from "@cad0p/unbash-walker";
 import {
   refToText,
@@ -35,25 +32,6 @@ function firstRef(command: string) {
   const extracted = extractAllCommandsFromAST(script, command);
   const { commands } = expandWrapperCommands(extracted);
   return commands[0]!;
-}
-
-/**
- * Effective env exactly as the evaluator builds it: walker per-ref
- * snapshot + the ref's own prefix assignments resolved in order.
- */
-function effectiveEnvFor(command: string): Map<string, string> {
-  const script = parse(command);
-  const extracted = extractAllCommandsFromAST(script, command);
-  const { commands } = expandWrapperCommands(extracted);
-  const ref = commands[0]!;
-  const walkResult = walk(script, {}, { env: envTracker }, commands);
-  const env = new Map(walkResult.get(ref)?.env ?? []);
-  for (const prefix of ref.node.prefix) {
-    if (prefix.name === undefined || prefix.value === undefined) continue;
-    const resolved = resolveWord(prefix.value, env);
-    if (resolved !== undefined) env.set(prefix.name, resolved);
-  }
-  return env;
 }
 
 describe("refToText", () => {
@@ -135,30 +113,6 @@ describe("refToTextResolved (issue #51)", () => {
       refToTextResolved(ref, new Map([["HOME", "/home/pier"]])),
       "gh pr create --body-file /home/pier/note.md",
     );
-  });
-
-  it("prefix overlay: env passed in already carries the ref's own prefix", () => {
-    // The helper takes env as given — the evaluator composes the
-    // prefix overlay before calling. effectiveEnvFor replicates that
-    // composition (walker snapshot + own prefix, in order).
-    const ref = firstRef(
-      'BODY=/vault/note.md gh pr create --body-file="$BODY"',
-    );
-    const env = effectiveEnvFor(
-      'BODY=/vault/note.md gh pr create --body-file="$BODY"',
-    );
-    assert.equal(env.get("BODY"), "/vault/note.md");
-    assert.equal(
-      refToTextResolved(ref, env),
-      "gh pr create --body-file=/vault/note.md",
-    );
-  });
-
-  it("unresolvable prefix RHS leaves the var unset (raw downstream)", () => {
-    const ref = firstRef('BODY=$(cmd) gh pr create --body-file="$BODY"');
-    const env = effectiveEnvFor('BODY=$(cmd) gh pr create --body-file="$BODY"');
-    assert.equal(env.has("BODY"), false, "unresolvable prefix skipped");
-    assert.equal(refToTextResolved(ref, env), "gh pr create --body-file=$BODY");
   });
 });
 

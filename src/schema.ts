@@ -1343,12 +1343,13 @@ export interface ToolResultEvent {
  * original source on `rawText` (issue #51 — "resolved-by-default
  * Word.text — predicates validate what executes").
  *
- * Resolution is against the ref's EFFECTIVE env (the walker's per-ref
- * env snapshot overlaid with the ref's OWN prefix assignments, in
- * source order). Fail-closed: any word the walker cannot resolve
- * (absent `$VAR`, command substitution, parameter-expansion
- * modifiers, …) keeps its raw forms, so predicates never
- * pattern-match a fiction.
+ * Resolution is against the ref's env snapshot (`ctx.walkerState.env`
+ * — the walker's per-ref env; same-ref prefix assignments are one-shot
+ * for the direct child's env and do NOT bind for the same command's
+ * word expansions, bash manual §3.7.1). Fail-closed: any word the
+ * walker cannot resolve (absent `$VAR`, command substitution,
+ * parameter-expansion modifiers, …) keeps its raw forms, so
+ * predicates never pattern-match a fiction.
  */
 export interface PredicateWord extends Word {
   /**
@@ -1417,11 +1418,23 @@ export interface PredicateToolInput {
    * never pattern-match a fiction.
    *
    * Sourced from `CommandRef.node.suffix` via unbash-walker and
-   * projected per-ref against the ref's effective env (the walker's
-   * per-ref env snapshot overlaid with the ref's own prefix
-   * assignments, in source order — so `BODY=/x gh … --body-file="$BODY"`
-   * resolves within the same ref). Static words are byte-identical to
-   * the pre-resolution surface. Undefined for non-bash tools.
+   * projected per-ref against the ref's env snapshot
+   * (`ctx.walkerState.env` — the walker's per-ref env; bash manual
+   * §3.7.1 expands words against the PRE-command environment, so
+   * same-ref prefix assignments do NOT bind here — they are one-shot
+   * for the direct child's env only). Fail-closed: absent variables
+   * stay raw — `BODY=/x gh … --body-file="$BODY"` keeps `"$BODY"`
+   * verbatim (real bash would also expand it to the OLD value, or
+   * empty when unset; this engine prefers the raw form so predicates
+   * never match a fiction). Static words are byte-identical to the
+   * pre-resolution surface. Undefined for non-bash tools.
+   *
+   * Rare consumer needing the genuine bash child-env (prefix applied
+   * to the DIRECT child only): fold the assignments sequentially —
+   * `new Map([...ctx.walkerState.env, ...resolveEach(envAssignments)])`
+   * where `resolveEach` resolves each `KEY=VALUE`'s RHS against the
+   * running map (bash RHS is sequential: `A=1 B=$A` → `B=1`) —
+   * documented here, not exported.
    */
   args?: readonly PredicateWord[];
   /**
@@ -1514,6 +1527,10 @@ export interface WhenWalkerState {
    * statically-resolved bare assignments (`FOO=bar`), `export`
    * writes, and `unset` deletions from the current scope, seeded
    * from `process.env.{HOME, USER, PWD}` at tracker initialization.
+   * Prefix assignments (`NAME=value cmd …`) are one-shot for the
+   * direct child's env and do NOT appear here; words in
+   * `ctx.input.args` / `ctx.input.command` resolve against this
+   * snapshot (bash manual §3.7.1).
    *
    * Plugin predicates consume this to expand `$VAR` / `~` in
    * user-supplied patterns, or to implement a `when.envVar`-style

@@ -7041,7 +7041,12 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
     assert.equal(modifier.value, "${X:-d}");
   });
 
-  it("~ resolves via seeded HOME (prefix overlay keeps it deterministic)", async () => {
+  it("~ resolves via seeded HOME (chain-assigned)", async () => {
+    // Chain form — the bare assignment persists into the next ref's
+    // walker env (bash-faithful: `HOME=/x && echo ~` → `/x`), so the
+    // result is deterministic on any host. (Prefix form would resolve
+    // `~` against the RUNNING process HOME on CI — `/home/runner` /
+    // `/Users/runner` — so the old prefix-form fixture was a CI trap.)
     const seen: PredicateContext[] = [];
     const evaluator = buildEvaluator(
       { rules: [captureInputRule(seen)] },
@@ -7049,7 +7054,7 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
       makeHost(),
     );
     await evaluator.evaluate(
-      bashEvent("HOME=/home/pier gh pr create --body-file ~/note.md"),
+      bashEvent("HOME=/home/pier && gh pr create --body-file ~/note.md"),
       makeCtx("/r"),
       0,
     );
@@ -7059,9 +7064,11 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
     assert.equal(args[3]!.rawText, "~/note.md");
   });
 
-  it("prefix overlay: same-ref prefix assignments resolve the ref's words", async () => {
-    // NEW behavior — the walker's env snapshot does NOT include the
-    // ref's own prefix (one-shot scope); the effective env overlays it.
+  it("same-ref prefix assignments do NOT resolve the ref's words (bash-faithful)", async () => {
+    // bash manual §3.7.1: command WORDS expand against the PRE-command
+    // environment; a prefix assignment (`NAME=value cmd …`) binds for
+    // the DIRECT CHILD's env only. BODY is absent from the walker's
+    // per-ref env snapshot, so the word stays raw — fail-closed.
     const seen: PredicateContext[] = [];
     const evaluator = buildEvaluator(
       { rules: [captureInputRule(seen)] },
@@ -7073,14 +7080,32 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
       makeCtx("/r"),
       0,
     );
-    const args = argsOf(seen, "gh");
+    let args = argsOf(seen, "gh");
     const bodyFile = args[2]!;
-    assert.equal(bodyFile.text, '--body-file="/vault/note.md"');
-    assert.equal(bodyFile.value, "--body-file=/vault/note.md");
+    assert.equal(bodyFile.text, '--body-file="$BODY"');
+    assert.equal(bodyFile.value, "--body-file=$BODY");
     assert.equal(bodyFile.rawText, '--body-file="$BODY"');
+
+    // `$(cmd)` RHS variant — same raw outcome under the env snapshot.
+    seen.length = 0;
+    await evaluator.evaluate(
+      bashEvent('BODY=$(cmd) gh pr create --body-file="$BODY"'),
+      makeCtx("/r"),
+      0,
+    );
+    args = argsOf(seen, "gh");
+    const bodyFile2 = args[2]!;
+    assert.equal(bodyFile2.text, '--body-file="$BODY"');
+    assert.equal(bodyFile2.value, "--body-file=$BODY");
   });
 
-  it("unresolvable prefix RHS leaves the var unexpanded (fail-closed)", async () => {
+  it('snapshot wins over prefix: BODY=old; BODY=new echo "$BODY" prints old', async () => {
+    // bash ground truth: `echo $BODY` prints the OLD value — the
+    // semicolon-assignment persists into the chain env, while the
+    // prefix `BODY=new` binds only for the direct child's env, not
+    // for the same command's word expansion (§3.7.1). Kills the
+    // public-surface disagreement: `walkerState.env` says `old` AND
+    // `args` say `old`.
     const seen: PredicateContext[] = [];
     const evaluator = buildEvaluator(
       { rules: [captureInputRule(seen)] },
@@ -7088,19 +7113,50 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
       makeHost(),
     );
     await evaluator.evaluate(
-      bashEvent('BODY=$(cmd) gh pr create --body-file="$BODY"'),
+      bashEvent('BODY=old; BODY=new echo "$BODY"'),
+      makeCtx("/r"),
+      0,
+    );
+    const args = argsOf(seen, "echo");
+    assert.equal(args[0]!.value, "old");
+    assert.equal(args[0]!.text, '"old"');
+    assert.equal(args[0]!.rawText, '"$BODY"');
+  });
+
+  it("fail-closed: procsub inner of a prefix-referencing word stays raw", async () => {
+    // Real bash forks the process substitution BEFORE the prefix
+    // assignment applies (the procsub child inherits the PRE-command
+    // env), so perl would get an empty arg and the failure would be
+    // swallowed. Keeping the word raw means the predicate sees the
+    // failure truth instead of a resolved fiction.
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(
+      bashEvent(
+        "BODY=/vault/note.md gh pr create --body-file=<(perl -0777 -pe '<BODY_STRIP>' \"$BODY\")",
+      ),
       makeCtx("/r"),
       0,
     );
     const args = argsOf(seen, "gh");
-    assert.equal(args[2]!.text, '--body-file="$BODY"');
-    assert.equal(args[2]!.value, "--body-file=$BODY");
+    const ps = args[3]!;
+    assert.match(ps.text!, /\$BODY/);
+    assert.doesNotMatch(ps.text!, /\/vault\/note\.md/);
+    assert.equal(ps.value, "<(perl -0777 -pe '<BODY_STRIP>' \"$BODY\")");
+    assert.equal(ps.rawText, "<(perl -0777 -pe '<BODY_STRIP>' \"$BODY\")");
   });
 
   it("command field resolves: pattern fires on a chain-assigned $T title", async () => {
     // Resolution-dependent: the RAW command text contains `"$T"` —
     // the keyword pattern `closes #\d+` only matches because `command`
-    // carries the resolved title value.
+    // carries the resolved title value. Chain form: the bare
+    // assignment persists into the next ref's walker env (prefix form
+    // would NOT — one-shot for the direct child's env only — so this
+    // pin must stay in chain shape to test what its name claims).
     const seen: PredicateContext[] = [];
     const evaluator = buildEvaluator(
       {
@@ -7124,7 +7180,7 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
       makeHost(),
     );
     const res = await evaluator.evaluate(
-      bashEvent('T="feat: x (closes #12)" gh pr create --title "$T"'),
+      bashEvent('T="feat: x (closes #12)" && gh pr create --title "$T"'),
       makeCtx("/r"),
       0,
     );

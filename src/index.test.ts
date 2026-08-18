@@ -538,7 +538,7 @@ describe("register(): observer dispatcher wiring", () => {
     const recorded = mock.entries.find((e) => e.kind === "bash-success");
     assert.ok(recorded, "observer should have written an entry");
     // The engine auto-injects `_agentLoopIndex` into every observer/
-    // predicate write so `when.happened: { in: "agent_loop" }` can
+    // predicate write so `when.missing: { in: "agent_loop" }` can
     // filter by scope. First agent_start happens implicitly at
     // session setup time — agentLoopIndex here is 0 because no
     // agent_start events have fired in this test.

@@ -633,7 +633,7 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 						field: "command",
 						pattern: /^never$/,
 						reason: "r",
-						when: { happened: { event: "X" } },
+						when: { missing: { event: "X" } },
 					},
 				],
 			};`,
@@ -675,7 +675,7 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 						field: "command",
 						pattern: /^never$/,
 						reason: "r",
-						when: { happened: { event: "X" } },
+						when: { missing: { event: "X" } },
 					},
 				],
 			};`,
@@ -693,9 +693,9 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
     );
   });
 
-  it("does NOT drop the observer when the only consumer is an exemption's happened (O1 parity extension)", async () => {
+  it("does NOT drop the observer when the only consumer is an exemption's missing (O1 parity extension)", async () => {
     // An observer whose writes are consumed ONLY by an exemption's
-    // top-level `happened` must survive the drop — otherwise the
+    // top-level `missing` must survive the drop — otherwise the
     // carve-out is silently dead (its event never written).
     // `finalizePluginState` threads both exemption buckets (config +
     // plugin) into `collectConsumedEvents`; this test pins the config
@@ -723,7 +723,7 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 				exemptions: [
 					{
 						rule: "consumer",
-						when: { happened: { event: "X" } },
+						when: { missing: { event: "X" } },
 					},
 				],
 			};`,
@@ -737,7 +737,7 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
     assert.equal(
       breadcrumb,
       undefined,
-      `expected NO observer-drop breadcrumb (exemption's happened consumes the write); got: ${JSON.stringify(infos)}`,
+      `expected NO observer-drop breadcrumb (exemption's missing consumes the write); got: ${JSON.stringify(infos)}`,
     );
   });
 });

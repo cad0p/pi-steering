@@ -5,7 +5,7 @@
  * Observer-drop optimization.
  *
  * At config-build time, observers whose declared `writes: [...]` are
- * entirely unconsumed by any rule's `happened.event` / `happened.since`
+ * entirely unconsumed by any rule's `missing.event` / `missing.since`
  * can be dropped: they'd only fire on `tool_result` and write entries
  * no rule ever reads. Dropping them skips both the write (cheaper
  * session JSONL) and the speculative-synthesis contribution (no chain
@@ -37,14 +37,14 @@ export interface DroppedObserver {
  *
  * @param observers - Observers to filter (any origin — plugin-merged
  *   or user-authored).
- * @param rules - Full rule set whose `happened.event` / `happened.since`
+ * @param rules - Full rule set whose `missing.event` / `missing.since`
  *   references determine consumption. Disabled rules should already
  *   be filtered out by the caller — this helper honors whatever's
  *   passed in.
  * @param exemptionWhens - Exemption clauses (config + plugin buckets)
- *   whose top-level `happened` references ALSO count as consumption.
+ *   whose top-level `missing` references ALSO count as consumption.
  *   Without this, an observer whose writes are consumed ONLY by an
- *   exemption's `happened` would be dropped and the carve-out would
+ *   exemption's `missing` would be dropped and the carve-out would
  *   be silently dead (O1 parity — same scan as rules).
  */
 export function dropUnusedObservers(
@@ -73,24 +73,24 @@ export function dropUnusedObservers(
   return { kept, dropped };
 }
 
-/** Collect every event referenced by any rule's `happened.event` /
- *  `happened.since` — plus exemption clauses' top-level `happened`
+/** Collect every event referenced by any rule's `missing.event` /
+ *  `missing.since` — plus exemption clauses' top-level `missing`
  *  (identical scan, O1 parity: an observer whose writes feed an
  *  exemption must survive the drop or the carve-out dies silently).
- *  Rules and exemptions without `when.happened` contribute nothing. */
+ *  Rules and exemptions without `when.missing` contribute nothing. */
 function collectConsumedEvents(
   rules: readonly Rule[],
   exemptionWhens: readonly TopLevelWhenClause<string>[] = [],
 ): Set<string> {
   const consumed = new Set<string>();
   for (const rule of rules) {
-    const h = rule.when?.happened;
+    const h = rule.when?.missing;
     if (h === undefined) continue;
     if (typeof h.event === "string") consumed.add(h.event);
     if (typeof h.since === "string") consumed.add(h.since);
   }
   for (const when of exemptionWhens) {
-    const h = when.happened;
+    const h = when.missing;
     if (h === undefined) continue;
     if (typeof h.event === "string") consumed.add(h.event);
     if (typeof h.since === "string") consumed.add(h.since);

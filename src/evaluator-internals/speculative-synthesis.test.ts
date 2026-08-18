@@ -8,7 +8,7 @@
  * tests pin the behaviour the evaluator relies on when threading the
  * synthesis output into `walkerState.events`; the integration-level
  * `&&`-chain tests in `evaluator.test.ts` still drive end-to-end
- * behaviour through the built-in `happened` predicate.
+ * behaviour through the built-in `missing` predicate.
  */
 
 import assert from "node:assert";
@@ -315,7 +315,7 @@ describe("synthesizeSpeculativeEntries: timestamp convention", () => {
   it("two speculative writes in same chain — later ref has later timestamp", () => {
     // `A && B && cr` where A writes X and B writes Y. AST order:
     // A.idx=0, B.idx=1. Timestamps: X=SPECULATIVE_BASELINE+1, Y=SPECULATIVE_BASELINE+2.
-    // Downstream `when.happened: { event: X, since: Y }` reads X
+    // Downstream `when.missing: { event: X, since: Y }` reads X
     // as stale — the two-speculative-writes-with-since-invalidator
     // correctness case.
     const EVENT_X = "event-x";

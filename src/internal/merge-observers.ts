@@ -3,7 +3,7 @@
 
 /**
  * Shared observer-merge helper used by both the evaluator's reverse
- * index (`when.happened` with `in: "tool_call"`) and the observer-dispatcher's
+ * index (`when.missing` with `in: "tool_call"`) and the observer-dispatcher's
  * fire list.
  *
  * Both callers need the same answer to the question "what observers

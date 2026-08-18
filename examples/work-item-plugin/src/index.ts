@@ -19,14 +19,14 @@
  *   - `observers/retest-required-tracker.ts`
  *       - Invalidation-sentinel pattern: observer writes
  *         `RETEST_REQUIRED_EVENT` on `git pull`, which stale-s
- *         prior `TEST_PASSED_EVENT` entries via `happened.since`.
+ *         prior `TEST_PASSED_EVENT` entries via `missing.since`.
  *   - `rules/commit-requires-work-item.ts`
  *       - Plugin-registered predicate consumption via `when.<key>`.
  *       - `not:` inversion in a {@link TopLevelWhenClause}.
  *   - `rules/push-requires-tests.ts`
- *       - `when.happened: { in: "agent_loop" }` gating.
+ *       - `when.missing: { in: "agent_loop" }` gating.
  *       - Observer → rule coupling via the shared EVENT constants.
- *       - Temporal invalidation via `happened.since`.
+ *       - Temporal invalidation via `missing.since`.
  *       - Chain-aware speculative allow for `npm test && git push`.
  *   - `rules/commit-description-check.ts`
  *       - Self-marking rules with `onFire`.
@@ -90,7 +90,7 @@ export { DESCRIPTION_REVIEWED_EVENT, RETEST_REQUIRED_EVENT, TEST_PASSED_EVENT };
 /**
  * The plugin. `as const satisfies Plugin` preserves the literal
  * `name: "work-item"` and the `writes` tuples from rules/observers
- * so `defineConfig` can cross-reference `when.happened.event` usages
+ * so `defineConfig` can cross-reference `when.missing.event` usages
  * against this plugin's declared writes. See the ADR §7 footgun
  * about bare `: Plugin` annotations.
  */

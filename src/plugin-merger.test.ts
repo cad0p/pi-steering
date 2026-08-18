@@ -238,7 +238,7 @@ describe("resolvePlugins: tracker collision (error-class diagnostic)", () => {
     // entry synthesis pass (see evaluator.ts `prepareBashState`). A
     // plugin-registered `events` tracker would be silently clobbered
     // when the evaluator merges synthesized entries in, breaking
-    // `when.happened` with `in: "tool_call"`. Schema JSDoc promises
+    // `when.missing` with `in: "tool_call"`. Schema JSDoc promises
     // rejection; this test holds the promise honest.
     const p: Plugin = {
       name: "broken",

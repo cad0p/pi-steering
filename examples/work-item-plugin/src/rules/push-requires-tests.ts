@@ -9,7 +9,7 @@
  *   1. Observer → rule coupling via shared constants (ADR §5, §14).
  *      `npm-test-tracker` writes `TEST_PASSED_EVENT` on every
  *      successful `npm test`; this rule gates `git push` on
- *      `when.happened`, which fires when the event has NOT happened.
+ *      `when.missing`, which fires while the event is missing.
  *
  *   2. Temporal invalidation via `since` (PR §4). A separate observer
  *      `retest-required-tracker` writes `RETEST_REQUIRED_EVENT` on
@@ -46,7 +46,7 @@ export const pushRequiresTests = {
     // current agent loop, OR its most-recent entry is older than
     // the most-recent RETEST_REQUIRED_EVENT (e.g. a later `git pull`
     // stale-d the test state).
-    happened: {
+    missing: {
       event: TEST_PASSED_EVENT,
       in: "agent_loop",
       since: RETEST_REQUIRED_EVENT,

@@ -161,10 +161,10 @@ export interface EvaluatorRuntime {
  * deduplicated via {@link mergeObserversUserFirst}) are threaded into
  * {@link prepareBashState} where the walker-level synthesis pass
  * turns them into per-ref speculative events on
- * `walkerState.events`. The built-in `when.happened` predicate merges
+ * `walkerState.events`. The built-in `when.missing` predicate merges
  * those with real entries via timestamp ordering. If future versions
  * add a dynamic-reload path (observers added at runtime), this merged
- * list must be rebuilt on change — otherwise `when.happened` with
+ * list must be rebuilt on change — otherwise `when.missing` with
  * `in: "tool_call"` scope consults a stale observer list. Today
  * there is no dynamic-reload path.
  */
@@ -295,7 +295,7 @@ export function buildEvaluator(
   // list feeds the walker-level synthesis pass in
   // {@link prepareBashState}, where eligible observers contribute
   // speculative `walkerState.events` entries the built-in
-  // `when.happened` predicate consults alongside real entries. Without
+  // `when.missing` predicate consults alongside real entries. Without
   // the dedup, a shadowed plugin observer's `writes` could produce
   // synthetic entries that never match a real dispatch, re-creating
   // the infinite-loop risk the speculative pass was designed to avoid.
@@ -458,9 +458,9 @@ interface BashRefState {
  *
  * Also runs the walker-level speculative-entry synthesis pass and
  * merges its output into each ref's walkerState under the reserved
- * `events` key. The built-in `when.happened` predicate consults
+ * `events` key. The built-in `when.missing` predicate consults
  * `ctx.walkerState.events[customType]` to unify real + speculative
- * entries via timestamp ordering (see {@link evaluateHappened}).
+ * entries via timestamp ordering (see {@link evaluateMissing}).
  */
 function prepareBashState(
   command: string,
@@ -531,7 +531,7 @@ function prepareBashState(
         end: p.end,
       })),
       // Merge tracker state with synthesized events so the built-in
-      // `happened` predicate can read `walkerState.events` without
+      // `missing` predicate can read `walkerState.events` without
       // threading a separate context field. Trackers cannot name a
       // dimension `"events"` — the plugin merger rejects that (see
       // plugin-merger.ts). The merge is a shallow copy so the walker's
@@ -683,7 +683,7 @@ async function resolveReasonBody(
  * `appendEntry` auto-tags every write with the current
  * `_agentLoopIndex`, including the `steering-override` audit entries
  * written from the override-accepted path — so rules using
- * `when.happened: { event: "steering-override", in: "agent_loop" }`
+ * `when.missing: { event: "steering-override", in: "agent_loop" }`
  * can correctly filter override activity to the current agent loop.
  *
  * `host` is retained on the shared context for non-entry operations
@@ -907,7 +907,7 @@ async function evaluateCandidate(
     if (reason !== null) {
       // Go through the wrapped `shared.appendEntry` so the
       // `_agentLoopIndex` auto-tag lands on the audit entry. Rules
-      // using `when.happened: { event: "steering-override", in:
+      // using `when.missing: { event: "steering-override", in:
       // "agent_loop" }` rely on the tag to filter overrides by the
       // current loop; a direct `host.appendEntry` here would bypass
       // the wrapper and leave the entry invisible to that predicate.
@@ -979,7 +979,7 @@ async function evaluateCandidate(
  *     ban (`ExemptionWhenClause`) and the load-time rejection
  *     (`validateExemptionWhenClauseShape`) are the other two layers.
  *   - Escapes `evaluateWhen` does not swallow (`UnknownPredicateError`,
- *     `evaluateHappened` shape throws, …) are caught HERE, per
+ *     `evaluateMissing` shape throws, …) are caught HERE, per
  *     exemption — a throwing exemption predicate = "does not match"
  *     = guard fires. Warn logs label the EXEMPTION, not the target
  *     rule (`Rule "<target>"@<src>` would be misleading).
@@ -1071,11 +1071,11 @@ async function evaluateEventInner(
   // Shared per-call closures: exec memoized by (cmd, args, cwd);
   // findEntries reads the current session JSONL on demand; appendEntry
   // auto-tags writes with `_agentLoopIndex` so rules using
-  // `when.happened` can filter by agent-loop scope.
+  // `when.missing` can filter by agent-loop scope.
   //
   // findEntries + appendEntry share a session-entry cache so a write
   // performed by an earlier rule's onFire (or by the override-audit
-  // path) invalidates the cached read — later rules' when.happened
+  // path) invalidates the cached read — later rules' when.missing
   // predicates see the fresh write instead of a stale snapshot
   // (S2/E1). The evaluator itself doesn't interleave writes with reads,
   // but onFire + override-audit do.

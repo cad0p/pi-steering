@@ -2,7 +2,7 @@
 // Part of pi-steering.
 
 /**
- * Unified speculative-entry synthesis for `when.happened`'s tool_call-
+ * Unified speculative-entry synthesis for `when.missing`'s tool_call-
  * scope speculative allow.
  *
  * Replaces the pre-PR-5 specialized speculative-allow path (a pair of
@@ -11,7 +11,7 @@
  * ref in an unconditionally-`&&`-reachable segment, for every observer
  * writing an event AND matching the ref via the shared
  * {@link matchesWatch} contract, we produce a synthetic entry that
- * later `happened` evaluations merge with real entries via timestamp
+ * later `missing` evaluations merge with real entries via timestamp
  * ordering.
  *
  * Pure function of `(refs, observers, resolvedTexts)`. The evaluator
@@ -50,7 +50,7 @@
  *   2. **Relative ordering among multiple speculative writes follows
  *      AST order.** Ref at index `j` gets `BASELINE + 1 + j`; a later
  *      ref at `k > j` gets `BASELINE + 1 + k`. So
- *      `when.happened: { event: X, since: Y }` correctly reads X as
+ *      `when.missing: { event: X, since: Y }` correctly reads X as
  *      stale when Y is written later — the two-speculative-writes-
  *      with-since-invalidator correctness case pinned by the
  *      `A && B && cr` test in this commit pack.
@@ -94,10 +94,10 @@ export const SPECULATIVE_BASELINE = 2 ** 52;
 /**
  * Speculative session entry. Structurally a superset of real entries
  * (`{ data, timestamp }`) plus a `speculative: true` marker so the
- * built-in `happened` predicate and plugin filters over
+ * built-in `missing` predicate and plugin filters over
  * `walkerState.events` can distinguish synthetic writes from real
  * ones. Default direction (include speculative) matches what
- * `happened` wants; plugins wanting pure historical semantics filter
+ * `missing` wants; plugins wanting pure historical semantics filter
  * with `.filter(e => !e.speculative)`.
  */
 export interface SyntheticEntry<T = unknown> {
@@ -175,7 +175,7 @@ export function synthesizeSpeculativeEntries(
     // Eligible producer: test every (customType, observer) against
     // the shared `matchesWatch` with a synthesized success event.
     // First matching observer per customType wins — a second match
-    // is redundant for `happened`'s presence + latest-timestamp
+    // is redundant for `missing`'s presence + latest-timestamp
     // verdict. Clone the chain before extending: earlier consumer
     // refs hold frozen references to the old map.
     //

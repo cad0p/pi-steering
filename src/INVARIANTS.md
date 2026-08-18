@@ -62,7 +62,7 @@ leaf counts as "does not match" → the target guard still fires:
   smuggled `onUnknown` — clause top level, not-block top level, and
   leaf object forms), and evaluation (this flag — defense-in-depth).
 - Escapes `evaluateWhen` doesn't swallow
-  (`UnknownPredicateError`, `evaluateHappened` shape throws) are
+  (`UnknownPredicateError`, `evaluateMissing` shape throws) are
   caught per-exemption in `evaluateExemptionClause` — a throwing
   exemption predicate = "does not match" = guard fires. Warn logs
   label the EXEMPTION, not the target rule: the outer catch emits
@@ -126,7 +126,7 @@ Validated at production call sites (`validateUserConfigNames`,
 `evaluator-internals/context.ts`.
 
 Within a single tool_call (or tool_result) phase, rule B's
-`when.happened` predicate MUST see entries rule A's `onFire` wrote
+`when.missing` predicate MUST see entries rule A's `onFire` wrote
 earlier in the same phase. Implementation: shared cache invalidation
 per `S2`.
 
@@ -147,10 +147,10 @@ both paths. A future surface that bypasses this ordering would see
 different observer-drop behavior than the runtime.
 
 **Exemption parity extension:** `collectConsumedEvents` scans
-EXEMPTION clauses' top-level `when.happened` identically to rules
+EXEMPTION clauses' top-level `when.missing` identically to rules
 (threaded through `finalizePluginState` from both config + plugin
 buckets by all three callers). An observer whose writes are consumed
-ONLY by an exemption's `happened` survives the drop — without this,
+ONLY by an exemption's `missing` survives the drop — without this,
 the exemption would be silently dead (its observer dropped, its
 event never written).
 

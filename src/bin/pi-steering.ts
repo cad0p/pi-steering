@@ -783,7 +783,7 @@ function renderExemptionLines(
  * Compact summary of a `TopLevelWhenClause`. Returns a comma-separated list
  * of keys (e.g. `branch, cwd`). Built-in keys get special labels so
  * the output is informative without dumping full predicate values:
- *   - `happened` becomes `happened:<event>`
+ *   - `missing` becomes `missing:<event>`
  *   - `not` becomes `not:...`
  *   - `condition` stays `condition`
  *   - plugin predicates just show the key name (`branch`, `upstream`, …).
@@ -791,12 +791,12 @@ function renderExemptionLines(
 function whenSummaryKeys(when: TopLevelWhenClause<string>): string {
   const parts: string[] = [];
   for (const key of Object.keys(when)) {
-    if (key === "happened") {
-      const happened = when.happened;
-      if (happened !== undefined) {
-        parts.push(`happened:${happened.event}`);
+    if (key === "missing") {
+      const missing = when.missing;
+      if (missing !== undefined) {
+        parts.push(`missing:${missing.event}`);
       } else {
-        parts.push("happened");
+        parts.push("missing");
       }
     } else if (key === "not") {
       parts.push("not:...");

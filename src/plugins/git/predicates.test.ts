@@ -123,7 +123,7 @@ describe("predicate: branch", () => {
 
   it('walkerState value `"unknown"` (dynamic checkout) short-circuits: default onUnknown=block fires, no exec fallback', async () => {
     // The walker saw something like `git checkout $VAR` - a write
-    // happened but the target branch can't be resolved statically.
+    // occurred but the target branch can't be resolved statically.
     // Falling through to `git branch --show-current` would return
     // the PRE-checkout branch and silently defeat the walker's
     // whole purpose. Predicate must apply onUnknown without exec.

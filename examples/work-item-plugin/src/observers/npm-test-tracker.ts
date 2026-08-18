@@ -33,7 +33,7 @@ import type {
 
 /**
  * Session-entry type written when `npm test` succeeds. Rules gate via
- * `when: { happened: { event: TEST_PASSED_EVENT, in: "agent_loop" } }`.
+ * `when: { missing: { event: TEST_PASSED_EVENT, in: "agent_loop" } }`.
  */
 export const TEST_PASSED_EVENT = "example-npm-test-passed" as const;
 
@@ -66,7 +66,7 @@ export function markTestPassed(
  * The observer itself. `as const satisfies Observer` preserves the
  * literal `name: "npm-test-tracker"` and the `writes` tuple so
  * `defineConfig`'s compile-time cross-reference checking works —
- * rules referencing `happened: { event: TEST_PASSED_EVENT }` get
+ * rules referencing `missing: { event: TEST_PASSED_EVENT }` get
  * validated against this observer's declared writes.
  *
  * See ADR §7 (`writes` declarations) for the authoring-pattern

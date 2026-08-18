@@ -23,7 +23,7 @@
  *
  * Generics threaded through (ADR §8):
  *   - `AllObserverNames<P, Inline>`  — for `Rule.observer` string refs.
- *   - `AllWrites<P, R, Inline>`      — for `Rule.when.happened.event`.
+ *   - `AllWrites<P, R, Inline>`      — for `Rule.when.missing.event`.
  *   - `AllRuleNames<P, R>`           — for `config.disabledRules`.
  *   - `AllPluginNames<P>`            — for `config.disabledPlugins`.
  *   - `PluginExemptionsCheck<P, R>`  — for plugin-shipped `exemptions`
@@ -302,13 +302,13 @@ export type PluginExemptionsCheck<
  *   - the top-level inline `rules`, AND
  *   - the top-level inline `observers`.
  *
- * Used to constrain {@link BuiltInWhenLeavesOuter.happened} `event` so typos
- * (e.g., `happened: { event: "sync-don" }` when the observer writes
+ * Used to constrain {@link BuiltInWhenLeavesOuter.missing} `event` so typos
+ * (e.g., `missing: { event: "sync-don" }` when the observer writes
  * `"sync-done"`) surface as compile errors.
  *
  * Authors who omit `writes` on a rule/observer don't contribute to the
  * union — the rule's write is undeclared, and any downstream
- * `when.happened.event` referencing it will be rejected. Matches the
+ * `when.missing.event` referencing it will be rejected. Matches the
  * "declare your writes" discipline that `writes[]` encourages.
  */
 export type AllWrites<
@@ -337,9 +337,9 @@ export type AllWrites<
  *   - `exemptions[].rule` typed against the same rule-name union as
  *     `disabledRules` — a carve-out targeting a typo'd rule name is
  *     rejected at compile time.
- *   - `rules[].when.happened.event` and `rules[].when.happened.since`
+ *   - `rules[].when.missing.event` and `rules[].when.missing.since`
  *     are both typed against `AllWrites` — typos rejected at compile
- *     time. `exemptions[].when.happened.*` narrows the same way.
+ *     time. `exemptions[].when.missing.*` narrows the same way.
  */
 export interface DefineConfigInput<
   P extends readonly Plugin[],
@@ -354,7 +354,7 @@ export interface DefineConfigInput<
   /**
    * Guard-rule carve-outs, typed so `rule` must name a real rule
    * (default rules, plugin rules, or inline rules — same union as
-   * {@link disabledRules}) and `when.happened.event` narrows against
+   * {@link disabledRules}) and `when.missing.event` narrows against
    * the config's `writes` union. See {@link Exemption} for the
    * accumulation + fail-closed semantics.
    */
@@ -377,7 +377,7 @@ export interface DefineConfigInput<
  * The `disabledRules` / `disabledPlugins` arrays are typed against the unions
  * of registered rule / plugin names — typos rejected.
  *
- * `rules[].when.happened.event` and `rules[].when.happened.since` are
+ * `rules[].when.missing.event` and `rules[].when.missing.since` are
  * both typed against the union of all `writes` declarations across
  * plugin rules, plugin observers, user rules, and user observers —
  * typos rejected. (The `since` field on the `Writes` union enforces
@@ -439,7 +439,7 @@ export interface DefineConfigInput<
  * the signature) preserves each rule's literal `name` so
  * `disabledRules` typo detection fires — the alternatives `: Rule`
  * and bare `satisfies Rule` restore hover but widen the inferred
- * type and collapse typo detection (and `when.happened.event`
+ * type and collapse typo detection (and `when.missing.event`
  * narrowing across declared `writes`).
  *
  * @example

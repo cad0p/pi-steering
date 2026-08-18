@@ -41,11 +41,7 @@ import {
 } from "@cad0p/unbash-walker";
 import { matchesPattern } from "../evaluator-internals/predicates.ts";
 import type { ObserverWatch, Pattern, ToolResultEvent } from "../schema.ts";
-import {
-  effectiveEnvForRef,
-  refToText,
-  refToTextResolved,
-} from "./ref-text.ts";
+import { refToText, refToTextResolved } from "./ref-text.ts";
 
 /**
  * True if the observer's `watch` filter accepts this event. No watch
@@ -164,12 +160,16 @@ function matchesInputField(
  * the ENV tracker only (no sessionCwd / plugin-composed trackers
  * exist on this path; cwd is irrelevant for word resolution —
  * `envTracker.initial` seeds `process.env`) and each ref is rendered
- * through {@link refToTextResolved} with the shared
- * {@link effectiveEnvForRef} overlay, mirroring the evaluator's
- * `command` surface so observer watch patterns match the same
- * resolved strings rule patterns see for the same command
- * (issue #51). Refs without walk state (e.g. process-substitution
- * inners) fall back to raw {@link refToText}.
+ * through {@link refToTextResolved} against the RAW walker env
+ * snapshot, mirroring the evaluator's `command` surface so observer
+ * watch patterns match the same resolved strings rule patterns see
+ * for the same command (issue #51) — NO prefix overlay (issue #53):
+ * same-ref prefix assignments are one-shot for the direct child's env
+ * and do NOT bind for the same command's word expansions (bash manual
+ * §3.7.1), so prefix-referencing refs stay raw (fail-closed); chain
+ * assignments (`VAR=x && …`) resolve via the env tracker. Refs
+ * without walk state (e.g. process-substitution inners) fall back to
+ * raw {@link refToText}.
  *
  * Exported so the production dispatcher can memoize the parse across
  * observers on the same event (see `dispatchEventInner`'s
@@ -194,9 +194,7 @@ export function extractRefTextsForBash(
     const walkResult = walk(script, {}, { env: envTracker }, refs);
     return refs.map((ref) => {
       const env = walkResult.get(ref)?.env;
-      return env !== undefined
-        ? refToTextResolved(ref, effectiveEnvForRef(ref, env))
-        : refToText(ref);
+      return env !== undefined ? refToTextResolved(ref, env) : refToText(ref);
     });
   } catch {
     // Don't let a parse error take down dispatch — a malformed

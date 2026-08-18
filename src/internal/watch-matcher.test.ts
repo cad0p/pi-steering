@@ -384,10 +384,11 @@ describe("extractRefTextsForBash: env-resolved ref text (issue #51)", () => {
     );
   });
 
-  it("prefix overlay: same-ref prefix assignments resolve event-side too", () => {
-    // Parity with the evaluator's rule side (shared effectiveEnvForRef):
-    // a same-ref prefix assignment binds for the command's own words on
-    // the watch side as well.
+  it("same-ref prefix assignments do NOT resolve event-side words (bash-faithful)", () => {
+    // Parity with the evaluator's rule side — both resolve against the
+    // RAW walker env snapshot: BODY is not in the snapshot (the prefix
+    // binds for the direct child's env only, NOT for the same
+    // command's word expansions), so the word stays raw.
     const texts = extractRefTextsForBash(
       bashResult(
         'BODY=/vault/repo/prs/note.md gh pr create --body-file "$BODY"',
@@ -395,7 +396,7 @@ describe("extractRefTextsForBash: env-resolved ref text (issue #51)", () => {
     );
     assert.ok(texts);
     const gh = texts.find((t) => t.startsWith("gh pr create"));
-    assert.equal(gh, "gh pr create --body-file /vault/repo/prs/note.md");
+    assert.equal(gh, "gh pr create --body-file $BODY");
   });
 
   it("unresolvable vars stay raw (fail-closed)", () => {

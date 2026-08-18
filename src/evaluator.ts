@@ -84,7 +84,6 @@ import {
 } from "./evaluator-internals/speculative-synthesis.ts";
 import { mergeObserversUserFirst } from "./internal/merge-observers.ts";
 import {
-  effectiveEnvForRef,
   refToTextResolved,
   resolvePredicateWords,
 } from "./internal/ref-text.ts";
@@ -478,16 +477,27 @@ function prepareBashState(
     trackers,
     refs,
   );
-  // Per-ref effective env + resolved command text (issue #51). The
-  // walker's per-ref env snapshot does NOT include the ref's own
-  // prefix assignments (one-shot scope), so overlay them here — the
-  // shell expands the command's words against its own prefix too.
+  // Per-ref env snapshot + resolved command text (issue #51). Word
+  // expansion in bash happens BEFORE the command runs, against the
+  // pre-command environment (bash manual §3.7.1) — so words resolve
+  // against the walker's per-ref env snapshot alone. Prefix
+  // assignments (`NAME=value cmd …`) are one-shot for the DIRECT
+  // CHILD's environment only; they do NOT bind for the same command's
+  // word expansions. A ref referencing its own prefix keeps the RAW
+  // form (fail-closed) — the snapshot doesn't carry the prefix. Chain
+  // assignments (`VAR=x && …`) DO persist via the walker env tracker
+  // and resolve normally.
   const effective = refs.map((ref) => {
     const trackerState = walkResult.get(ref) ?? {
       cwd: sessionCwd,
       env: new Map<string, string>(),
     };
-    const env = effectiveEnvForRef(ref, trackerState.env as EnvState);
+    // The composed trackers map is typed as a `Record<string,
+    // Tracker<unknown>>`, so the walk result value is an index-signature
+    // record — narrow `unknown` to the expected env map (the tracker is
+    // always the envTracker's EnvState). NO prefix overlay here (issue
+    // #53).
+    const env = trackerState.env as EnvState;
     return { ref, trackerState, env, text: refToTextResolved(ref, env) };
   });
   // Thread per-ref resolved text into speculative synthesis so watch
@@ -502,7 +512,7 @@ function prepareBashState(
       ref,
       text,
       basename: getBasename(ref),
-      // Per-ref effective-env projection: text/value carry the
+      // Per-ref env-snapshot projection: text/value carry the
       // ENV-RESOLVED runtime forms (text quote-preserving incl.
       // process-substitution inner expansion; value the unquoted
       // resolved value), rawText the original source, parts the RAW

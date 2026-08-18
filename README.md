@@ -378,7 +378,7 @@ interface WhenWalkerState {
 
 `exec` is memoized per `(cmd, args, cwd)` within a single tool_call — two rules reading the same git state don't re-fork git. No cross-call cache.
 
-`PredicateToolInput.args` on bash gives you the `Word[]` suffix — quote-aware; `.value` is the lexical unwrapped value, `.text` is the raw source. Use this when a predicate needs to read `-m "feat: x"` without losing the quoted content.
+`PredicateToolInput.args` on bash gives you the `Word[]` suffix — quote-aware; `.text` / `.value` carry the ENV-RESOLVED runtime forms (`text` quote-preserving, `value` unquoted) and `rawText` exposes the original source token. Use this when a predicate needs to read `-m "feat: x"` without losing the quoted content.
 
 `walkerState.env` carries the per-ref env map: bare assignments (`FOO=bar`), `export NAME=value`, and `unset NAME` from the same bash chain, plus `HOME`/`USER`/`PWD` seeded from `process.env` at session start. Use it to resolve `$VAR` / `${VAR}` / `~` in user-supplied patterns via the `resolveWord` helper re-exported from the package root:
 
@@ -766,6 +766,16 @@ export const matchesHome: PredicateHandler = (args, ctx) => {
 ```
 
 Returning `undefined` means the word is statically intractable (unknown var, command substitution, arithmetic, parameter-expansion with modifiers). Handle it via an `onUnknown`-style policy on your predicate's option shape.
+
+**Prefix assignments are one-shot — words resolve against the chain snapshot (bash §3.7.1).** The shell expands a command's WORDS against the PRE-command environment; a prefix assignment (`NAME=value cmd …`) binds only for the DIRECT CHILD's environment, not for the same command's word expansions. So `BODY=x echo "$BODY"` in bash prints the OLD value of `BODY`, and pi keeps the word RAW here — fail-closed — rather than resolving it against the prefix and letting predicates match a fiction:
+
+```bash
+# pi resolves words against the walker chain env snapshot only:
+BODY=x echo "$BODY"      # word stays raw ("$BODY") — prefix is one-shot
+BODY=x && echo "$BODY"   # chain form — resolves to `x` (canonical shape)
+```
+
+A predicate that genuinely needs the child-env view (prefix applied to the direct child only) can fold the assignments sequentially itself: `new Map([...ctx.walkerState.env, ...resolveEach(envAssignments)])` where `resolveEach` resolves each `KEY=VALUE` RHS against the running map — bash's RHS is sequential (`A=1 B=$A cmd` → `B=1`).
 
 ## Testing rules
 

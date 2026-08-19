@@ -24,6 +24,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { EnvState, Tracker } from "@cad0p/unbash-walker";
 import type {
   BashToolCallEvent,
   EditToolCallEvent,
@@ -31,7 +32,11 @@ import type {
   WriteToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { makeCtx, makeTrackedHost as makeHost } from "./__test-helpers__.ts";
-import { buildEvaluator, type EvaluatorHost } from "./evaluator.ts";
+import {
+  buildEvaluator,
+  EVALUATOR_BUILTIN_TRACKERS,
+  type EvaluatorHost,
+} from "./evaluator.ts";
 import { evaluateWhen } from "./evaluator-internals/predicates.ts";
 import type { ResolvedPluginState } from "./plugin-merger.ts";
 import { resolvePlugins } from "./plugin-merger.ts";
@@ -7242,5 +7247,109 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
     const input = seen[0]!.input;
     assert.equal(input.envAssignments!.length, 1);
     assert.equal(input.envAssignments![0]!.text, "A=$VAR");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #54 — speculative synthesis keeps parity with plugin env trackers
+// ---------------------------------------------------------------------------
+//
+// The speculative-allow path (synthesizeSpeculativeEntries) feeds the
+// evaluator's rule-side RESOLVED text (computed with the full plugin
+// walk registry) into the shared matchesWatch. Chain-masking must not
+// regress when a plugin env tracker is present: a producer `&&` ref
+// that only matches its observer in RESOLVED form must still grant a
+// speculative entry.
+
+describe("buildEvaluator: speculative allow with plugin env tracker (issue #54)", () => {
+  const PROBE = "PI_STEERING_PARITY_PROBE_FOO" as const;
+  const PROBE_SEEN = "probe-seen" as const;
+
+  function pluginEnvTracker(): Tracker<EnvState> {
+    return {
+      initial: new Map([[PROBE, "plugin-only"]]),
+      unknown: new Map(),
+      modifiers: {},
+      subshellSemantics: "isolated",
+    };
+  }
+
+  const resolvedWithPlugin = resolvePlugins(
+    [{ name: "env-owner", trackers: { env: pluginEnvTracker() } }],
+    {},
+    EVALUATOR_BUILTIN_TRACKERS,
+  );
+
+  function producer(pat: RegExp, name: string): Observer {
+    return {
+      name,
+      writes: [PROBE_SEEN],
+      watch: { toolName: "bash", inputMatches: { command: pat } },
+      onResult: () => {
+        /* the reverse-index only reads metadata in the evaluator */
+      },
+    };
+  }
+
+  const needsSeen: Rule = {
+    name: "needs-probe-seen",
+    tool: "bash",
+    field: "command",
+    pattern: /^finalize\b/,
+    reason: "probe first",
+    when: { missing: { event: PROBE_SEEN, in: "agent_loop" } },
+  };
+
+  it("resolved producer ref grants the speculative allow (chain registered plugin env)", async () => {
+    // `$PROBE` resolves to plugin-only ONLY via the plugin env tracker
+    // (the built-in env tracker has no such var). The evaluator's
+    // resolvedTexts carry the full-registry resolution into the
+    // synthesized event → the resolved-form observer matches → the
+    // `finalize` ref sees the speculative entry as present → allow.
+    const evaluator = buildEvaluator(
+      {
+        rules: [needsSeen],
+        observers: [producer(/echo plugin-only/, "resolved-producer")],
+      },
+      resolvedWithPlugin,
+      makeHost(),
+    );
+    const res = await evaluator.evaluate(
+      bashEvent(`echo "$PI_STEERING_PARITY_PROBE_FOO" && finalize`),
+      makeCtx("/r"),
+      5,
+    );
+    assert.equal(
+      res,
+      undefined,
+      "chain must be ALLOWED: the resolved producer ref was seen speculatively",
+    );
+  });
+
+  it("control: raw-form watch on the producer → no speculative entry → chain blocked", async () => {
+    // A watch written for the raw `$VAR` shape cannot match the
+    // rule-side resolved text (`echo plugin-only` no longer carries the
+    // raw token) → no speculative entry → the requirement gate fires.
+    // Pins that raw-form observers do NOT grant spurious allows
+    // (rule-resolves-more direction on the speculative surface).
+    const evaluator = buildEvaluator(
+      {
+        rules: [needsSeen],
+        observers: [
+          producer(/echo \$PI_STEERING_PARITY_PROBE_FOO/, "raw-producer"),
+        ],
+      },
+      resolvedWithPlugin,
+      makeHost(),
+    );
+    const res = await evaluator.evaluate(
+      bashEvent(`echo "$PI_STEERING_PARITY_PROBE_FOO" && finalize`),
+      makeCtx("/r"),
+      5,
+    );
+    assert.ok(
+      res && res.block === true,
+      "raw-form producer can't match resolved text → no speculative entry → BLOCK",
+    );
   });
 });

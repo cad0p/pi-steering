@@ -68,8 +68,8 @@
 
 import {
   cwdTracker,
-  envTracker,
   type EnvState,
+  envTracker,
   type Modifier,
   type Tracker,
 } from "@cad0p/unbash-walker";
@@ -118,8 +118,10 @@ export function buildWalkRegistry(
  * this constant — it threads `buildWalkRegistry(resolved)` + per-event
  * `ctx.cwd` instead.
  */
-export const WATCH_DEFAULT_WALK: Record<string, Tracker<unknown>> =
-  Object.freeze({ env: envTracker });
+export const WATCH_DEFAULT_WALK: Record<
+  string,
+  Tracker<unknown>
+> = Object.freeze({ env: envTracker });
 
 /**
  * Layer a bucket of plugin-provided `{ basename -> Modifier[] }`

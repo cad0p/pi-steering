@@ -30,8 +30,21 @@
  *
  * Wiring (Phase 3c): the extension runtime subscribes to `tool_result`
  * and forwards the event + current `agentLoopIndex` into `dispatch`.
+ *
+ * ## Walk-registry parity (issue #54)
+ *
+ * `buildObserverDispatcher` derives the effective walker registry
+ * from its `resolved` plugin state (via {@link buildWalkRegistry} in
+ * `internal/walk-registry.ts`) — the SAME derivation the evaluator's
+ * rule surface uses — and seeds each watch walk with the per-event
+ * `ctx.cwd`. The watch surface therefore resolves the same
+ * plugin-composed env trackers as the rule surface (closing the
+ * parity gap where observers matched raw forms while rules saw
+ * resolved forms); per-event cwd keeps cwd-dependent loaders in step
+ * with the rule side (which is already per-event).
  */
 
+import type { Tracker } from "@cad0p/unbash-walker";
 import type {
   ExtensionContext,
   ToolResultEvent as PiToolResultEvent,
@@ -43,7 +56,7 @@ import {
   type EvaluatorHost,
 } from "./evaluator-internals/context.ts";
 import { mergeObserversUserFirst } from "./internal/merge-observers.ts";
-import { WATCH_DEFAULT_WALK } from "./internal/walk-registry.ts";
+import { buildWalkRegistry } from "./internal/walk-registry.ts";
 import {
   extractRefTextsForBash,
   matchesWatch,
@@ -127,9 +140,16 @@ export function buildObserverDispatcher(
   // `mergeObserversUserFirst` so both callers see the same final list.
   const merged = mergeObserversUserFirst(userObservers, resolved.observers);
 
+  // Effective walker registry for the watch surface — same derivation
+  // the evaluator's rule surface uses (see internal/walk-registry.ts),
+  // so plugin-composed env/cwd trackers resolve identically on both
+  // surfaces (issue #54). Captured into the dispatch closure; the
+  // per-event cwd seed comes from `ctx.cwd` at dispatch time.
+  const trackers = buildWalkRegistry(resolved);
+
   return {
     dispatch: (event, ctx, agentLoopIndex) =>
-      dispatchEvent(event, ctx, agentLoopIndex, merged, host),
+      dispatchEvent(event, ctx, agentLoopIndex, merged, host, trackers),
   };
 }
 
@@ -143,6 +163,7 @@ async function dispatchEvent(
   agentLoopIndex: number,
   observers: readonly Observer[],
   host: EvaluatorHost,
+  trackers: Record<string, Tracker<unknown>>,
 ): Promise<void> {
   // Top-level fail-open wrap. Per-observer throws are already
   // isolated in the inner loop; this outer wrap exists so a throw in
@@ -152,7 +173,14 @@ async function dispatchEvent(
   // `tool_result` hook. Observers are best-effort state recorders —
   // a broken engine should not take down the tool_result pipeline.
   try {
-    await dispatchEventInner(event, ctx, agentLoopIndex, observers, host);
+    await dispatchEventInner(
+      event,
+      ctx,
+      agentLoopIndex,
+      observers,
+      host,
+      trackers,
+    );
   } catch (err) {
     console.warn(
       `[pi-steering] observer dispatcher threw: ${formatError(err)}`,
@@ -166,6 +194,7 @@ async function dispatchEventInner(
   agentLoopIndex: number,
   observers: readonly Observer[],
   host: EvaluatorHost,
+  trackers: Record<string, Tracker<unknown>>,
 ): Promise<void> {
   // Shared per-event session-entry cache: findEntries + appendEntry
   // share it so an earlier observer's appendEntry invalidates the
@@ -198,12 +227,12 @@ async function dispatchEventInner(
   const getRefTexts = (): readonly string[] | null => {
     if (refTextsCache !== undefined) return refTextsCache;
     refTextsCache = extractRefTextsForBash(schemaEvent, {
-      // M3 intermediate: the required-options signature landed; this
-      // call site temporarily preserves the prior builtin-only
-      // behavior. M4 threads `buildWalkRegistry(resolved)` +
-      // per-event `ctx.cwd` here.
-      trackers: WATCH_DEFAULT_WALK,
-      cwd: "/",
+      // Plugin-composed walk registry (same derivation as the rule
+      // surface) + per-event cwd — the parity fix of issue #54.
+      // `ctx.cwd` is load-bearing: a cwd-dependent env loader must
+      // resolve the same on both surfaces.
+      trackers,
+      cwd: ctx.cwd,
     });
     return refTextsCache;
   };

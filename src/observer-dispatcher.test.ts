@@ -20,11 +20,13 @@
 
 import assert from "node:assert/strict";
 import { describe, it, mock } from "node:test";
+import type { EnvState, Modifier, Tracker } from "@cad0p/unbash-walker";
 import type { ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { makeCtx, makeTrackedHost as makeHost } from "./__test-helpers__.ts";
+import { buildEvaluator, EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
 import { buildObserverDispatcher } from "./observer-dispatcher.ts";
 import { resolvePlugins } from "./plugin-merger.ts";
-import type { Observer, Plugin } from "./schema.ts";
+import type { Observer, Plugin, Rule } from "./schema.ts";
 
 // ---------------------------------------------------------------------------
 // Event builders
@@ -937,3 +939,288 @@ describe("buildObserverDispatcher: user observer-name validation (S3)", () => {
 // refactors remove the event-shape test above.
 const _resultTypeKeepalive = null as unknown as ToolResultEvent | null;
 void _resultTypeKeepalive;
+
+// ---------------------------------------------------------------------------
+// Issue #54 — plugin env tracker parity across rule + watch surfaces
+// ---------------------------------------------------------------------------
+//
+// A plugin may legally register `trackers: { env }` (env is not a
+// reserved tracker name). Before the fix the watch surface re-walked
+// with the built-in env tracker only, so observers matched raw `$VAR`
+// forms while rules saw resolved forms. The dispatcher must walk the
+// watch surface with the SAME `buildWalkRegistry(resolved)` registry
+// (and per-event `ctx.cwd`) as the rule surface.
+
+describe("buildObserverDispatcher: plugin env tracker parity (issue #54)", () => {
+  const PROBE = "PI_STEERING_PARITY_PROBE_FOO" as const;
+
+  function pluginEnvTracker(seed: string): Tracker<EnvState> {
+    return {
+      initial: new Map([[PROBE, seed]]),
+      unknown: new Map(),
+      modifiers: {},
+      subshellSemantics: "isolated",
+    };
+  }
+
+  function bashCallEvent(command: string) {
+    return {
+      type: "tool_call" as const,
+      toolCallId: "t1",
+      toolName: "bash",
+      input: { command },
+    };
+  }
+
+  it("resolved-form watch FIRES; raw ref-text form does NOT (rule-resolves-more pinned)", async () => {
+    const resolved = resolvePlugins(
+      [
+        {
+          name: "env-owner",
+          trackers: { env: pluginEnvTracker("plugin-only") },
+        },
+      ],
+      {},
+      EVALUATOR_BUILTIN_TRACKERS,
+    );
+    let resolvedCount = 0;
+    let rawCount = 0;
+    const obsResolved: Observer = {
+      name: "resolved-watcher",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /echo plugin-only/ },
+      },
+      onResult: () => {
+        resolvedCount++;
+      },
+    };
+    const obsRaw: Observer = {
+      name: "raw-reftext-watcher",
+      watch: {
+        toolName: "bash",
+        // Pre-fix the watch surface's ref TEXT rendered the raw bare
+        // token (`echo $PI_STEERING_PARITY_PROBE_FOO`) — a pattern on
+        // that unquoted bare-token form fired. Post-fix the ref text
+        // resolves, so the only place the token could still surface raw
+        // is the raw OUTER command, which carries a quote before the `$`
+        // (adjacency breaks) — so this watch must NOT fire. Pins the
+        // "rule resolves more than watch" direction: no spurious raw-
+        // form entries disabling a requirement gate.
+        inputMatches: { command: /echo \$PI_STEERING_PARITY_PROBE_FOO/ },
+      },
+      onResult: () => {
+        rawCount++;
+      },
+    };
+    const dispatcher = buildObserverDispatcher(
+      resolved,
+      [obsResolved, obsRaw],
+      makeHost(),
+    );
+    await dispatcher.dispatch(
+      bashResult(`echo "$${PROBE}"`, 0),
+      makeCtx("/r"),
+      0,
+    );
+
+    assert.equal(
+      resolvedCount,
+      1,
+      "resolved-form watch must fire (parity restored via buildWalkRegistry)",
+    );
+    assert.equal(
+      rawCount,
+      0,
+      "raw ref-text form must not fire — the watch walk now resolves the plugin env",
+    );
+  });
+
+  it("behavioral equality: rule blocks AND observer fires on the same resolved-form pattern", async () => {
+    const resolved = resolvePlugins(
+      [
+        {
+          name: "env-owner",
+          trackers: { env: pluginEnvTracker("plugin-only") },
+        },
+      ],
+      {},
+      EVALUATOR_BUILTIN_TRACKERS,
+    );
+
+    // Rule surface: pattern on the resolved form blocks the tool_call.
+    const guard: Rule = {
+      name: "block-plugin-echo",
+      tool: "bash",
+      field: "command",
+      pattern: /echo plugin-only/,
+      reason: "resolved-form block",
+    };
+    const evaluator = buildEvaluator({ rules: [guard] }, resolved, makeHost());
+    const evaluatorResult = await evaluator.evaluate(
+      bashCallEvent(`echo "$${PROBE}"`),
+      makeCtx("/r"),
+      0,
+    );
+    assert.ok(
+      evaluatorResult && evaluatorResult.block === true,
+      "rule surface must match the resolved form (echo plugin-only)",
+    );
+
+    // Watch surface: same pattern fires on the tool_result.
+    let fired = 0;
+    const obs: Observer = {
+      name: "resolved-watcher",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /echo plugin-only/ },
+      },
+      onResult: () => {
+        fired++;
+      },
+    };
+    const dispatcher = buildObserverDispatcher(resolved, [obs], makeHost());
+    await dispatcher.dispatch(
+      bashResult(`echo "$${PROBE}"`, 0),
+      makeCtx("/r"),
+      0,
+    );
+
+    assert.equal(
+      fired,
+      1,
+      "the same command + registry must resolve identically on the watch surface",
+    );
+  });
+
+  it("per-event ctx.cwd seeds the watch walk (cwd-dependent env loader)", async () => {
+    // An env loader modifier that reads the walk's cwd dimension
+    // (allState.cwd) — the .envrc-style case. The dispatcher must seed
+    // the watch walk from per-event ctx.cwd, never the "/" sentinel.
+    const loader: Modifier<unknown> = {
+      scope: "sequential",
+      apply: (_args, _current, allState) =>
+        new Map([
+          ["PWD_SEEDED_VAR", allState["cwd"] === "/a" ? "from-a" : "from-b"],
+        ]),
+    };
+    const loaderTracker: Tracker<unknown> = {
+      initial: new Map(),
+      unknown: new Map(),
+      modifiers: { "pwd-load": loader },
+      subshellSemantics: "isolated",
+    };
+    const resolved = resolvePlugins(
+      [{ name: "cwd-loader", trackers: { env: loaderTracker } }],
+      {},
+      EVALUATOR_BUILTIN_TRACKERS,
+    );
+
+    let firedFromA = 0;
+    let firedFromB = 0;
+    const obsA: Observer = {
+      name: "a-watcher",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /echo from-a/ },
+      },
+      onResult: () => {
+        firedFromA++;
+      },
+    };
+    const obsB: Observer = {
+      name: "b-watcher",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /echo from-b/ },
+      },
+      onResult: () => {
+        firedFromB++;
+      },
+    };
+    const dispatcher = buildObserverDispatcher(
+      resolved,
+      [obsA, obsB],
+      makeHost(),
+    );
+    const command = 'pwd-load && echo "$PWD_SEEDED_VAR"';
+
+    await dispatcher.dispatch(bashResult(command, 0), makeCtx("/a"), 0);
+    assert.equal(firedFromA, 1, "cwd /a must resolve the loader to from-a");
+    assert.equal(firedFromB, 0, "cwd /a must NOT resolve from-b");
+
+    await dispatcher.dispatch(bashResult(command, 0), makeCtx("/b"), 0);
+    assert.equal(firedFromB, 1, "cwd /b must resolve the loader to from-b");
+    assert.equal(firedFromA, 1, "cwd /b must not re-fire from-a");
+  });
+
+  it("fail-open E2E: resolved dispatch records → latch guard blocks; builtin-only dispatch re-opens (control)", async () => {
+    const resolved = resolvePlugins(
+      [
+        {
+          name: "env-owner",
+          trackers: { env: pluginEnvTracker("plugin-only") },
+        },
+      ],
+      {},
+      EVALUATOR_BUILTIN_TRACKERS,
+    );
+
+    const guard: Rule = {
+      name: "no-destructive-after-danger",
+      tool: "bash",
+      field: "command",
+      pattern: /^rm -rf/,
+      reason: "dangerous-rm latch",
+      when: {
+        not: { missing: { event: "dangerous-rm", in: "agent_loop" } },
+      },
+    };
+    const recorder: Observer = {
+      name: "danger-rm-recorder",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /^rm -rf plugin-only/ },
+      },
+      onResult: (_event, ctx) => {
+        ctx.appendEntry("dangerous-rm");
+      },
+    };
+
+    const cmd = `rm -rf "$${PROBE}"`;
+
+    // (a) WITH the plugin env registry: dispatch resolves the watch,
+    //     records the entry, and the not:missing latch guard fires.
+    const hostA = makeHost();
+    const ctxA = makeCtx("/r", hostA.entries);
+    const dispatcherA = buildObserverDispatcher(resolved, [recorder], hostA);
+    const evaluatorA = buildEvaluator({ rules: [guard] }, resolved, hostA);
+    await dispatcherA.dispatch(bashResult(cmd, 1), ctxA, 1);
+    const blocked = await evaluatorA.evaluate(bashCallEvent(cmd), ctxA, 1);
+    assert.ok(
+      blocked && blocked.block === true,
+      "resolved-form dispatch records → not(missing) → guard BLOCKS the rm -rf",
+    );
+
+    // (b) CONTROL — a dispatcher built over builtin-only plugins cannot
+    //     see the resolved form → no entry → not(missing) sees missing
+    //     = true → guard inert → allowed (fail-open pinned). This is
+    //     exactly the pre-fix mis-wiring the dispatch parity closes.
+    const builtinResolved = resolvePlugins([], {}, EVALUATOR_BUILTIN_TRACKERS);
+    const hostB = makeHost();
+    const ctxB = makeCtx("/r", hostB.entries);
+    const dispatcherB = buildObserverDispatcher(
+      builtinResolved,
+      [recorder],
+      hostB,
+    );
+    const evaluatorB = buildEvaluator({ rules: [guard] }, resolved, hostB);
+    await dispatcherB.dispatch(bashResult(cmd, 1), ctxB, 1);
+    const allowed = await evaluatorB.evaluate(bashCallEvent(cmd), ctxB, 1);
+    assert.equal(
+      allowed,
+      undefined,
+      "builtin-only dispatch misses the resolved watch → latch inert → ALLOWED (fail-open pinned)",
+    );
+  });
+});

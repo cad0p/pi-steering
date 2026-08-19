@@ -43,7 +43,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ObserverWatch, ToolResultEvent } from "../schema.ts";
+import { WATCH_DEFAULT_WALK } from "./walk-registry.ts";
 import { extractRefTextsForBash, matchesWatch } from "./watch-matcher.ts";
+
+// Standalone walk options for direct extractRefTextsForBash callers in
+// this file: no plugin state is in play, so the builtin default walk
+// + inert cwd sentinel apply (same as the matchesWatch default
+// provider). Production threads buildWalkRegistry + per-event cwd.
+const STANDALONE_WALK = {
+  trackers: WATCH_DEFAULT_WALK,
+  cwd: "/",
+} as const;
 
 // ---------------------------------------------------------------------------
 // Synthetic-event constructor
@@ -341,27 +351,34 @@ describe("extractRefTextsForBash: env-resolved ref text (issue #51)", () => {
 
   it("returns null for non-bash events", () => {
     assert.equal(
-      extractRefTextsForBash({
-        toolName: "read",
-        input: { path: "/x" },
-        output: undefined,
-      }),
+      extractRefTextsForBash(
+        {
+          toolName: "read",
+          input: { path: "/x" },
+          output: undefined,
+        },
+        STANDALONE_WALK,
+      ),
       null,
     );
   });
 
   it("returns null when the command is missing or empty", () => {
-    assert.equal(extractRefTextsForBash(bashResult("")), null);
+    assert.equal(extractRefTextsForBash(bashResult(""), STANDALONE_WALK), null);
   });
 
   it("static commands render identically to raw refToText", () => {
-    const texts = extractRefTextsForBash(bashResult("git push origin main"));
+    const texts = extractRefTextsForBash(
+      bashResult("git push origin main"),
+      STANDALONE_WALK,
+    );
     assert.deepEqual(texts, ["git push origin main"]);
   });
 
   it("chain-assigned $VAR resolves against the walk's env", () => {
     const texts = extractRefTextsForBash(
       bashResult('T="feat: x (closes #12)" && gh pr create --title "$T"'),
+      STANDALONE_WALK,
     );
     assert.ok(texts);
     // The bare-assignment ref renders as its own (empty) ref; the gh
@@ -375,6 +392,7 @@ describe("extractRefTextsForBash: env-resolved ref text (issue #51)", () => {
       bashResult(
         "BODY=/vault/repo/prs/note.md && gh pr create --body-file=<(perl -0777 -pe '<BODY_STRIP>' \"$BODY\")",
       ),
+      STANDALONE_WALK,
     );
     assert.ok(texts);
     const gh = texts.find((t) => t.startsWith("gh pr create"));
@@ -393,6 +411,7 @@ describe("extractRefTextsForBash: env-resolved ref text (issue #51)", () => {
       bashResult(
         'BODY=/vault/repo/prs/note.md gh pr create --body-file "$BODY"',
       ),
+      STANDALONE_WALK,
     );
     assert.ok(texts);
     const gh = texts.find((t) => t.startsWith("gh pr create"));
@@ -402,6 +421,7 @@ describe("extractRefTextsForBash: env-resolved ref text (issue #51)", () => {
   it("unresolvable vars stay raw (fail-closed)", () => {
     const texts = extractRefTextsForBash(
       bashResult('gh pr create --title "$UNDEF"'),
+      STANDALONE_WALK,
     );
     assert.deepEqual(texts, ["gh pr create --title $UNDEF"]);
   });
@@ -412,6 +432,7 @@ describe("extractRefTextsForBash: env-resolved ref text (issue #51)", () => {
     // (identical to the evaluator's per-ref fallback).
     const texts = extractRefTextsForBash(
       bashResult("sh -c 'BODY=/x && echo \"$BODY\"'"),
+      STANDALONE_WALK,
     );
     assert.ok(texts);
     const inner = texts.find((t) => t.startsWith("echo"));

@@ -13,6 +13,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { Observer } from "@cad0p/pi-steering";
 import {
   createRecordingHost,
   expectAllows,
@@ -44,6 +45,11 @@ describe("work-item-plugin (end-to-end)", () => {
       "npm-test-tracker",
       "retest-required-tracker",
     ]);
+
+    assert.ok(
+      workItemPlugin.trackerExtensions?.env?.["source-env"],
+      "env-loader extension registered onto the built-in env tracker",
+    );
   });
 
   it("blocks a commit without a work-item tag", async () => {
@@ -164,5 +170,68 @@ describe("work-item-plugin (end-to-end)", () => {
       config: { plugins: [workItemPlugin] },
     });
     await expectAllows(harness, { command: "ls -la" });
+  });
+
+  it("observer watch matching resolves trackerExtensions.env loader (issue #54 parity)", async () => {
+    // The plugin composes a `.envrc`-style env loader onto the shared
+    // `env` tracker. Both rule AND watch surfaces derive from the same
+    // `buildWalkRegistry(resolved)`, so the injected variable must be
+    // resolvable on the watch surface (this example locks the parity
+    // contract at the ecosystem level).
+    const host = createRecordingHost();
+    const ctx = mockExtensionContext("/tmp/test", host.entries);
+
+    const run = async (obs: Observer) => {
+      const h = loadHarness({
+        config: { plugins: [workItemPlugin], observers: [obs] },
+        host,
+      });
+      await h.dispatch(
+        {
+          type: "tool_result",
+          toolCallId: "tc1",
+          toolName: "bash",
+          input: { command: 'source-env && echo "$WORK_ITEM_LOADED_VAR"' },
+          content: [],
+          details: { exitCode: 0 },
+        } as unknown as Parameters<typeof h.dispatch>[0],
+        ctx,
+        1,
+      );
+    };
+
+    let firedResolved = 0;
+    await run({
+      name: "env-loaded-watcher",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /echo env-loaded/ },
+      },
+      onResult: () => {
+        firedResolved++;
+      },
+    });
+    assert.equal(
+      firedResolved,
+      1,
+      "resolved-form watch fires via the env-loader extension",
+    );
+
+    // Control: the raw `\$VAR` form no longer fires — the watch walk
+    // resolves the injected variable, so the raw token is gone from the
+    // resolved ref text (and the outer command only carries the name
+    // behind a quote, breaking adjacency).
+    let firedRaw = 0;
+    await run({
+      name: "raw-watcher",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /echo \$WORK_ITEM_LOADED_VAR/ },
+      },
+      onResult: () => {
+        firedRaw++;
+      },
+    });
+    assert.equal(firedRaw, 0, "raw-form watch must not fire");
   });
 });

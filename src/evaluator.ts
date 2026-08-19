@@ -45,13 +45,10 @@
 
 import {
   type CommandRef,
-  cwdTracker,
   type EnvState,
-  envTracker,
   expandWrapperCommands,
   extractAllCommandsFromAST,
   getBasename,
-  type Modifier,
   parse as parseBash,
   type Tracker,
   type Word,
@@ -87,6 +84,7 @@ import {
   refToTextResolved,
   resolvePredicateWords,
 } from "./internal/ref-text.ts";
+import { buildWalkRegistry } from "./internal/walk-registry.ts";
 import type { ResolvedPluginState } from "./plugin-merger.ts";
 import { validateName } from "./plugin-merger.ts";
 import type {
@@ -258,37 +256,14 @@ export function buildEvaluator(
     ruleSources.set(rule, resolved.rulePluginOwners[rule.name] ?? "user");
   }
 
-  // Compose the walker's tracker registry. Must always include `cwd`
-  // and `env` so the built-in `when.cwd` predicate + cd's env-aware
-  // resolution work — even if no plugin ships them. Plugins extending
-  // these with their own modifiers are honored via
-  // `resolved.composedTrackers.{cwd,env}` (the plugin merger already
-  // layered extensions on top of the plugin-declared trackers, if any).
-  //
-  // When no plugin registers a `cwd` tracker, we fall back to the
-  // built-in `cwdTracker` AND layer any `trackerModifiers.cwd`
-  // extensions onto it (the plugin merger preserves extensions
-  // targeting `"cwd"` on the caller's behalf via the
-  // `knownBuiltinTrackers` hint passed to `resolvePlugins`). Same
-  // pattern for `env` — lets a future plugin add e.g. `.envrc`-style
-  // env loading as a new modifier on the shared tracker without
-  // replacing it.
-  //
+  // Effective walker registry — single source of truth shared with
+  // the observer-dispatcher's watch surface (see
+  // `internal/walk-registry.ts` for the builtin-fallback contract).
+  // Always includes `env` + `cwd` (built-in fallbacks when no plugin
+  // ships them) and honors plugin `trackers`/`trackerExtensions`.
   // Env goes in first so cd's modifier sees the current ref's env via
-  // the `allState` read. Walker iteration is registration-order
-  // stable (Object.keys on an object literal); the ordering is a soft
-  // guarantee good for the built-in composition.
-  const trackers: Record<string, Tracker<unknown>> = {
-    ...resolved.composedTrackers,
-  };
-  if (!("env" in trackers)) {
-    const extraEnvModifiers = resolved.trackerModifiers["env"];
-    trackers["env"] = composeBuiltinEnv(extraEnvModifiers) as Tracker<unknown>;
-  }
-  if (!("cwd" in trackers)) {
-    const extraCwdModifiers = resolved.trackerModifiers["cwd"];
-    trackers["cwd"] = composeBuiltinCwd(extraCwdModifiers) as Tracker<unknown>;
-  }
+  // the `allState` read; the ordering is a soft guarantee.
+  const trackers = buildWalkRegistry(resolved);
 
   // Merge user + plugin observers (user-first dedup via the shared
   // helper, same convention as the observer-dispatcher). The merged
@@ -351,86 +326,6 @@ export function buildEvaluator(
 // ---------------------------------------------------------------------------
 // Per-event evaluation
 // ---------------------------------------------------------------------------
-
-/**
- * Layer a bucket of plugin-provided `{ basename -> Modifier[] }`
- * extensions on top of the built-in {@link cwdTracker}, returning a
- * fresh tracker so the built-in's `modifiers` map is never mutated.
- *
- * Used when no plugin registers a `cwd` tracker but plugins still
- * want to add basename modifiers to the built-in one (e.g. the git
- * plugin's `--git-dir=` handler). Mirrors the plugin-merger's
- * `composeTracker` shape — kept local here because the merger's
- * helper is private to that module and exposing it would force the
- * merger to know about the built-in cwd tracker. Keeping the merger
- * built-in-agnostic is worth the small duplication.
- */
-function composeBuiltinCwd(
-  extras: Record<string, Modifier<unknown>[]> | undefined,
-): Tracker<string> {
-  return composeBuiltin(cwdTracker, extras);
-}
-
-/**
- * Layer a bucket of plugin-provided `{ basename -> Modifier[] }`
- * extensions on top of the built-in {@link envTracker}, returning a
- * fresh tracker so the built-in's `modifiers` map is never mutated.
- *
- * Parallels {@link composeBuiltinCwd}. Env extensions are a future
- * surface — no plugin ships one today — but the composition is
- * symmetric with cwd and costs one helper to keep both paths
- * consistent when a plugin eventually wants to add e.g. `.envrc`-
- * style env-loading under the same tracker.
- */
-function composeBuiltinEnv(
-  extras: Record<string, Modifier<unknown>[]> | undefined,
-): Tracker<EnvState> {
-  return composeBuiltin(envTracker, extras);
-}
-
-/**
- * Generic tracker-extension compositor. Given a base tracker and a
- * bucket of plugin-provided `{ basename -> Modifier[] }` extensions,
- * returns a fresh tracker whose `modifiers` map fuses the two
- * without mutating the base.
- *
- * Resolution rule per basename:
- *   - Base has none, extras has 1+: extras become the entry
- *     (unwrapped to a single Modifier when length is 1).
- *   - Base has one or many, extras has 1+: concatenated into an
- *     array ordered base-first, extras-after, so per-command
- *     overrides layer in the expected sequence.
- *
- * Used by {@link composeBuiltinCwd} and {@link composeBuiltinEnv}
- * to fold `trackerExtensions.cwd` / `trackerExtensions.env` from
- * plugin registrations onto the built-ins. Keeping this helper
- * internal (not exported) lets the plugin-merger stay agnostic of
- * which built-in trackers exist.
- */
-function composeBuiltin<T>(
-  baseTracker: Tracker<T>,
-  extras: Record<string, Modifier<unknown>[]> | undefined,
-): Tracker<T> {
-  if (!extras || Object.keys(extras).length === 0) return baseTracker;
-  const merged: Record<string, Modifier<T> | Modifier<T>[]> = {};
-  for (const [basename, mod] of Object.entries(baseTracker.modifiers)) {
-    merged[basename] = Array.isArray(mod) ? [...(mod as Modifier<T>[])] : mod;
-  }
-  for (const [basename, mods] of Object.entries(extras)) {
-    const existing = merged[basename];
-    const extrasTyped = mods as unknown as Modifier<T>[];
-    if (existing === undefined) {
-      merged[basename] =
-        extrasTyped.length === 1 ? extrasTyped[0]! : [...extrasTyped];
-      continue;
-    }
-    const existingList = Array.isArray(existing)
-      ? (existing as Modifier<T>[])
-      : [existing as Modifier<T>];
-    merged[basename] = [...existingList, ...extrasTyped];
-  }
-  return { ...baseTracker, modifiers: merged };
-}
 
 /**
  * Walker-state snapshot per extracted bash command ref plus the

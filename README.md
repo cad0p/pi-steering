@@ -431,6 +431,8 @@ interface ObserverWatch {
 
 Observers fire on matching `tool_result` events. `watch.inputMatches.command` is **wrapper-aware** — a regex for `/^npm\s+test/` matches both `npm test` and `sh -c 'npm test'`.
 
+**Watch matching resolves the same walk registry as rules.** `watch.inputMatches.command` against a bash event rewinds the command through the SAME tracker registry the rule surface uses (via `internal/walk-registry.ts`'s `buildWalkRegistry(resolved)`), so plugin-composed env trackers (`trackers: { env }` or `trackerExtensions.env`, e.g. an `.envrc`-style loader) are honored on the watch side too — an observer pattern matches what the command actually resolves to, not the raw `$VAR` form. Each dispatch resolves against the per-event `ctx.cwd`. Caveats: (a) the LATCH idiom `when: { not: { missing: { event } } }` depends on an observer recording that event — if the watch surface can't resolve (or a command fails to parse), the latch goes inert / raw-only (fail-open); observers written for the raw token, by contrast, still fire when the raw OUTER command carries the literal token (see `internal/watch-matcher.ts`).
+
 `observerCtx.appendEntry` auto-tags writes with `_agentLoopIndex`. Don't inject that tag yourself. Use `ctx.findEntries<Payload>(type)` to read prior entries back.
 
 ### `writes` declarations

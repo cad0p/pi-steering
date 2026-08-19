@@ -42,6 +42,7 @@
  *     on the NEXT evaluation, not the current one.
  */
 
+import type { Tracker } from "@cad0p/unbash-walker";
 import type {
   ExtensionContext,
   ExecResult as PiExecResult,
@@ -63,6 +64,8 @@ import {
 import type { SyntheticEntry } from "../evaluator-internals/speculative-synthesis.ts";
 import { finalizePluginState } from "../internal/finalize-plugin-state.ts";
 import { runMergerPipeline } from "../internal/session-runtime.ts";
+import { WATCH_DEFAULT_WALK } from "../internal/walk-registry.ts";
+import { extractRefTextsForBash } from "../internal/watch-matcher.ts";
 import {
   buildObserverDispatcher,
   matchesWatch,
@@ -661,11 +664,27 @@ function defaultInputFor(tool: "bash" | "write" | "edit"): PredicateToolInput {
  * Options for {@link mockObserverContext}. Observers don't see
  * `tool`, `input`, or `walkerState` — those are predicate-side
  * concepts — so those fields are omitted here.
+ *
+ * The `walkRegistry` extension belongs HERE (not on
+ * {@link MockContextOptions}): it drives the observer's
+ * `watch.inputMatches.command` resolution, a watch-surface-only
+ * concept.
  */
 export type MockObserverContextOptions = Omit<
   MockContextOptions,
   "tool" | "input" | "walkerState" | "toolCallEvents"
->;
+> & {
+  /**
+   * Effective walker registry for resolving `watch.inputMatches.command`
+   * on bash events. Defaults to {@link WATCH_DEFAULT_WALK} (builtin env
+   * only). Pass a `buildWalkRegistry(resolved)` result (from
+   * `internal/walk-registry.ts`) to test an observer against the SAME
+   * plugin-composed env trackers production dispatch uses — without it,
+   * the lightweight `testObserver` path can pass green while production
+   * dispatch diverges (issue #54 verification-tool blind spot).
+   */
+  readonly walkRegistry?: Record<string, Tracker<unknown>>;
+};
 
 /**
  * Build an {@link ObserverContext} for unit-testing observer
@@ -1201,7 +1220,17 @@ export async function testObserver(
 
   const ctx = mockObserverContext(options);
   const resolvedEvent = resolveToolResultEvent(event);
-  const watchMatched = matchesWatch(observer.watch, resolvedEvent);
+  // Resolve `inputMatches.command` against the caller's walk registry
+  // (default: builtin) + the mock cwd — same derivation shape as
+  // production dispatch's per-event ctx.cwd. Passing a provider always
+  // is safe: `matchesWatch` only invokes it for `command` on bash events.
+  const walkRegistry = options.walkRegistry ?? WATCH_DEFAULT_WALK;
+  const getRefTexts = (): readonly string[] | null =>
+    extractRefTextsForBash(resolvedEvent, {
+      trackers: walkRegistry,
+      cwd: options.cwd ?? "/tmp/test",
+    });
+  const watchMatched = matchesWatch(observer.watch, resolvedEvent, getRefTexts);
 
   if (watchMatched) {
     await Promise.resolve(observer.onResult(resolvedEvent, ctx));

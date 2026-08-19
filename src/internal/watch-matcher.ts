@@ -33,15 +33,17 @@
  */
 
 import {
-  envTracker,
+  type EnvState,
   expandWrapperCommands,
   extractAllCommandsFromAST,
   parse as parseBash,
+  type Tracker,
   walk,
 } from "@cad0p/unbash-walker";
 import { matchesPattern } from "../evaluator-internals/predicates.ts";
 import type { ObserverWatch, Pattern, ToolResultEvent } from "../schema.ts";
 import { refToText, refToTextResolved } from "./ref-text.ts";
+import { WATCH_DEFAULT_WALK } from "./walk-registry.ts";
 
 /**
  * True if the observer's `watch` filter accepts this event. No watch
@@ -94,7 +96,17 @@ export function matchesWatch(
         ? (rawInput as Record<string, unknown>)
         : {};
     const getRefTexts =
-      refTextsProvider ?? (() => extractRefTextsForBash(event));
+      refTextsProvider ??
+      (() =>
+        extractRefTextsForBash(event, {
+          trackers: WATCH_DEFAULT_WALK,
+          // Documented inert sentinel for standalone callers: the
+          // default walk has no cwd-dependent modifiers, so the cwd
+          // seed only exists to satisfy the required-options shape.
+          // Production dispatch NEVER routes through this default — it
+          // passes `buildWalkRegistry(resolved)` + per-event `ctx.cwd`.
+          cwd: "/",
+        }));
     for (const [key, pat] of Object.entries(watch.inputMatches)) {
       const value = input[key];
       if (typeof value !== "string") return false;
@@ -156,29 +168,55 @@ function matchesInputField(
  * (hard-to-parse command — fall back to raw-only matching without
  * blowing up dispatch).
  *
- * Resolution: after parse+extract+expand, the command is walked with
- * the ENV tracker only (no sessionCwd / plugin-composed trackers
- * exist on this path; cwd is irrelevant for word resolution —
- * `envTracker.initial` seeds `process.env`) and each ref is rendered
- * through {@link refToTextResolved} against the RAW walker env
- * snapshot, mirroring the evaluator's `command` surface so observer
- * watch patterns match the same resolved strings rule patterns see
- * for the same command (issue #51) — NO prefix overlay (issue #53):
- * same-ref prefix assignments are one-shot for the direct child's env
- * and do NOT bind for the same command's word expansions (bash manual
+ * ## Walk options (REQUIRED — issue #54)
+ *
+ * The caller supplies the walk registry + cwd seed:
+ *
+ *   - `trackers` — the effective walker registry. Production threads
+ *     `buildWalkRegistry(resolved)` from
+ *     `internal/walk-registry.ts` so the watch surface resolves the
+ *     SAME plugin-composed trackers (incl. `trackers: { env }` /
+ *     `trackerExtensions.env`) as the rule surface — closing the
+ *     parity gap where observers matched raw forms while rules saw
+ *     resolved forms. Standalone callers pass {@link WATCH_DEFAULT_WALK}.
+ *     Required (not optional) on purpose: a forgotten registry would
+ *     silently re-introduce the divergence, so forgetting it is a
+ *     compile error.
+ *   - `cwd` — seeds the walk (production: per-event `ctx.cwd`, load-
+ *     bearing for cwd-dependent env loaders; standalone: `"/"` inert
+ *     sentinel).
+ *
+ * With the caller's registry, each ref is rendered through
+ * {@link refToTextResolved} against the walker's env snapshot,
+ * mirroring the evaluator's `command` surface so observer watch
+ * patterns match the same resolved strings rule patterns see for the
+ * same command (issue #51) — NO prefix overlay (issue #53): same-ref
+ * prefix assignments are one-shot for the direct child's env and do
+ * NOT bind for the same command's word expansions (bash manual
  * §3.7.1), so prefix-referencing refs stay raw (fail-closed); chain
  * assignments (`VAR=x && …`) resolve via the env tracker. Refs
  * without walk state (e.g. process-substitution inners) fall back to
  * raw {@link refToText}.
  *
+ * ## Fail-open `null` fallback note
+ *
+ * A parse throw falls back to raw-only matching (no ref texts). In
+ * the `not: { missing }` latch idiom that raw-only tail is fail-open
+ * — a parse crash silently never records, so the latch guard goes
+ * inert. Empirically unreachable today (the parser survived all probe
+ * constructs); documented here, not redesigned.
+ *
  * Exported so the production dispatcher can memoize the parse across
  * observers on the same event (see `dispatchEventInner`'s
  * `getRefTexts` cache). Chain-aware speculative-allow already
  * synthesizes one event per prior ref and doesn't need memoization —
- * it calls {@link matchesWatch} without a provider.
+ * it calls {@link matchesWatch} without a provider (the builtin
+ * default walk, safe because that path's input is already
+ * rule-resolved text).
  */
 export function extractRefTextsForBash(
   event: ToolResultEvent,
+  opts: { trackers: Record<string, Tracker<unknown>>; cwd: string },
 ): readonly string[] | null {
   if (event.toolName !== "bash") return null;
   const input =
@@ -191,9 +229,18 @@ export function extractRefTextsForBash(
     const script = parseBash(command);
     const extracted = extractAllCommandsFromAST(script, command);
     const { commands: refs } = expandWrapperCommands(extracted);
-    const walkResult = walk(script, {}, { env: envTracker }, refs);
+    const walkResult = walk(
+      script,
+      { cwd: opts.cwd } as Record<string, unknown>,
+      opts.trackers,
+      refs,
+    );
     return refs.map((ref) => {
-      const env = walkResult.get(ref)?.env;
+      // The walk's generic T widens to `Record<string, unknown>` with
+      // the broad caller-supplied registry, so narrow the env snapshot
+      // to the expected EnvState (same cast the evaluator's
+      // prepareBashState applies).
+      const env = walkResult.get(ref)?.env as EnvState | undefined;
       return env !== undefined ? refToTextResolved(ref, env) : refToText(ref);
     });
   } catch {

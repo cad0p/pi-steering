@@ -43,6 +43,7 @@ import {
   type EvaluatorHost,
 } from "./evaluator-internals/context.ts";
 import { mergeObserversUserFirst } from "./internal/merge-observers.ts";
+import { WATCH_DEFAULT_WALK } from "./internal/walk-registry.ts";
 import {
   extractRefTextsForBash,
   matchesWatch,
@@ -196,7 +197,14 @@ async function dispatchEventInner(
   let refTextsCache: readonly string[] | null | undefined;
   const getRefTexts = (): readonly string[] | null => {
     if (refTextsCache !== undefined) return refTextsCache;
-    refTextsCache = extractRefTextsForBash(schemaEvent);
+    refTextsCache = extractRefTextsForBash(schemaEvent, {
+      // M3 intermediate: the required-options signature landed; this
+      // call site temporarily preserves the prior builtin-only
+      // behavior. M4 threads `buildWalkRegistry(resolved)` +
+      // per-event `ctx.cwd` here.
+      trackers: WATCH_DEFAULT_WALK,
+      cwd: "/",
+    });
     return refTextsCache;
   };
 

@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - Set GH_TOKEN in drift-check Report step (e2e-caught) ([#44](https://github.com/cad0p/pi-steering/pull/44))
 - Bash-faithful Word resolution — drop the same-ref prefix overlay (closes #53) ([#56](https://github.com/cad0p/pi-steering/pull/56))
 - Rename when.happened to when.missing (closes #55) ([#57](https://github.com/cad0p/pi-steering/pull/57))
+- Observer watch matching resolves plugin-composed env trackers (closes #54)
 
 ### ⚡ Performance
 

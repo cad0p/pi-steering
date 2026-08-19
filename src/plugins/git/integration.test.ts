@@ -245,7 +245,9 @@ describe("git plugin: -C routing does not bypass no-main-commit", () => {
     // predicate then runs `git branch --show-current` with `cwd:
     // "/other"`. We assert that cwd on the exec call to pin the
     // extension reached the evaluator (via the `knownBuiltinTrackers`
-    // hint and the evaluator's `composeBuiltinCwd` helper).
+    // hint and `internal/walk-registry.ts`'s `composeBuiltinCwd`
+    // helper, which builds the evaluator + observer dispatcher's
+    // shared walk registry).
     const { evaluator, host } = buildRuntime(
       { plugins: [gitPlugin], rules: [] },
       branchExec("main"),

@@ -26,8 +26,14 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { EnvState, Tracker } from "@cad0p/unbash-walker";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { EvaluatorHost } from "../evaluator.ts";
+import {
+  EVALUATOR_BUILTIN_TRACKERS,
+  type EvaluatorHost,
+} from "../evaluator.ts";
+import { buildWalkRegistry } from "../internal/walk-registry.ts";
+import { resolvePlugins } from "../plugin-merger.ts";
 import type {
   Observer,
   ObserverContext,
@@ -1732,5 +1738,140 @@ describe("priorEntry", () => {
     const hits = ctx.findEntries<{ _agentLoopIndex: number }>("ws-sync-done");
     assert.equal(hits.length, 1);
     assert.equal(hits[0]?.data._agentLoopIndex, 5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #54 — harness parity for plugin env trackers
+// ---------------------------------------------------------------------------
+//
+// testObserver gains a `walkRegistry` option so plugin authors can pin
+// the resolved-form watches production dispatch uses. loadHarness's
+// dispatch is production-parity by construction (it shares the real
+// builder), so plugin env trackers resolve there without any harness
+// option.
+
+describe("issue #54: harness parity for plugin env trackers", () => {
+  const PROBE = "PI_STEERING_PARITY_PROBE_FOO" as const;
+
+  function pluginEnvTracker(): Tracker<EnvState> {
+    return {
+      initial: new Map([[PROBE, "plugin-only"]]),
+      unknown: new Map(),
+      modifiers: {},
+      subshellSemantics: "isolated",
+    };
+  }
+
+  const resolved = resolvePlugins(
+    [{ name: "env-owner", trackers: { env: pluginEnvTracker() } }],
+    {},
+    EVALUATOR_BUILTIN_TRACKERS,
+  );
+
+  it("testObserver walkRegistry option: resolved-form watch fires, raw ref-text form does NOT", async () => {
+    const event = {
+      toolName: "bash",
+      input: { command: `echo "$PI_STEERING_PARITY_PROBE_FOO"` },
+      output: {},
+      exitCode: 0,
+    };
+    const resolvedObs: Observer = {
+      name: "resolved-watcher",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /echo plugin-only/ },
+      },
+      onResult: () => {},
+    };
+    const rawObs: Observer = {
+      name: "raw-watcher",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /echo \$PI_STEERING_PARITY_PROBE_FOO/ },
+      },
+      onResult: () => {},
+    };
+
+    const viaOption = await testObserver(resolvedObs, event, {
+      walkRegistry: buildWalkRegistry(resolved),
+    });
+    assert.equal(
+      viaOption.watchMatched,
+      true,
+      "resolved-form watch fires when the plugin walk registry is supplied",
+    );
+
+    const rawViaOption = await testObserver(rawObs, event, {
+      walkRegistry: buildWalkRegistry(resolved),
+    });
+    assert.equal(
+      rawViaOption.watchMatched,
+      false,
+      "raw ref-text form does NOT fire — fail-open direction pinned at the harness level",
+    );
+  });
+
+  it("testObserver default (no option) keeps builtin-only resolution (blind spot documented)", async () => {
+    // Without the option, the lightweight path cannot resolve the
+    // plugin's env — the resolved-form watch misses. This is the
+    // verification-tool blind spot the walkRegistry option closes;
+    // the default stays backward-compatible.
+    const resolvedObs: Observer = {
+      name: "resolved-watcher",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /echo plugin-only/ },
+      },
+      onResult: () => {},
+    };
+    const res = await testObserver(resolvedObs, {
+      toolName: "bash",
+      input: { command: `echo "$PI_STEERING_PARITY_PROBE_FOO"` },
+      output: {},
+      exitCode: 0,
+    });
+    assert.equal(
+      res.watchMatched,
+      false,
+      "default walk (builtin env only) cannot match the plugin-resolved form",
+    );
+  });
+
+  it("loadHarness dispatch resolves plugin env trackers (production-parity by construction)", async () => {
+    const plugin: Plugin = {
+      name: "env-owner",
+      trackers: { env: pluginEnvTracker() },
+    };
+    let fired = 0;
+    const obs: Observer = {
+      name: "resolved-watcher",
+      watch: {
+        toolName: "bash",
+        inputMatches: { command: /echo plugin-only/ },
+      },
+      onResult: () => {
+        fired++;
+      },
+    };
+    const h = loadHarness({ config: { plugins: [plugin], observers: [obs] } });
+    await h.dispatch(
+      {
+        type: "tool_result",
+        toolCallId: "t",
+        toolName: "bash",
+        input: { command: `echo "$PI_STEERING_PARITY_PROBE_FOO"` },
+        content: [{ type: "text", text: "" }],
+        isError: false,
+        details: { exitCode: 0 },
+      } as unknown as Parameters<typeof h.dispatch>[0],
+      makeExtCtx("/repo"),
+      0,
+    );
+    assert.equal(
+      fired,
+      1,
+      "loadHarness dispatch threads the plugin-composed registry — resolved watch fires",
+    );
   });
 });

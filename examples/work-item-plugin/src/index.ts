@@ -32,6 +32,11 @@
  *       - Self-marking rules with `onFire`.
  *       - Constant + helper co-located with the rule when no
  *         observer corresponds (ADR §14).
+ *   - `trackers/env-loader.ts`
+ *       - `.envrc`-style env loader as a `trackerExtensions.env`
+ *         modifier on the SHARED built-in env tracker — an issue-54
+ *         parity example: the injected variable is visible to rules
+ *         AND observer watch matching via the same walk registry.
  *
  * Copy-adapt this layout. A real plugin likely ships more rules and
  * possibly a tracker too — see `src/plugins/git/`
@@ -66,6 +71,11 @@ import {
 } from "./rules/commit-description-check.ts";
 import { commitRequiresWorkItem } from "./rules/commit-requires-work-item.ts";
 import { pushRequiresTests } from "./rules/push-requires-tests.ts";
+import {
+  LOADED_VALUE,
+  LOADED_VAR,
+  sourceEnvLoader,
+} from "./trackers/env-loader.ts";
 
 declare global {
   /**
@@ -99,6 +109,13 @@ const workItemPlugin = {
   predicates: { workItemFormat },
   rules: [commitRequiresWorkItem, pushRequiresTests, commitDescriptionCheck],
   observers: [npmTestTracker, retestRequiredTracker],
+  // `.envrc`-style env loader composed onto the shared built-in `env`
+  // tracker (see `trackers/env-loader.ts`). Demonstrates the issue-54
+  // parity contract: rules and observer watch matching resolve the
+  // injected var through the SAME walk registry.
+  trackerExtensions: {
+    env: { "source-env": sourceEnvLoader() },
+  },
 } as const satisfies Plugin;
 
 export default workItemPlugin;
@@ -120,3 +137,8 @@ export {
 } from "./rules/commit-description-check.ts";
 export { commitRequiresWorkItem } from "./rules/commit-requires-work-item.ts";
 export { pushRequiresTests } from "./rules/push-requires-tests.ts";
+export {
+  LOADED_VALUE,
+  LOADED_VAR,
+  sourceEnvLoader,
+} from "./trackers/env-loader.ts";

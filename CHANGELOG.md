@@ -28,6 +28,10 @@ All notable changes to this project will be documented in this file.
 - Observer watch matching resolves plugin-composed env trackers (closes #54)
 - Work-item-format fixture rawText shape + CI examples typecheck (closes #60)
 
+### 🚜 Refactor
+
+- Git plugin → per-item layout (work-item-plugin structure, zero behavior change) (closes #62)
+
 ### ⚡ Performance
 
 - Pin jiti fsCache to package-local node_modules/.cache/jiti ([#38](https://github.com/cad0p/pi-steering/pull/38)) ([#39](https://github.com/cad0p/pi-steering/pull/39))

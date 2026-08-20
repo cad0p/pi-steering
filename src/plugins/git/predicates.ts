@@ -63,14 +63,14 @@ import type {
   PredicateShape,
   PredicateVerdict,
 } from "../../schema.ts";
-import { NO_CHECKOUT_IN_CHAIN } from "./branch-tracker.ts";
 import {
   getCommitsAhead,
   getRemoteUrl,
   getStagedChanges,
   getUpstream,
   getWorkingTreeClean,
-} from "./git-ops.ts";
+} from "./helpers/git-ops.ts";
+import { NO_CHECKOUT_IN_CHAIN } from "./trackers/branch-tracker.ts";
 
 // ---------------------------------------------------------------------------
 // Walker-unknown cwd guard (inline trinary)

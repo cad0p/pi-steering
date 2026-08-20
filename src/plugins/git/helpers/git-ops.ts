@@ -42,7 +42,7 @@
  * helper therefore always shells out.
  */
 
-import type { PredicateContext } from "../../schema.ts";
+import type { PredicateContext } from "../../../schema.ts";
 
 /**
  * Run a git command in the given cwd and return its trimmed stdout on

@@ -85,10 +85,10 @@ import type {
   Plugin,
   PredicateShape,
 } from "../../schema.ts";
-import { branchTracker } from "./branch-tracker.ts";
-import { gitCwdExtensions } from "./cwd-extensions.ts";
 import { predicates } from "./predicates.ts";
 import { rules } from "./rules.ts";
+import { branchTracker } from "./trackers/branch-tracker.ts";
+import { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
 
 declare global {
   /**
@@ -219,11 +219,6 @@ export const GIT_PLUGIN_NAME: "git" = gitPlugin.name;
 
 export default gitPlugin;
 
-// Named re-exports for consumers that want to pick pieces (e.g. a
-// test harness constructing a minimal config that uses only the
-// `branch` predicate without the shipped rule).
-export { branchTracker, NO_CHECKOUT_IN_CHAIN } from "./branch-tracker.ts";
-export { gitCwdExtensions } from "./cwd-extensions.ts";
 export {
   getBranch,
   getCommitsAhead,
@@ -231,7 +226,7 @@ export {
   getStagedChanges,
   getUpstream,
   getWorkingTreeClean,
-} from "./git-ops.ts";
+} from "./helpers/git-ops.ts";
 export {
   branch,
   type CommitsAheadArgs,
@@ -251,3 +246,11 @@ export {
   PROTECTED_BRANCH_PATTERN,
   rules,
 } from "./rules.ts";
+// Named re-exports for consumers that want to pick pieces (e.g. a
+// test harness constructing a minimal config that uses only the
+// `branch` predicate without the shipped rule).
+export {
+  branchTracker,
+  NO_CHECKOUT_IN_CHAIN,
+} from "./trackers/branch-tracker.ts";
+export { gitCwdExtensions } from "./trackers/cwd-extensions.ts";

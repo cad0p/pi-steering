@@ -27,8 +27,8 @@
  */
 
 import type { Rule } from "../../schema.ts";
-import { NO_CHECKOUT_IN_CHAIN } from "./branch-tracker.ts";
 import { walkerString } from "./predicates.ts";
+import { NO_CHECKOUT_IN_CHAIN } from "./trackers/branch-tracker.ts";
 
 /**
  * Bash command pattern matching `git commit` (with optional pre-subcommand

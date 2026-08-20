@@ -17,7 +17,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ExecResult, PredicateContext } from "../../index.ts";
+import type { ExecResult, PredicateContext } from "../../../index.ts";
 import {
   getBranch,
   getCommitsAhead,

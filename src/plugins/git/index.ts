@@ -10,8 +10,9 @@
  *
  *   - `predicates`         - `branch`, `upstream`, `commitsAhead`,
  *                             `hasStagedChanges`, `isClean`, `remote`.
- *                             See `./predicates/index.ts` for the arg
- *                             shapes each handler accepts.
+ *                             See the per-item files under
+ *                             `./predicates/` for the arg shapes each
+ *                             handler accepts.
  *   - `rules`              - `no-main-commit-github` (github-flavored,
  *                             first-match-wins) + `no-main-commit`
  *                             (generic fallback). Both overridable.
@@ -274,6 +275,7 @@ export {
   getWorkingTreeClean,
 } from "./helpers/git-ops.ts";
 export {
+  branch,
   type WalkerStringResult,
   walkerString,
 } from "./predicates/branch.ts";

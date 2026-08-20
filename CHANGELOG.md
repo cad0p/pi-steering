@@ -31,6 +31,7 @@ All notable changes to this project will be documented in this file.
 ### 🚜 Refactor
 
 - Git plugin → per-item layout (work-item-plugin structure, zero behavior change) (closes #62)
+- Drop per-folder bundles in plugins/git — top-level assembly shape (closes #64)
 
 ### ⚡ Performance
 

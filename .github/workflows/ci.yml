@@ -41,7 +41,11 @@ jobs:
         # their pretest builds it, then runs the rule-pack smoke tests
         # (locks README code blocks against drift).
         run: pnpm -r test
-      - name: Run steering smoke harness
+      - name: Run steering smoke harness + typecheck examples
         # dist/ is built by the examples' pretest above; the explicit
-        # build guards against pretest ordering changes.
-        run: pnpm build && node scripts/smoke.mjs
+        # build guards against pretest ordering changes. The examples
+        # typecheck (issue #60) needs the same dist/ and runs on the
+        # same matrix — canonical example packages must stay
+        # type-honest: node --test passes type-broken fixtures, tsc
+        # does not.
+        run: pnpm build && pnpm typecheck:examples && node scripts/smoke.mjs

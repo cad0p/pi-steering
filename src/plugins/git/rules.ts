@@ -27,7 +27,7 @@
  */
 
 import type { Rule } from "../../schema.ts";
-import { walkerString } from "./predicates.ts";
+import { walkerString } from "./predicates/index.ts";
 import { NO_CHECKOUT_IN_CHAIN } from "./trackers/branch-tracker.ts";
 
 /**

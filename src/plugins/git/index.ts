@@ -85,7 +85,7 @@ import type {
   Plugin,
   PredicateShape,
 } from "../../schema.ts";
-import { predicates } from "./predicates.ts";
+import { predicates } from "./predicates/index.ts";
 import { rules } from "./rules.ts";
 import { branchTracker } from "./trackers/branch-tracker.ts";
 import { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
@@ -238,7 +238,7 @@ export {
   upstream,
   type WalkerStringResult,
   walkerString,
-} from "./predicates.ts";
+} from "./predicates/index.ts";
 export {
   GIT_COMMIT_PATTERN,
   noMainCommit,

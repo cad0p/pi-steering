@@ -6,8 +6,8 @@
  */
 
 import type { PredicateHandler } from "../../../schema.ts";
-import { getWorkingTreeClean } from "../helpers/git-ops.ts";
 import { unwrapBooleanLeafArg } from "../helpers/boolean-args.ts";
+import { getWorkingTreeClean } from "../helpers/git-ops.ts";
 import { cwdIsWalkerUnknown } from "../helpers/pattern-args.ts";
 
 /**

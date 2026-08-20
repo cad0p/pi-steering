@@ -13,10 +13,7 @@
  */
 
 import { isPattern } from "../../../internal/pattern-utils.ts";
-import type {
-  Pattern,
-  PredicateContext,
-} from "../../../schema.ts";
+import type { Pattern, PredicateContext } from "../../../schema.ts";
 
 // ---------------------------------------------------------------------------
 // Walker-unknown cwd guard (inline trinary)

@@ -11,16 +11,13 @@
  * `predicates/index.ts` (and the plugin index) for plugin authors.
  */
 
-import type {
-  PredicateContext,
-  PredicateHandler,
-} from "../../../schema.ts";
-import { NO_CHECKOUT_IN_CHAIN } from "../trackers/branch-tracker.ts";
+import type { PredicateContext, PredicateHandler } from "../../../schema.ts";
 import {
   matchPattern,
   unknownVerdict,
   unwrapPatternArg,
 } from "../helpers/pattern-args.ts";
+import { NO_CHECKOUT_IN_CHAIN } from "../trackers/branch-tracker.ts";
 
 // ---------------------------------------------------------------------------
 // WalkerStringResult / walkerString (branch-tracker consumption helpers)

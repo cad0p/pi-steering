@@ -86,7 +86,7 @@ import type {
   PredicateShape,
 } from "../../schema.ts";
 import { predicates } from "./predicates/index.ts";
-import { rules } from "./rules.ts";
+import { rules } from "./rules/index.ts";
 import { branchTracker } from "./trackers/branch-tracker.ts";
 import { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
 
@@ -245,7 +245,7 @@ export {
   noMainCommitGithub,
   PROTECTED_BRANCH_PATTERN,
   rules,
-} from "./rules.ts";
+} from "./rules/index.ts";
 // Named re-exports for consumers that want to pick pieces (e.g. a
 // test harness constructing a minimal config that uses only the
 // `branch` predicate without the shipped rule).

@@ -25,11 +25,11 @@
 
 import type { AnyPredicateHandler } from "../../../schema.ts";
 import { branch, type WalkerStringResult, walkerString } from "./branch.ts";
-import { upstream } from "./upstream.ts";
-import { commitsAhead, type CommitsAheadArgs } from "./commits-ahead.ts";
+import { type CommitsAheadArgs, commitsAhead } from "./commits-ahead.ts";
 import { hasStagedChanges } from "./has-staged-changes.ts";
 import { isClean } from "./is-clean.ts";
 import { remote } from "./remote.ts";
+import { upstream } from "./upstream.ts";
 
 /**
  * Bundle of predicate handlers the git plugin registers under
@@ -51,11 +51,13 @@ export const predicates: Record<string, AnyPredicateHandler> = {
   remote,
 };
 
-export { branch, walkerString };
-export type { WalkerStringResult };
-export { upstream };
-export { commitsAhead };
-export type { CommitsAheadArgs };
-export { hasStagedChanges };
-export { isClean };
-export { remote };
+export type { CommitsAheadArgs, WalkerStringResult };
+export {
+  branch,
+  commitsAhead,
+  hasStagedChanges,
+  isClean,
+  remote,
+  upstream,
+  walkerString,
+};

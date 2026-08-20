@@ -6,8 +6,8 @@
  */
 
 import type { PredicateHandler } from "../../../schema.ts";
-import { getStagedChanges } from "../helpers/git-ops.ts";
 import { unwrapBooleanLeafArg } from "../helpers/boolean-args.ts";
+import { getStagedChanges } from "../helpers/git-ops.ts";
 import { cwdIsWalkerUnknown } from "../helpers/pattern-args.ts";
 
 /**

@@ -95,7 +95,8 @@ Why prefer `{ isClean: false }`:
   leaf level. A `not:` block takes block-level modifiers and forbids
   per-leaf modifiers inside; if you ever need a different `onUnknown:`
   policy on this single leaf, the bare form is the simpler edit.
-- **Idiomatic.** gitPlugin's `predicates.ts` JSDoc documents both
+- **Idiomatic.** gitPlugin's predicate registry JSDoc (`declare global`
+  block in `src/plugins/git/index.ts`) documents both
   polarities of every boolean predicate (`isClean: true` /
   `isClean: false`, `hasStagedChanges: true` / `hasStagedChanges: false`)
   exactly so authors can avoid `not:` for negation when a documented
@@ -139,7 +140,8 @@ trigger was a dynamic-cwd target the walker bailed on.
 ## Cross-references
 
 - `walkerUnknownCwdReason` JSDoc — `src/helpers/walker-unknown-cwd-reason.ts`. Read for the helper's signature, the `verifying` arg contract, and a worked rule snippet.
-- gitPlugin runtime-cwd predicates — `src/plugins/git/predicates/index.ts`. Each has a `@see {@link walkerUnknownCwdReason}` cross-link in its JSDoc, surfacing the helper at the predicate's hover location.
+- gitPlugin runtime-cwd predicates —
+  `src/plugins/git/predicates/{upstream,remote,is-clean,has-staged-changes,commits-ahead}.ts`. Each has a `@see {@link walkerUnknownCwdReason}` cross-link in its JSDoc, surfacing the helper at the predicate's hover location.
 
 ## Run the tests
 

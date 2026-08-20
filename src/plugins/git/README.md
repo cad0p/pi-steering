@@ -210,7 +210,7 @@ commit'`, and — thanks to the branch tracker — `git checkout main
 && git commit`.
 
 The pattern is shared with `no-main-commit-github` via the
-exported `GIT_COMMIT_PATTERN` constant in `rules/patterns.ts` (re-exported
+exported `GIT_COMMIT_PATTERN` constant in `helpers/patterns.ts` (re-exported
 from `pi-steering/plugins/git`), so a regex change to one rule is
 physically forced onto the other (a unit test pins each rule's
 `pattern` field against the constant by value).
@@ -445,6 +445,8 @@ predicate / helper, mirroring `examples/work-item-plugin`:
 ```
 src/plugins/git/
 ├── index.ts                  # public surface + plugin assembly
+│                             # (predicates record + rules roster inline)
+├── index.test.ts             # rules-roster order pin (first-match-wins)
 ├── integration.test.ts       # end-to-end wiring through the evaluator
 ├── trackers/
 │   ├── branch-tracker.ts     # walker state modifier (one file per tracker)
@@ -452,18 +454,16 @@ src/plugins/git/
 ├── helpers/
 │   ├── git-ops.ts            # raw git query helpers (getBranch, ...)
 │   ├── pattern-args.ts       # shared pattern-arg unwrapping helpers
-│   └── boolean-args.ts       # shared boolean-leaf arg unwrapping
-├── predicates/
-│   ├── index.ts              # `predicates` bundle + re-exports
-│   ├── branch.ts             # one handler per `when.<key>` slot
+│   ├── boolean-args.ts       # shared boolean-leaf arg unwrapping
+│   └── patterns.ts           # GIT_COMMIT_PATTERN / PROTECTED_BRANCH_PATTERN
+├── predicates/               # one handler per `when.<key>` slot (+ tests)
+│   ├── branch.ts
 │   ├── upstream.ts
 │   ├── commits-ahead.ts
 │   ├── has-staged-changes.ts
 │   ├── is-clean.ts
 │   └── remote.ts
-└── rules/
-    ├── index.ts              # `rules` array (first-match-wins order) + re-exports
-    ├── patterns.ts           # GIT_COMMIT_PATTERN / PROTECTED_BRANCH_PATTERN
+└── rules/                    # one file per rule (+ tests)
     ├── no-main-commit.ts
     └── no-main-commit-github.ts
 ```

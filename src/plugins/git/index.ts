@@ -275,6 +275,10 @@ export {
   getWorkingTreeClean,
 } from "./helpers/git-ops.ts";
 export {
+  GIT_COMMIT_PATTERN,
+  PROTECTED_BRANCH_PATTERN,
+} from "./helpers/patterns.ts";
+export {
   branch,
   type WalkerStringResult,
   walkerString,
@@ -287,11 +291,6 @@ export { hasStagedChanges } from "./predicates/has-staged-changes.ts";
 export { isClean } from "./predicates/is-clean.ts";
 export { remote } from "./predicates/remote.ts";
 export { upstream } from "./predicates/upstream.ts";
-export {
-  GIT_COMMIT_PATTERN,
-  PROTECTED_BRANCH_PATTERN,
-} from "./helpers/patterns.ts";
-export { noMainCommit, noMainCommitGithub };
 // Named re-exports for consumers that want to pick pieces (e.g. a
 // test harness constructing a minimal config that uses only the
 // `branch` predicate without the shipped rule).
@@ -300,3 +299,4 @@ export {
   NO_CHECKOUT_IN_CHAIN,
 } from "./trackers/branch-tracker.ts";
 export { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
+export { noMainCommit, noMainCommitGithub };

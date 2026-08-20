@@ -84,9 +84,11 @@ import type {
   Patterns,
   Plugin,
   PredicateShape,
+  Rule,
 } from "../../schema.ts";
 import { predicates } from "./predicates/index.ts";
-import { rules } from "./rules/index.ts";
+import { noMainCommit } from "./rules/no-main-commit.ts";
+import { noMainCommitGithub } from "./rules/no-main-commit-github.ts";
 import { branchTracker } from "./trackers/branch-tracker.ts";
 import { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
 
@@ -180,6 +182,24 @@ declare global {
 }
 
 /**
+ * Suggested rules for the git plugin.
+ *
+ * **Order matters — first-match-wins.** The github-specific rule
+ * (`no-main-commit-github`) is placed BEFORE the generic
+ * (`no-main-commit`) so on github clones + on main, the github
+ * rule's `remote:` predicate matches → fires first → user gets
+ * PR-flow guidance. On non-github contexts (Brazil packages, vault
+ * paths, scratch repos with non-github remotes) the github rule's
+ * `remote:` predicate doesn't match → the engine falls through to
+ * the generic `no-main-commit`. Reordering for stylistic reasons
+ * breaks this routing; pinned via a unit test in `./index.test.ts`.
+ */
+export const rules = [
+  noMainCommitGithub,
+  noMainCommit,
+] as const satisfies readonly Rule[];
+
+/**
  * The git plugin. Default export so `import gitPlugin from
  * "pi-steering/plugins/git"` gives you the whole thing.
  *
@@ -241,11 +261,9 @@ export {
 } from "./predicates/index.ts";
 export {
   GIT_COMMIT_PATTERN,
-  noMainCommit,
-  noMainCommitGithub,
   PROTECTED_BRANCH_PATTERN,
-  rules,
-} from "./rules/index.ts";
+} from "./helpers/patterns.ts";
+export { noMainCommit, noMainCommitGithub };
 // Named re-exports for consumers that want to pick pieces (e.g. a
 // test harness constructing a minimal config that uses only the
 // `branch` predicate without the shipped rule).

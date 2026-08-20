@@ -29,13 +29,13 @@ import type {
 } from "../../../index.ts";
 import {
   branch,
-  commitsAhead,
-  hasStagedChanges,
-  isClean,
-  remote,
-  upstream,
   walkerString,
-} from "./index.ts";
+} from "./branch.ts";
+import { commitsAhead } from "./commits-ahead.ts";
+import { hasStagedChanges } from "./has-staged-changes.ts";
+import { isClean } from "./is-clean.ts";
+import { remote } from "./remote.ts";
+import { upstream } from "./upstream.ts";
 
 // ---------------------------------------------------------------------------
 // Context builder

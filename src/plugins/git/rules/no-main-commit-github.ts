@@ -7,7 +7,7 @@
  */
 
 import type { Rule } from "../../../schema.ts";
-import { walkerString } from "../predicates/index.ts";
+import { walkerString } from "../predicates/branch.ts";
 import { NO_CHECKOUT_IN_CHAIN } from "../trackers/branch-tracker.ts";
 import {
   GIT_COMMIT_PATTERN,

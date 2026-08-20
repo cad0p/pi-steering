@@ -80,13 +80,19 @@
 import type { Tracker } from "@cad0p/unbash-walker";
 import type { DEFAULT_PLUGINS } from "../../defaults.ts";
 import type {
+  AnyPredicateHandler,
   BuiltInWhenLeaves,
   Patterns,
   Plugin,
   PredicateShape,
   Rule,
 } from "../../schema.ts";
-import { predicates } from "./predicates/index.ts";
+import { branch } from "./predicates/branch.ts";
+import { commitsAhead } from "./predicates/commits-ahead.ts";
+import { hasStagedChanges } from "./predicates/has-staged-changes.ts";
+import { isClean } from "./predicates/is-clean.ts";
+import { remote } from "./predicates/remote.ts";
+import { upstream } from "./predicates/upstream.ts";
 import { noMainCommit } from "./rules/no-main-commit.ts";
 import { noMainCommitGithub } from "./rules/no-main-commit-github.ts";
 import { branchTracker } from "./trackers/branch-tracker.ts";
@@ -182,6 +188,26 @@ declare global {
 }
 
 /**
+ * Predicate handlers the git plugin registers under
+ * `Plugin.predicates`. Keys become the `when.<key>` slots rule authors
+ * see.
+ *
+ * Typed as `Record<string, AnyPredicateHandler>` to match
+ * {@link Plugin.predicates} at the registry boundary — each handler's
+ * concrete argument shape is preserved in its own module, and
+ * consumers can import `commitsAhead`, `isClean`, etc. directly when
+ * they want the narrow type.
+ */
+export const predicates: Record<string, AnyPredicateHandler> = {
+  branch,
+  upstream,
+  commitsAhead,
+  hasStagedChanges,
+  isClean,
+  remote,
+};
+
+/**
  * Suggested rules for the git plugin.
  *
  * **Order matters — first-match-wins.** The github-specific rule
@@ -248,17 +274,17 @@ export {
   getWorkingTreeClean,
 } from "./helpers/git-ops.ts";
 export {
-  branch,
-  type CommitsAheadArgs,
-  commitsAhead,
-  hasStagedChanges,
-  isClean,
-  predicates,
-  remote,
-  upstream,
   type WalkerStringResult,
   walkerString,
-} from "./predicates/index.ts";
+} from "./predicates/branch.ts";
+export {
+  type CommitsAheadArgs,
+  commitsAhead,
+} from "./predicates/commits-ahead.ts";
+export { hasStagedChanges } from "./predicates/has-staged-changes.ts";
+export { isClean } from "./predicates/is-clean.ts";
+export { remote } from "./predicates/remote.ts";
+export { upstream } from "./predicates/upstream.ts";
 export {
   GIT_COMMIT_PATTERN,
   PROTECTED_BRANCH_PATTERN,

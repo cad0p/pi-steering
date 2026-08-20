@@ -11,13 +11,13 @@
  * null-on-failure contract.
  *
  * Predicate-layer concerns (`onUnknown`, pattern matching, walker-state
- * short-circuits) live in `./predicates.test.ts` and are deliberately
+ * short-circuits) live in `../predicates/*.test.ts` and are deliberately
  * not re-tested here.
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ExecResult, PredicateContext } from "../../index.ts";
+import type { ExecResult, PredicateContext } from "../../../index.ts";
 import {
   getBranch,
   getCommitsAhead,

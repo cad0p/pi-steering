@@ -37,7 +37,7 @@ import type {
   commitsAhead,
   hasStagedChanges,
   isClean,
-} from "./plugins/git/predicates.ts";
+} from "./plugins/git/predicates/index.ts";
 import type {
   BuiltInWhenLeaves,
   InnerValue,

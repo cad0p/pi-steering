@@ -10,7 +10,7 @@
  *
  *   - `predicates`         - `branch`, `upstream`, `commitsAhead`,
  *                             `hasStagedChanges`, `isClean`, `remote`.
- *                             See `./predicates.ts` for the arg
+ *                             See `./predicates/index.ts` for the arg
  *                             shapes each handler accepts.
  *   - `rules`              - `no-main-commit-github` (github-flavored,
  *                             first-match-wins) + `no-main-commit`
@@ -21,11 +21,11 @@
  *                             of the whole plugin with
  *                             `disabledPlugins: ["git"]`.
  *   - `trackers.branch`    - sequential `git checkout` / `git switch`
- *                             branch tracker. See `./branch-tracker.ts`.
+ *                             branch tracker. See `./trackers/branch-tracker.ts`.
  *   - `trackerExtensions.cwd.git`
  *                            - per-command `--git-dir=` / `--work-tree=`
  *                              parser layered on the core cwd tracker.
- *                              See `./cwd-extensions.ts`.
+ *                              See `./trackers/cwd-extensions.ts`.
  *
  * Also re-exported as composable building blocks for downstream
  * plugins (e.g. RDS-style multi-package `cr --all` scans that need
@@ -50,8 +50,8 @@
  *                                          mainline / trunk) used by
  *                                          both commit-on-main rules
  *
- * See `./git-ops.ts` for the helper contract (all collapse failure
- * modes to `null`; caller decides what to do with it).
+ * See `./helpers/git-ops.ts` for the helper contract (all collapse
+ * failure modes to `null`; caller decides what to do with it).
  *
  * Opt-in since the v0.1.x monorepo split: `DEFAULT_PLUGINS` is empty,
  * so this plugin is registered ONLY when the user declares it:
@@ -85,10 +85,10 @@ import type {
   Plugin,
   PredicateShape,
 } from "../../schema.ts";
-import { branchTracker } from "./branch-tracker.ts";
-import { gitCwdExtensions } from "./cwd-extensions.ts";
-import { predicates } from "./predicates.ts";
-import { rules } from "./rules.ts";
+import { predicates } from "./predicates/index.ts";
+import { rules } from "./rules/index.ts";
+import { branchTracker } from "./trackers/branch-tracker.ts";
+import { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
 
 declare global {
   /**
@@ -219,11 +219,6 @@ export const GIT_PLUGIN_NAME: "git" = gitPlugin.name;
 
 export default gitPlugin;
 
-// Named re-exports for consumers that want to pick pieces (e.g. a
-// test harness constructing a minimal config that uses only the
-// `branch` predicate without the shipped rule).
-export { branchTracker, NO_CHECKOUT_IN_CHAIN } from "./branch-tracker.ts";
-export { gitCwdExtensions } from "./cwd-extensions.ts";
 export {
   getBranch,
   getCommitsAhead,
@@ -231,7 +226,7 @@ export {
   getStagedChanges,
   getUpstream,
   getWorkingTreeClean,
-} from "./git-ops.ts";
+} from "./helpers/git-ops.ts";
 export {
   branch,
   type CommitsAheadArgs,
@@ -243,11 +238,19 @@ export {
   upstream,
   type WalkerStringResult,
   walkerString,
-} from "./predicates.ts";
+} from "./predicates/index.ts";
 export {
   GIT_COMMIT_PATTERN,
   noMainCommit,
   noMainCommitGithub,
   PROTECTED_BRANCH_PATTERN,
   rules,
-} from "./rules.ts";
+} from "./rules/index.ts";
+// Named re-exports for consumers that want to pick pieces (e.g. a
+// test harness constructing a minimal config that uses only the
+// `branch` predicate without the shipped rule).
+export {
+  branchTracker,
+  NO_CHECKOUT_IN_CHAIN,
+} from "./trackers/branch-tracker.ts";
+export { gitCwdExtensions } from "./trackers/cwd-extensions.ts";

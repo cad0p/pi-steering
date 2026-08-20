@@ -7,8 +7,8 @@
  * Also hosts the {@link WalkerStringResult} / {@link walkerString}
  * helpers — they exist for the branch-tracker-consumption contract
  * shared by this handler and the shipped rules' ReasonFns, so they
- * live next to their primary consumer. Re-exported from
- * `predicates/index.ts` (and the plugin index) for plugin authors.
+ * live next to their primary consumer. Re-exported from the plugin
+ * index for plugin authors.
  */
 
 import type { PredicateContext, PredicateHandler } from "../../../schema.ts";

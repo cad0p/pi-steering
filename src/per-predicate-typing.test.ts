@@ -35,9 +35,9 @@ import gitPlugin from "./plugins/git/index.ts";
 import type {
   CommitsAheadArgs,
   commitsAhead,
-  hasStagedChanges,
-  isClean,
-} from "./plugins/git/predicates/index.ts";
+} from "./plugins/git/predicates/commits-ahead.ts";
+import type { hasStagedChanges } from "./plugins/git/predicates/has-staged-changes.ts";
+import type { isClean } from "./plugins/git/predicates/is-clean.ts";
 import type {
   BuiltInWhenLeaves,
   InnerValue,

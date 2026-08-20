@@ -10,8 +10,9 @@
  *
  *   - `predicates`         - `branch`, `upstream`, `commitsAhead`,
  *                             `hasStagedChanges`, `isClean`, `remote`.
- *                             See `./predicates/index.ts` for the arg
- *                             shapes each handler accepts.
+ *                             See the per-item files under
+ *                             `./predicates/` for the arg shapes each
+ *                             handler accepts.
  *   - `rules`              - `no-main-commit-github` (github-flavored,
  *                             first-match-wins) + `no-main-commit`
  *                             (generic fallback). Both overridable.
@@ -80,13 +81,21 @@
 import type { Tracker } from "@cad0p/unbash-walker";
 import type { DEFAULT_PLUGINS } from "../../defaults.ts";
 import type {
+  AnyPredicateHandler,
   BuiltInWhenLeaves,
   Patterns,
   Plugin,
   PredicateShape,
+  Rule,
 } from "../../schema.ts";
-import { predicates } from "./predicates/index.ts";
-import { rules } from "./rules/index.ts";
+import { branch } from "./predicates/branch.ts";
+import { commitsAhead } from "./predicates/commits-ahead.ts";
+import { hasStagedChanges } from "./predicates/has-staged-changes.ts";
+import { isClean } from "./predicates/is-clean.ts";
+import { remote } from "./predicates/remote.ts";
+import { upstream } from "./predicates/upstream.ts";
+import { noMainCommit } from "./rules/no-main-commit.ts";
+import { noMainCommitGithub } from "./rules/no-main-commit-github.ts";
 import { branchTracker } from "./trackers/branch-tracker.ts";
 import { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
 
@@ -180,6 +189,44 @@ declare global {
 }
 
 /**
+ * Predicate handlers the git plugin registers under
+ * `Plugin.predicates`. Keys become the `when.<key>` slots rule authors
+ * see.
+ *
+ * Typed as `Record<string, AnyPredicateHandler>` to match
+ * {@link Plugin.predicates} at the registry boundary — each handler's
+ * concrete argument shape is preserved in its own module, and
+ * consumers can import `commitsAhead`, `isClean`, etc. directly when
+ * they want the narrow type.
+ */
+export const predicates: Record<string, AnyPredicateHandler> = {
+  branch,
+  upstream,
+  commitsAhead,
+  hasStagedChanges,
+  isClean,
+  remote,
+};
+
+/**
+ * Suggested rules for the git plugin.
+ *
+ * **Order matters — first-match-wins.** The github-specific rule
+ * (`no-main-commit-github`) is placed BEFORE the generic
+ * (`no-main-commit`) so on github clones + on main, the github
+ * rule's `remote:` predicate matches → fires first → user gets
+ * PR-flow guidance. On non-github contexts (Brazil packages, vault
+ * paths, scratch repos with non-github remotes) the github rule's
+ * `remote:` predicate doesn't match → the engine falls through to
+ * the generic `no-main-commit`. Reordering for stylistic reasons
+ * breaks this routing; pinned via a unit test in `./index.test.ts`.
+ */
+export const rules = [
+  noMainCommitGithub,
+  noMainCommit,
+] as const satisfies readonly Rule[];
+
+/**
  * The git plugin. Default export so `import gitPlugin from
  * "pi-steering/plugins/git"` gives you the whole thing.
  *
@@ -228,24 +275,22 @@ export {
   getWorkingTreeClean,
 } from "./helpers/git-ops.ts";
 export {
+  GIT_COMMIT_PATTERN,
+  PROTECTED_BRANCH_PATTERN,
+} from "./helpers/patterns.ts";
+export {
   branch,
-  type CommitsAheadArgs,
-  commitsAhead,
-  hasStagedChanges,
-  isClean,
-  predicates,
-  remote,
-  upstream,
   type WalkerStringResult,
   walkerString,
-} from "./predicates/index.ts";
+} from "./predicates/branch.ts";
 export {
-  GIT_COMMIT_PATTERN,
-  noMainCommit,
-  noMainCommitGithub,
-  PROTECTED_BRANCH_PATTERN,
-  rules,
-} from "./rules/index.ts";
+  type CommitsAheadArgs,
+  commitsAhead,
+} from "./predicates/commits-ahead.ts";
+export { hasStagedChanges } from "./predicates/has-staged-changes.ts";
+export { isClean } from "./predicates/is-clean.ts";
+export { remote } from "./predicates/remote.ts";
+export { upstream } from "./predicates/upstream.ts";
 // Named re-exports for consumers that want to pick pieces (e.g. a
 // test harness constructing a minimal config that uses only the
 // `branch` predicate without the shipped rule).
@@ -254,3 +299,4 @@ export {
   NO_CHECKOUT_IN_CHAIN,
 } from "./trackers/branch-tracker.ts";
 export { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
+export { noMainCommit, noMainCommitGithub };

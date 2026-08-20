@@ -20,11 +20,12 @@ import { testPredicate } from "@cad0p/pi-steering/testing";
 import { workItemFormat } from "./work-item-format.ts";
 
 /**
- * Tiny Word factory. Real Words carry `pos` / `end` / `parts` too, but
- * the predicate only ever reads `.value`; omitting the rest keeps the
- * test concise. Typed as `PredicateWord` — the shape predicates
- * actually receive (`input.args`): `rawText` is the original source
- * token (issue #51), identical to `value` for these static words.
+ * Tiny Word factory. Real predicate words carry `parts` too, but the
+ * predicate only ever reads `.value`; omitting the optional `parts`
+ * keeps the test concise. Typed as `PredicateWord` — the shape
+ * predicates actually receive (`input.args`): `rawText` is the
+ * original source token (issue #51), identical to `value` for these
+ * static words.
  */
 function W(value: string): PredicateWord {
   return { value, text: value, rawText: value, pos: 0, end: value.length };

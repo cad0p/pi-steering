@@ -10,7 +10,7 @@
  *
  *   - `predicates`         - `branch`, `upstream`, `commitsAhead`,
  *                             `hasStagedChanges`, `isClean`, `remote`.
- *                             See `./predicates.ts` for the arg
+ *                             See `./predicates/index.ts` for the arg
  *                             shapes each handler accepts.
  *   - `rules`              - `no-main-commit-github` (github-flavored,
  *                             first-match-wins) + `no-main-commit`
@@ -21,11 +21,11 @@
  *                             of the whole plugin with
  *                             `disabledPlugins: ["git"]`.
  *   - `trackers.branch`    - sequential `git checkout` / `git switch`
- *                             branch tracker. See `./branch-tracker.ts`.
+ *                             branch tracker. See `./trackers/branch-tracker.ts`.
  *   - `trackerExtensions.cwd.git`
  *                            - per-command `--git-dir=` / `--work-tree=`
  *                              parser layered on the core cwd tracker.
- *                              See `./cwd-extensions.ts`.
+ *                              See `./trackers/cwd-extensions.ts`.
  *
  * Also re-exported as composable building blocks for downstream
  * plugins (e.g. RDS-style multi-package `cr --all` scans that need
@@ -50,8 +50,8 @@
  *                                          mainline / trunk) used by
  *                                          both commit-on-main rules
  *
- * See `./git-ops.ts` for the helper contract (all collapse failure
- * modes to `null`; caller decides what to do with it).
+ * See `./helpers/git-ops.ts` for the helper contract (all collapse
+ * failure modes to `null`; caller decides what to do with it).
  *
  * Opt-in since the v0.1.x monorepo split: `DEFAULT_PLUGINS` is empty,
  * so this plugin is registered ONLY when the user declares it:

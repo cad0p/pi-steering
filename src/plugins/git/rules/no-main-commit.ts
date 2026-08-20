@@ -72,7 +72,7 @@ export const noMainCommit = {
     // same three-way discrimination (value / unknown / missing)
     // every other branch-consumer in this plugin uses. Single source
     // of truth for tracker-sentinel semantics; future sentinel
-    // additions update one site (the classifier in predicates.ts),
+    // additions update one site (the classifier in predicates/branch.ts),
     // not this filter too. Empty-string remains filtered inline as
     // a defensive check against future tracker contracts (detached
     // HEAD or similar); the branch tracker doesn't emit it today.

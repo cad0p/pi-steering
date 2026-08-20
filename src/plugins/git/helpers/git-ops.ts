@@ -27,7 +27,7 @@
  *
  * The helpers return **raw query results** and are INTENTIONALLY free
  * of the `onUnknown` / pattern-matching layer. That layer lives in
- * `predicates.ts`. If you want predicate-style semantics, call the
+ * `../predicates/`. If you want predicate-style semantics, call the
  * matching `when.*` handler (also re-exported from the plugin index)
  * rather than the helper.
  *

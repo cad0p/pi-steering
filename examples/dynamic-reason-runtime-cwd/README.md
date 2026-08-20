@@ -139,7 +139,7 @@ trigger was a dynamic-cwd target the walker bailed on.
 ## Cross-references
 
 - `walkerUnknownCwdReason` JSDoc — `src/helpers/walker-unknown-cwd-reason.ts`. Read for the helper's signature, the `verifying` arg contract, and a worked rule snippet.
-- gitPlugin runtime-cwd predicates — `src/plugins/git/predicates.ts`. Each has a `@see {@link walkerUnknownCwdReason}` cross-link in its JSDoc, surfacing the helper at the predicate's hover location.
+- gitPlugin runtime-cwd predicates — `src/plugins/git/predicates/index.ts`. Each has a `@see {@link walkerUnknownCwdReason}` cross-link in its JSDoc, surfacing the helper at the predicate's hover location.
 
 ## Run the tests
 

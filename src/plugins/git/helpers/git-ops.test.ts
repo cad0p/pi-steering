@@ -11,7 +11,7 @@
  * null-on-failure contract.
  *
  * Predicate-layer concerns (`onUnknown`, pattern matching, walker-state
- * short-circuits) live in `./predicates.test.ts` and are deliberately
+ * short-circuits) live in `../predicates/*.test.ts` and are deliberately
  * not re-tested here.
  */
 

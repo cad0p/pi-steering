@@ -5,7 +5,7 @@
  * Shared argument-unwrapping helpers for the git plugin's
  * pattern-valued predicates (`branch`, `upstream`, `remote`).
  *
- * Extracted verbatim from `predicates.ts` during the per-item layout
+ * Extracted verbatim from the rules bulk file during the per-item layout
  * refactor — the pattern-normalization contract (shorthand forms,
  * OR-of-matches array semantics, fail-skip on malformed input) is
  * shared by all three handlers and lives here so the per-predicate

@@ -5,8 +5,8 @@
  * Shared boolean-leaf argument unwrapping for the git plugin's
  * boolean predicates (`isClean`, `hasStagedChanges`).
  *
- * Extracted verbatim from `predicates.ts` during the per-item layout
- * refactor — both boolean handlers accept the same bare / spread
+ * Extracted verbatim from the predicates bulk file during the per-item
+ * layout refactor — both boolean handlers accept the same bare / spread
  * shapes and share this single unwrap implementation.
  */
 

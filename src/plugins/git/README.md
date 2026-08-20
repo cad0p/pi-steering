@@ -210,7 +210,7 @@ commit'`, and — thanks to the branch tracker — `git checkout main
 && git commit`.
 
 The pattern is shared with `no-main-commit-github` via the
-exported `GIT_COMMIT_PATTERN` constant in `rules.ts` (re-exported
+exported `GIT_COMMIT_PATTERN` constant in `rules/patterns.ts` (re-exported
 from `pi-steering/plugins/git`), so a regex change to one rule is
 physically forced onto the other (a unit test pins each rule's
 `pattern` field against the constant by value).
@@ -439,17 +439,38 @@ becomes load-bearing only when mixing strings and RegExp.
 ## Authoring new plugins
 
 This directory is the canonical reference for plugin authors. The
-file layout separates concerns:
+file layout separates concerns — one file per rule / tracker /
+predicate / helper, mirroring `examples/work-item-plugin`:
 
-- `branch-tracker.ts` — walker state modifier (one file per tracker).
-- `cwd-extensions.ts` — modifiers layering onto existing trackers.
-- `predicates.ts` — one handler per `when.<key>` slot.
-- `rules.ts` — rule definitions consuming the above.
-- `index.ts` — default export assembling the plugin.
+```
+src/plugins/git/
+├── index.ts                  # public surface + plugin assembly
+├── integration.test.ts       # end-to-end wiring through the evaluator
+├── trackers/
+│   ├── branch-tracker.ts     # walker state modifier (one file per tracker)
+│   └── cwd-extensions.ts     # modifiers layering onto existing trackers
+├── helpers/
+│   ├── git-ops.ts            # raw git query helpers (getBranch, ...)
+│   ├── pattern-args.ts       # shared pattern-arg unwrapping helpers
+│   └── boolean-args.ts       # shared boolean-leaf arg unwrapping
+├── predicates/
+│   ├── index.ts              # `predicates` bundle + re-exports
+│   ├── branch.ts             # one handler per `when.<key>` slot
+│   ├── upstream.ts
+│   ├── commits-ahead.ts
+│   ├── has-staged-changes.ts
+│   ├── is-clean.ts
+│   └── remote.ts
+└── rules/
+    ├── index.ts              # `rules` array (first-match-wins order) + re-exports
+    ├── patterns.ts           # GIT_COMMIT_PATTERN / PROTECTED_BRANCH_PATTERN
+    ├── no-main-commit.ts
+    └── no-main-commit-github.ts
+```
 
-Each file has its own test suite; `integration.test.ts` pins end-to-
-end wiring through `resolvePlugins` and `buildEvaluator`. Copy-adapt
-this layout for your own plugin.
+Each file has its own test suite (co-located `<item>.test.ts`);
+`integration.test.ts` pins end-to-end wiring through `resolvePlugins`
+and `buildEvaluator`. Copy-adapt this layout for your own plugin.
 
 ### Composable building blocks
 

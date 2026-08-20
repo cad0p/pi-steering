@@ -93,7 +93,7 @@ describe("rules: no-main-commit shape", () => {
     assert.equal(rule.noOverride, false);
     // Accept both shapes: runtime value can be string | RegExp per the
     // schema, even though the narrowed literal type is string-only after
-    // the `as const satisfies Rule` narrowing in ./rules.ts.
+    // the `as const satisfies Rule` narrowing in ./no-main-commit.ts.
     const pattern = rule.pattern as string | RegExp;
     const patternSource =
       typeof pattern === "string" ? pattern : pattern.source;

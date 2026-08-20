@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - Bash-faithful Word resolution — drop the same-ref prefix overlay (closes #53) ([#56](https://github.com/cad0p/pi-steering/pull/56))
 - Rename when.happened to when.missing (closes #55) ([#57](https://github.com/cad0p/pi-steering/pull/57))
 - Observer watch matching resolves plugin-composed env trackers (closes #54)
+- Work-item-format fixture rawText shape + CI examples typecheck (closes #60)
 
 ### ⚡ Performance
 

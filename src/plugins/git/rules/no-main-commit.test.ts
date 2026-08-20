@@ -26,7 +26,10 @@ import { buildEvaluator } from "../../../evaluator.ts";
 import { resolvePlugins } from "../../../plugin-merger.ts";
 import gitPlugin from "../index.ts";
 import { noMainCommit } from "./no-main-commit.ts";
-import { GIT_COMMIT_PATTERN, PROTECTED_BRANCH_PATTERN } from "./patterns.ts";
+import {
+  GIT_COMMIT_PATTERN,
+  PROTECTED_BRANCH_PATTERN,
+} from "../helpers/patterns.ts";
 
 // ---------------------------------------------------------------------------
 // Harness

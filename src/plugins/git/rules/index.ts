@@ -43,7 +43,7 @@ import type { Rule } from "../../../schema.ts";
 import { noMainCommit } from "./no-main-commit.ts";
 import { noMainCommitGithub } from "./no-main-commit-github.ts";
 
-export { GIT_COMMIT_PATTERN, PROTECTED_BRANCH_PATTERN } from "./patterns.ts";
+export { GIT_COMMIT_PATTERN, PROTECTED_BRANCH_PATTERN } from "../helpers/patterns.ts";
 
 /**
  * Suggested rules for the git plugin.

@@ -1,13 +1,5 @@
 {
-  "disable": ["no-force-push"],
   "rules": [
-    {
-      "name": "no-force-push-strict",
-      "tool": "bash",
-      "field": "command",
-      "pattern": "^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+push\\b.*(?:--force\\b|\\s-f(?:\\s|$))",
-      "reason": "No force pushes of any kind, including --force-with-lease."
-    },
     {
       "name": "no-amend",
       "tool": "bash",

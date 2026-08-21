@@ -2,30 +2,35 @@
 
 A rule pack that blocks **every** form of `git push --force`, including `--force-with-lease`.
 
+> **Redundant since issue [#65](https://github.com/cad0p/pi-steering/issues/65).** The shipped `no-force-push` default is now *sealed*: it blocks every remote-history-rewrite form — `--force`, `--force-with-lease`, `--force-if-includes`, bundled short flags (`-uf`, `-fu`, `-nfv`), leading-`+` refspecs (`git push origin +main`), and `--mirror`. The default now covers everything this pack does, and more. The pack is kept as a **reference for the disable-and-replace idiom**: dropping a default via `disabledRules` and installing your own rule under a new name.
+
 ## What it enforces
 
 - `git push --force` → blocked
 - `git push -f` → blocked
-- `git push --force-with-lease` → **blocked** (this is the difference from the default)
+- `git push --force-with-lease` → **blocked**
+- `git push origin +main` (leading-`+` refspec) → blocked
+- `git push --mirror` → blocked
 - `git push origin main` → allowed
 
 The pattern also handles git pre-subcommand flags (`git -C /other push --force`, `git -c key=val push -f`) and wrapper bypasses (`sh -c 'git push --force'`, `sudo xargs git push --force`, …) — all transparently, via the AST backend.
 
-## How it differs from the default
+## How it relates to the default
 
-The built-in `no-force-push` rule permits `--force-with-lease` because the lease flag is the documented "safe" way to update a branch after a rebase. That's fine for most teams, but in environments where:
+Historically, the built-in `no-force-push` rule permitted `--force-with-lease` (the documented "safe" way to update a branch after a rebase), and this pack existed to close that carve-out for strict-history teams. Issue #65 sealed the default instead: every history-rewrite form now blocks out of the box, with a dedicated reason message.
 
-- the branch is shared broadly (`main`, `develop`, long-lived release branches),
-- history integrity is a compliance requirement, or
-- you want the agent to never reach for any `--force` variant as a first-line fix,
+What remains interesting here is the **mechanism**, not the policy:
 
-the lease-variant carve-out is an attack surface. This rule pack closes it.
+1. `disabledRules: ["no-force-push"]` turns the shipped default off.
+2. A custom rule (`no-force-push-strict`) takes its place with its own pattern and reason message.
+
+That's the idiom to reach for whenever you want a *different* policy or block message than a default provides — including loosening one (e.g. re-allowing lease pushes behind your own narrower rule).
 
 ## When to use
 
-- Strict-history environments (shared release branches, regulated contexts)
-- Teams that want a single "never force push" discipline without agent-side judgement calls
-- As a starting point for more restrictive house rules
+- You want a custom force-push reason message or a tweaked pattern on top of the sealed semantics
+- As a template for disable-and-replace overrides of any other default
+- Strict-history environments that pin an explicit in-repo policy file rather than relying on package defaults
 
 ## Install
 
@@ -53,8 +58,8 @@ plugin-registered predicate keys (`when.<customKey>`), `when.not`,
 and `when.condition` are TypeScript-only — equivalently, any `when`
 clause member other than `when.cwd` is rejected.
 
-The `disable` entry below turns off the built-in `no-force-push`; the
-new `no-force-push-strict` rule takes its place:
+The `disable` entry below turns off the built-in `no-force-push`;
+the new `no-force-push-strict` rule takes its place:
 
 ```json
 {
@@ -64,8 +69,8 @@ new `no-force-push-strict` rule takes its place:
       "name": "no-force-push-strict",
       "tool": "bash",
       "field": "command",
-      "pattern": "^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+push\\b.*(?:--force\\b|\\s-f(?:\\s|$))",
-      "reason": "No force pushes of any kind, including --force-with-lease."
+      "pattern": "^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+push\\b.*(?:--force\\b|\\s-[A-Za-z]*f[A-Za-z]*(?:\\s|$)|\\s\\+[^\\s:]+(?::\\S*)?(?:\\s|$)|--mirror\\b)",
+      "reason": "No force pushes of any kind, including --force-with-lease. Create a new commit, or reset + re-commit via a non-force path."
     }
   ]
 }

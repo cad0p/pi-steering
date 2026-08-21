@@ -2,13 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
-
-### Breaking
-
-- **Sealed the default `no-force-push` rule** (issue [#65](https://github.com/cad0p/pi-steering/issues/65)): the shipped pattern no longer carves out "safe" rewrites. It now blocks every remote-history-rewrite form — `--force-with-lease` and `--force-if-includes` (the old `(?!-with-lease)` allowance is inverted), bundled short flags (`-f`, `-uf`, `-fu`, `-nfv`), leading-`+` refspecs (`git push origin +main`, `+src:dst`), and `--mirror`. The block reason changed to match ("Force pushes rewrite remote history and can destroy teammates' work. Create a new commit instead, or ask the user to run one manually.").
-- **Migration:** if you shipped a disable-and-replace strict pack (`disabledRules: ["no-force-push"]` + a stricter replacement, e.g. the old `force-push-strict` / `combined-git-discipline` examples), drop it — your custom rule is now weaker than the sealed default and only shadows its reason message. To genuinely re-allow lease pushes, keep `disabledRules: ["no-force-push"]` and add your own narrower rule.
-
 ## [0.2.0] - 2026-08-11
 
 <!-- USER-EDITABLE SECTION START -->

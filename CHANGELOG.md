@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - Compile-time detection of orphan plugin exemptions ([#29](https://github.com/cad0p/pi-steering/pull/29)) ([#46](https://github.com/cad0p/pi-steering/pull/46))
 - Escalate plugin-shipped exemption orphans to error-class at merge (closes #48)
 - Resolved-by-default Word.text — predicates validate what executes (closes #51)
+- *(defaults)* Seal no-force-push — block --force-with-lease, +refspec force, --mirror (closes #65)
 
 ### 🐛 Bug Fixes
 

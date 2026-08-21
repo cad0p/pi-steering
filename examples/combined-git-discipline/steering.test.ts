@@ -13,20 +13,23 @@ import { describe, it } from "node:test";
 import config from "./steering.ts";
 
 describe("example: combined-git-discipline", () => {
-  it("exports a SteeringConfig with the three expected rules", () => {
+  it("exports a SteeringConfig with the two expected rules", () => {
     assert.ok(config.rules !== undefined);
     const names = config.rules.map((r) => r.name).sort();
     assert.deepEqual(
       names,
-      ["no-amend", "no-force-push-strict", "pr-create-must-be-draft"],
+      ["no-amend", "pr-create-must-be-draft"],
       `unexpected rule set: ${names.join(", ")}`,
     );
   });
 
-  it("disables the shipped `no-force-push` default", () => {
+  it("does NOT disable the shipped `no-force-push` default (sealed default is wanted here)", () => {
+    // Since issue #65 the default no-force-push rule blocks every
+    // history-rewrite form, so this pack keeps it active instead of
+    // the old disable-and-replace dance.
     assert.ok(
-      config.disabledRules?.includes("no-force-push"),
-      "expected disabledRules to include 'no-force-push'",
+      !config.disabledRules?.includes("no-force-push"),
+      "expected disabledRules to NOT include 'no-force-push'",
     );
   });
 

@@ -6,10 +6,10 @@ ships both a TypeScript config (`steering.ts`) and a JSON config
 
 | Example | What it enforces | Best for |
 |---------|------------------|----------|
-| [force-push-strict](./force-push-strict) | No force pushes of any kind (not even `--force-with-lease`) | Shared branches, strict-history teams |
+| [force-push-strict](./force-push-strict) | Reference for the disable-and-replace idiom — the shipped `no-force-push` default is now sealed (blocks every rewrite form, incl. `--force-with-lease`) | Teams overriding the sealed default with a custom force-push policy |
 | [no-amend](./no-amend) | No `git commit --amend`. Includes a cwd-scoped variant | Review-driven workflows where commit-SHA stability matters |
 | [draft-prs-only](./draft-prs-only) | `gh pr create` requires `--draft` | Teams that require human review before marking ready |
-| [combined-git-discipline](./combined-git-discipline) | All three above | Starting point for disciplined PR teams |
+| [combined-git-discipline](./combined-git-discipline) | no-amend + draft-PRs-only on top of the (now-sealed) default force-push rule | Starting point for disciplined PR teams |
 | [dynamic-reason-runtime-cwd](./dynamic-reason-runtime-cwd) | Composes a runtime-cwd predicate (`isClean`) with a two-branch `ReasonFn` using `walkerUnknownCwdReason` | Plugin authors writing rules over runtime-cwd predicates that need useful agent reasons on the walker-unknown branch |
 | [work-item-plugin](./work-item-plugin) | Canonical example PLUGIN (not a rule-pack). See the plugin's own README. | Authors writing a new plugin |
 

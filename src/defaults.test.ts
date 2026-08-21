@@ -8,6 +8,12 @@
  * here flips vs. its v1 counterpart, the pattern drifted and the port
  * is broken.
  *
+ * ONE deliberate exception to the zero-drift contract: `no-force-push`
+ * was sealed in issue #65 (breaking change, maintainer-approved) to
+ * block every remote-history-rewrite form. The two lease-related cases
+ * below intentionally flip vs. their v1 counterparts (`--force-with-lease`
+ * now MATCHES / BLOCKS); everything else still matches v1 exactly.
+ *
  * Two suites:
  *
  *   - Shape invariants (count, uniqueness, non-empty fields, valid
@@ -158,15 +164,77 @@ describe("defaults: DEFAULT_RULES pattern spot-checks", () => {
     assert.equal(pattern("no-force-push").test("git push -f"), true);
   });
 
-  it("no-force-push does NOT match `git push --force-with-lease`", () => {
+  it("no-force-push matches `git push --force-with-lease` (sealed, #65)", () => {
     assert.equal(
       pattern("no-force-push").test("git push --force-with-lease"),
-      false,
+      true,
     );
+  });
+
+  it("no-force-push matches `git push --force-if-includes` (sealed, #65)", () => {
+    assert.equal(
+      pattern("no-force-push").test("git push --force-if-includes"),
+      true,
+    );
+  });
+
+  it("no-force-push matches bundled short flags (`-uf`, `-fu`, `-nfv`) (#65)", () => {
+    assert.equal(
+      pattern("no-force-push").test("git push -uf origin main"),
+      true,
+    );
+    assert.equal(
+      pattern("no-force-push").test("git push -fu origin main"),
+      true,
+    );
+    assert.equal(
+      pattern("no-force-push").test("git push -nfv origin main"),
+      true,
+    );
+  });
+
+  it("no-force-push matches leading-`+` refspecs (#65)", () => {
+    assert.equal(pattern("no-force-push").test("git push origin +main"), true);
+    assert.equal(
+      pattern("no-force-push").test("git push origin +src:dst"),
+      true,
+    );
+  });
+
+  it("no-force-push matches `git push --mirror` (#65)", () => {
+    assert.equal(pattern("no-force-push").test("git push --mirror"), true);
   });
 
   it("no-force-push does NOT match plain `git push origin main`", () => {
     assert.equal(pattern("no-force-push").test("git push origin main"), false);
+  });
+
+  it("no-force-push does NOT match non-force short flags alone (-u/-n/-q/-v)", () => {
+    assert.equal(
+      pattern("no-force-push").test("git push -u origin main"),
+      false,
+    );
+    assert.equal(
+      pattern("no-force-push").test("git push -n origin main"),
+      false,
+    );
+    assert.equal(
+      pattern("no-force-push").test("git push -q origin main"),
+      false,
+    );
+    assert.equal(
+      pattern("no-force-push").test("git push -v origin main"),
+      false,
+    );
+  });
+
+  it("no-force-push does NOT match branch names with mid-token `+` (c++-port)", () => {
+    // Only LEADING-`+` refspec forms are force markers: no whitespace
+    // before the `+` in `c++-port`, so no refspec-force match.
+    assert.equal(
+      pattern("no-force-push").test("git push origin c++-port"),
+      false,
+    );
   });
 
   it("no-force-push matches `git push origin main --force`", () => {
@@ -405,14 +473,18 @@ describe("defaults: end-to-end via buildEvaluator", () => {
     );
   });
 
-  it("allows `git push --force-with-lease`", async () => {
+  it("blocks `git push --force-with-lease` (sealed default, #65)", async () => {
     const ev = defaultsEvaluator();
     const r = await ev.evaluate(
       bashEvent("git push --force-with-lease"),
       makeCtx("/r"),
       0,
     );
-    assert.equal(r, undefined);
+    assert.equal((r as { block?: boolean } | undefined)?.block, true);
+    assert.match(
+      (r as { reason?: string } | undefined)?.reason ?? "",
+      /no-force-push/,
+    );
   });
 
   it("catches `git push --force` behind `sh -c` wrapper", async () => {

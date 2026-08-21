@@ -215,7 +215,7 @@ describe("register(): default rules wiring", () => {
     assert.match(result?.reason ?? "", /no-force-push/);
   });
 
-  it("allows `git push --force-with-lease`", async () => {
+  it("blocks `git push --force-with-lease` (sealed default, #65)", async () => {
     const mock = makeMockPi();
     await register(mock.api as ExtensionAPI);
     await fireSessionStart(mock, tmpHome);
@@ -225,7 +225,8 @@ describe("register(): default rules wiring", () => {
       "git push --force-with-lease",
       tmpHome,
     );
-    assert.equal(result, undefined);
+    assert.equal(result?.block, true);
+    assert.match(result?.reason ?? "", /no-force-push/);
   });
 
   it("blocks `git push --force` behind `sh -c` wrapper", async () => {

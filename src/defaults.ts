@@ -4,10 +4,16 @@
 /**
  * Built-in default rules + default plugins for the v2 engine.
  *
- * Ported from v1's `../defaults.ts` with patterns kept IDENTICAL so the
- * safety contract existing users rely on doesn't drift. Each pattern
- * here matches v1 byte-for-byte (string form, not RegExp); the v2
- * evaluator compiles strings at load time via
+ * Ported from v1's `../defaults.ts`. Patterns were kept byte-identical
+ * to v1 so the safety contract existing users rely on doesn't drift —
+ * with ONE deliberate exception: `no-force-push` was SEALED in
+ * issue #65 (https://github.com/cad0p/pi-steering/issues/65) to block
+ * every remote-history-rewrite form (`--force-with-lease`, bundled
+ * short flags like `-uf`, leading-`+` refspecs, `--mirror`). This is
+ * the first intentional break from the byte-identical-to-v1 port
+ * contract: a breaking change (minor bump in 0.x), maintainer-approved.
+ * All other patterns still match v1 byte-for-byte (string form, not
+ * RegExp); the v2 evaluator compiles strings at load time via
  * `./evaluator-internals/predicates.ts`.
  *
  * Design notes (preserved from v1):
@@ -45,9 +51,10 @@ export const DEFAULT_RULES = [
     name: "no-force-push",
     tool: "bash",
     field: "command",
-    // Block `git push --force` / `-f`, allow `--force-with-lease`.
-    // Anchored so `echo 'git push --force'` (basename=echo) is NOT
-    // flagged. The pre-subcommand flag slot
+    // Block EVERY remote-history-rewrite form (issue #65 sealed the
+    // old lenient pattern, which deliberately allowed
+    // `--force-with-lease`). Anchored so `echo 'git push --force'`
+    // (basename=echo) is NOT flagged. The pre-subcommand flag slot
     // `(?:\s+-{1,2}[A-Za-z]\S*(?:\s+\S+)?)*` allows short and long
     // git-flags before the subcommand:
     //   - `git -C /path push --force`
@@ -55,15 +62,30 @@ export const DEFAULT_RULES = [
     //   - `git --git-dir=/x push --force`
     // All three are silent bypasses with a plain `^git\s+push` anchor.
     //
+    // The four force alternatives:
+    //   - `--force\b`: the word boundary between `e` and `-` catches
+    //     BOTH `--force-with-lease` AND `--force-if-includes`. This
+    //     INVERTS the old `(?!-with-lease)` carve-out.
+    //   - `\s-[A-Za-z]*f[A-Za-z]*(?:\s|$)`: short force INCLUDING
+    //     bundled shorts (`-f`, `-uf`, `-fu`, `-nfv`). Same technique
+    //     as `no-rm-rf-slash`. Safe for push: no other git-push short
+    //     flag contains `f`.
+    //   - `\s\+[^\s:]+(?::\S*)?(?:\s|$)`: refspec force prefix
+    //     (`git push origin +main`, `+src:dst`). Only LEADING-`+`
+    //     forms are force markers — a `+` mid-token (branch names like
+    //     `c++-port`) has no whitespace before it and is not matched.
+    //   - `--mirror\b`: mirror implies force-update + remote
+    //     deletions.
+    //
     // Known limit: this pattern over-matches on
     // `git log --grep="push --force"` because `--grep=push` is a
     // single token that still satisfies `\bpush\b`. Real agents don't
     // emit that; if it becomes a problem we'll move to args-array
     // matching.
     pattern:
-      "^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+push\\b.*(?:--force(?!-with-lease)|\\s-f(?:\\s|$))",
+      "^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+push\\b.*(?:--force\\b|\\s-[A-Za-z]*f[A-Za-z]*(?:\\s|$)|\\s\\+[^\\s:]+(?::\\S*)?(?:\\s|$)|--mirror\\b)",
     reason:
-      "Force push rewrites remote history and can destroy teammates' work. Use `git push --force-with-lease` if you must, or create a new commit instead.",
+      "Force pushes rewrite remote history and can destroy teammates' work. Create a new commit instead, or ask the user to run one manually.",
   },
   {
     name: "no-hard-reset",

@@ -8,7 +8,7 @@ A deterministic guardrail layer that sits between your pi agent and the tools it
 
 Use it when:
 
-- You want to gate commands by structure, not substring — `sh -c 'git push --force'`, `cd /repo && git push --force`, and `git push "--force"` should all trigger the same `^git\s+push.*--force(?!-)` rule, and `echo 'git push --force'` should not.
+- You want to gate commands by structure, not substring — `sh -c 'git push --force'`, `cd /repo && git push --force`, and `git push "--force"` should all trigger the same force-push rule (which blocks every history-rewrite form: `--force*`, bundled shorts like `-uf`, leading-`+` refspecs, `--mirror`), and `echo 'git push --force'` should not.
 - You want "must run X before Y" rules that survive across tool calls within the same user prompt.
 - You want to ship + version a rule pack as an npm dependency (plugins), not a shared JSON file.
 
@@ -95,11 +95,14 @@ export default defineConfig({
       name: "no-force-push",
       tool: "bash",
       field: "command",
-      // `(?!-)` rules out `--force-with-lease` — `\b` alone would match
-      // it, since `-` is a non-word character and `--force\b` sees a
-      // word boundary between `e` and `-`.
-      pattern: /^git\s+push.*--force(?!-)/,
-      reason: "Force-push rewrites history. Use --force-with-lease if needed.",
+      // `\b` after `--force` is enough to catch `--force-with-lease`
+      // too: `-` is a non-word character, so a word boundary sits
+      // between `e` and `-`. The shipped default goes further — it
+      // also blocks bundled short flags (`-uf`), leading-`+` refspecs
+      // (`git push origin +main`), and `--mirror`.
+      pattern: /^git\s+push.*--force\b/,
+      reason:
+        "Force pushes rewrite remote history. Create a new commit instead, or ask the user to run one manually.",
     },
   ],
 });
@@ -108,7 +111,7 @@ export default defineConfig({
 With this config:
 
 - `git push --force`, `sh -c 'git push --force'`, and `cd /repo && git push --force` all block via your rule.
-- `git push --force-with-lease` is not matched.
+- `git push --force-with-lease` is blocked too — the sealed default treats every history-rewrite form as unsafe (see [Defaults](#defaults)).
 - `git commit` on `main` / `master` / `mainline` / `trunk` blocks via the git plugin's `no-main-commit` rule (opt-in — declare `plugins: [gitPlugin]`, see [Defaults](#defaults) below).
 - `echo 'git push --force'` correctly does not block — the AST extraction anchors patterns on real command refs, not substrings of arguments.
 
@@ -116,7 +119,7 @@ With this config:
 
 One default bundle ships with the package and is layered onto every config automatically:
 
-- **`DEFAULT_RULES`** — `no-force-push`, `no-hard-reset`, `no-rm-rf-slash`, `no-long-running-commands`. Domain-agnostic safety rails. See [`src/defaults.ts`](./src/defaults.ts) for the exact patterns.
+- **`DEFAULT_RULES`** — `no-force-push`, `no-hard-reset`, `no-rm-rf-slash`, `no-long-running-commands`. Domain-agnostic safety rails. See [`src/defaults.ts`](./src/defaults.ts) for the exact patterns. As of issue [#65](https://github.com/cad0p/pi-steering/issues/65), `no-force-push` is sealed: it blocks every remote-history-rewrite form (`--force`, `--force-with-lease`, `--force-if-includes`, bundled shorts like `-uf`, leading-`+` refspecs like `git push origin +main`, and `--mirror`). To re-allow lease pushes, disable the default via `disabledRules: ["no-force-push"]` and add your own rule.
 
 **`DEFAULT_PLUGINS` is deliberately empty** — domain plugins are opt-in. The [git plugin](./src/plugins/git/README.md) (the `branch` / `upstream` / `commitsAhead` / `hasStagedChanges` / `isClean` / `remote` predicates, the `no-main-commit` and `no-main-commit-github` rules (both overridable per commit via `# steering-override: <name> — <reason>`), the branch tracker (tool_call-scoped `git checkout` awareness), and the `cwd.git` tracker extension (`--git-dir=` / `--work-tree=` parsing)) is enabled by declaring it:
 

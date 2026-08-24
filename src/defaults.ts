@@ -130,7 +130,7 @@ export const DEFAULT_RULES = [
     pattern:
       "^(?:npm\\s+(?:run\\s+dev|start)|yarn\\s+(?:dev|start)|pnpm\\s+(?:run\\s+)?(?:dev|start)|npx\\s+.*--watch|webpack\\s+(?:--watch|serve)|jest\\s+--watch|nodemon\\b|tsc\\s+--watch|vite(?:\\s+(?:dev|serve|preview))?(?!\\s+[A-Za-z])|astro\\s+(?:dev|preview)|next\\s+dev|deno\\s+task\\s+(?:dev|start|serve)|bun\\s+(?:dev|run\\s+dev))\\b",
     reason:
-      "Long-running dev servers and watchers block the agent loop. Ask the user to run it manually in another terminal, or use a background-process tool. Representative — add your own via `.pi/steering.ts` if a framework isn't listed here.",
+      "Long-running dev servers and watchers block the agent loop. Ask the user to run it manually in another terminal, or use a background-process tool.",
   },
 ] as const satisfies readonly Rule[];
 

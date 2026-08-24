@@ -200,12 +200,16 @@ Blocks direct commits to protected branches (`main`, `master`,
   pattern: GIT_COMMIT_PATTERN,
   when: { branch: PROTECTED_BRANCH_PATTERN },
   reason: "Don't commit directly to a protected branch...",
-  noOverride: false,
+  noOverride: true,
 }
 ```
 
-Overridable via `# steering-override: no-main-commit — <reason>` on
-the bash command. Catches `git -C /path commit`, `sh -c 'git
+Strict and non-overridable since issue #79: inline
+`# steering-override:` comments are ignored. Escape valves live at
+the config layer — `disabledRules`, a same-name project-layer
+redeclaration, or a cwd-scoped exemption (see the
+[Cwd-based exemption](#cwd-based-exemption-advanced) section).
+Still catches `git -C /path commit`, `sh -c 'git
 commit'`, and — thanks to the branch tracker — `git checkout main
 && git commit`.
 
@@ -244,7 +248,7 @@ reminder against unsolicited PR merges or ready-for-review flips.
     remote: /github\.com[/:]/,
   },
   reason: (ctx) => /* multi-paragraph PR-flow + safety guidance */,
-  noOverride: false,
+  noOverride: true,
 }
 ```
 

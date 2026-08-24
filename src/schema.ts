@@ -549,8 +549,9 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
 /**
  * Inner-flavor non-registry built-in leaves. Lives on
  * {@link TopLevelWhenClauseNoRecurse} (the body of `not:`). Leaves
- * inside a `not:` block are ANDed too — the block's verdict is true
- * only when every inner leaf matches. `cwd?:`
+ * inside a `not:` block are ANDed too — every inner leaf must match
+ * for the combined verdict to be `true`, and `not:` inverts that
+ * combined verdict. `cwd?:`
  * accepts `Pattern | Pattern[] | { pattern }` — NO leaf-level
  * `onUnknown?:`. Modifiers live at the not-block level via
  * `& PredicateModifiers`, matching the constraint registry-driven

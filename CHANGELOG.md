@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - Escalate plugin-shipped exemption orphans to error-class at merge (closes #48)
 - Resolved-by-default Word.text — predicates validate what executes (closes #51)
 - *(defaults)* Seal no-force-push — block --force-with-lease, +refspec force, --mirror (closes #65)
+- *(git-plugin)* Make no-main-commit pair non-overridable (closes #79)
 
 ### 🐛 Bug Fixes
 

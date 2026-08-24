@@ -304,24 +304,16 @@ describe("rules: no-main-commit-github", () => {
     );
   });
 
-  it("overridable via `# steering-override: no-main-commit-github` comment", async () => {
-    // Mirrors the override-comment test on the generic rule. The
-    // rule's `noOverride: false` field is set explicitly with a
-    // JSDoc rationale ("workflow rules are intentionally
-    // overridable") — this test exercises the engine's actual
-    // override-comment path on the github specialization, rather
-    // than relying on the rule-shape `assert.equal(noOverride,
-    // false)` pin alone. A future refactor that drops the field
-    // or flips the schema default would surface here as a failed
-    // override + a missing audit entry.
-    //
-    // Both `no-main-commit-github` and the generic
-    // `no-main-commit` fire on a github clone + main. Stacked
-    // override comments suppress both — the engine accepts
-    // multiple override markers on a single command (see
-    // `extractOverride`'s JSDoc on stacked overrides). The audit
-    // entry assertion specifically targets the github rule to pin
-    // the github-side override path was exercised.
+  it("stacked override comments cannot bypass — rule is strict (issue #79)", async () => {
+    // noOverride: true on both rules (issue #79) — stacking BOTH
+    // override names (`no-main-commit-github` + the generic
+    // `no-main-commit`) used to pass, because each rule only
+    // matched its exact name and evaluation fell through to the
+    // twin. Inline overrides are now ignored entirely: the command
+    // still blocks, routed to the github rule (pinned via the
+    // reason tag so a regression falling through to the generic
+    // twin fails), with no steering-override audit entries and no
+    // "To override" hint in the message.
     const { evaluator, host } = buildWithBranchAndRemote(
       "main",
       "https://github.com/cad0p/repo.git",
@@ -335,15 +327,16 @@ describe("rules: no-main-commit-github", () => {
       makeCtx("/repo"),
       0,
     );
-    assert.equal(res, undefined);
+    assert.ok(res && res.block === true);
+    assert.match(
+      res.reason!,
+      /\[steering:no-main-commit-github@[^\]]+\]/,
+      "must route to the github rule, not fall through to the generic twin",
+    );
+    assert.doesNotMatch(res.reason!, /To override/);
     assert.ok(
-      host.appended.some(
-        (e) =>
-          e.type === "steering-override" &&
-          (e.data as { rule?: string } | undefined)?.rule ===
-            "no-main-commit-github",
-      ),
-      "expected a steering-override audit entry for no-main-commit-github (proves the github rule's override path was exercised)",
+      !host.appended.some((e) => e.type === "steering-override"),
+      "strict rules must not record steering-override audit entries",
     );
   });
 
@@ -504,7 +497,7 @@ describe("rules: no-main-commit-github", () => {
     );
   });
 
-  it("rule-shape pin: `noOverride: false` + `when:` includes both branch + remote", () => {
+  it("rule-shape pin: `noOverride: true` + `when:` includes both branch + remote", () => {
     const rule = gitPlugin.rules?.find(
       (r) => r.name === "no-main-commit-github",
     );
@@ -513,8 +506,8 @@ describe("rules: no-main-commit-github", () => {
     assert.equal(rule.field, "command");
     assert.equal(
       rule.noOverride,
-      false,
-      "workflow rule must stay overridable via `# steering-override:` comment",
+      true,
+      "strict guard (issue #79): inline override comments must not bypass",
     );
     assert.ok(
       rule.when !== undefined &&

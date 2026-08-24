@@ -88,12 +88,12 @@ function buildWithBranch(branchName: string) {
 // ---------------------------------------------------------------------------
 
 describe("rules: no-main-commit shape", () => {
-  it("exists on the plugin with the expected name + pattern + overridable flag", () => {
+  it("exists on the plugin with the expected name + pattern + strict flag", () => {
     const rule = gitPlugin.rules?.find((r) => r.name === "no-main-commit");
     assert.ok(rule);
     assert.equal(rule.tool, "bash");
     assert.equal(rule.field, "command");
-    assert.equal(rule.noOverride, false);
+    assert.equal(rule.noOverride, true);
     // Accept both shapes: runtime value can be string | RegExp per the
     // schema, even though the narrowed literal type is string-only after
     // the `as const satisfies Rule` narrowing in ./no-main-commit.ts.
@@ -163,10 +163,12 @@ describe("rules: no-main-commit shape", () => {
     assert.ok(res && res.block === true);
   });
 
-  it("overridable via `# steering-override: no-main-commit` comment", async () => {
-    // noOverride: false on the rule - author-supplied override
-    // comment on the raw tool_call command is accepted, the event
-    // doesn't block, and the override is audit-logged.
+  it("ignores `# steering-override: no-main-commit` comment — rule is strict", async () => {
+    // noOverride: true on the rule (issue #79) — an inline override
+    // comment no longer suppresses the block. The command still
+    // blocks with the standard reason, no steering-override audit
+    // entry is recorded, and the message carries no "To override"
+    // hint.
     const { evaluator, host } = buildWithBranch("main");
     const res = await evaluator.evaluate(
       bashEvent(
@@ -175,10 +177,12 @@ describe("rules: no-main-commit shape", () => {
       makeCtx("/repo"),
       0,
     );
-    assert.equal(res, undefined);
+    assert.ok(res && res.block === true);
+    assert.match(res.reason!, /\[steering:no-main-commit@[^\]]+\]/);
+    assert.doesNotMatch(res.reason!, /To override/);
     assert.ok(
-      host.appended.some((e) => e.type === "steering-override"),
-      "expected a steering-override audit entry",
+      !host.appended.some((e) => e.type === "steering-override"),
+      "strict rule must not record a steering-override audit entry",
     );
   });
 });

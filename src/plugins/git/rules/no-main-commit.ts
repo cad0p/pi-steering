@@ -59,10 +59,17 @@ import { NO_CHECKOUT_IN_CHAIN } from "../trackers/branch-tracker.ts";
  * first-match-wins routes the github-flavored guidance to github
  * users; non-github contexts fall through to this generic rule).
  *
- * Override: allowed (the rule is overridable via a
- * `# steering-override: no-main-commit` comment). This is a workflow
- * rule, not an inherent-destructiveness rule - authors override when
- * the commit is intentional (e.g. release process on `main`).
+ * Strict (non-overridable) since issue #79: inline
+ * `# steering-override:` comments are ignored. The override path
+ * defeated this guard exactly when it mattered — agents stacked
+ * override comments to force commits onto whatever ref was checked
+ * out (an incident landed a commit on local `main`), and the
+ * exact-name + fall-through traps made overrides a copy-paste hazard
+ * (overriding one rule falls through to its twin). Escape valves
+ * live at the config layer instead: disable via `disabledRules`,
+ * redeclare a same-name rule in the project layer, or scope a
+ * cwd-based exemption — see the plugin README's Customization /
+ * Cwd-based exemption sections.
  */
 export const noMainCommit = {
   name: "no-main-commit",
@@ -89,7 +96,8 @@ export const noMainCommit = {
       `Create a feature branch first: \`git checkout -b feat/...\`.`
     );
   },
-  // Explicit override-OK: workflow rules are intentionally
-  // overridable.
-  noOverride: false,
+  // Explicit strict: non-overridable (issue #79) — inline override
+  // comments are ignored. Explicit field pins this even against
+  // config `defaultNoOverride: false`.
+  noOverride: true,
 } as const satisfies Rule;

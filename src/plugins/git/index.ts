@@ -15,8 +15,9 @@
  *                             handler accepts.
  *   - `rules`              - `no-main-commit-github` (github-flavored,
  *                             first-match-wins) + `no-main-commit`
- *                             (generic fallback). Both overridable.
- *                             Users disable via
+ *                             (generic fallback). Both non-overridable
+ *                             (issue #79): no inline override escape
+ *                             hatch; users disable via
  *                             `disabledRules: ["no-main-commit"]` /
  *                             `["no-main-commit-github"]` or opt out
  *                             of the whole plugin with

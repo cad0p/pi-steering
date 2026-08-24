@@ -121,7 +121,7 @@ One default bundle ships with the package and is layered onto every config autom
 
 - **`DEFAULT_RULES`** — `no-force-push`, `no-hard-reset`, `no-rm-rf-slash`, `no-long-running-commands`. Domain-agnostic safety rails. See [`src/defaults.ts`](./src/defaults.ts) for the exact patterns. As of issue [#65](https://github.com/cad0p/pi-steering/issues/65), `no-force-push` is sealed: it blocks every remote-history-rewrite form (`--force`, `--force-with-lease`, `--force-if-includes`, bundled shorts like `-uf`, leading-`+` refspecs like `git push origin +main`, and `--mirror`). To re-allow lease pushes, disable the default via `disabledRules: ["no-force-push"]` and add your own rule.
 
-**`DEFAULT_PLUGINS` is deliberately empty** — domain plugins are opt-in. The [git plugin](./src/plugins/git/README.md) (the `branch` / `upstream` / `commitsAhead` / `hasStagedChanges` / `isClean` / `remote` predicates, the `no-main-commit` and `no-main-commit-github` rules (both overridable per commit via `# steering-override: <name> — <reason>`), the branch tracker (tool_call-scoped `git checkout` awareness), and the `cwd.git` tracker extension (`--git-dir=` / `--work-tree=` parsing)) is enabled by declaring it:
+**`DEFAULT_PLUGINS` is deliberately empty** — domain plugins are opt-in. The [git plugin](./src/plugins/git/README.md) (the `branch` / `upstream` / `commitsAhead` / `hasStagedChanges` / `isClean` / `remote` predicates, the `no-main-commit` and `no-main-commit-github` rules (non-overridable — see issue #79; use `disabledRules`, same-name project-layer redeclarations, or cwd-scoped exemptions instead), the branch tracker (tool_call-scoped `git checkout` awareness), and the `cwd.git` tracker extension (`--git-dir=` / `--work-tree=` parsing)) is enabled by declaring it:
 
 ```ts
 import { defineConfig } from "@cad0p/pi-steering";
@@ -887,8 +887,10 @@ Emits a `defineConfig({...})` module using JSON-literal rendering. Rule patterns
 For overridable rules (`noOverride: false`), the agent can annotate a tool call with an inline comment to bypass the block:
 
 ```bash
-git commit -m "release" # steering-override: no-main-commit
+npm run deploy # steering-override: advisory-no-deploy
 ```
+
+Here `advisory-no-deploy` is a user-authored rule that opted into overridability (`noOverride: false`). The shipped git-plugin protected-branch guards (`no-main-commit` / `no-main-commit-github`) do **not** accept overrides — they are strict since issue #79.
 
 The engine parses the comment before AST extraction (so the override persists across wrappers). Overrides are recorded as `steering-override` session entries for audit.
 

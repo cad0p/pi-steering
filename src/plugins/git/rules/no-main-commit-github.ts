@@ -27,10 +27,9 @@ import { NO_CHECKOUT_IN_CHAIN } from "../trackers/branch-tracker.ts";
  * packages, vault paths, /tmp scratch repos with non-github remotes)
  * fall through to the generic `noMainCommit`.
  *
- * Override: allowed (intentionally overridable for legitimate cases
- * like release-process commits to main). User can:
+ * Strict (non-overridable, issue #79): inline `# steering-override:`
+ * comments are ignored. User can:
  *   - Disable: `disabledRules: ["no-main-commit-github"]`
- *   - Per-invocation: `# steering-override: no-main-commit-github` comment
  *   - Customize: see gitPlugin's README "Customization" section
  *
  * @remarks Both `https://github.com/...` and `git@github.com:...`
@@ -147,10 +146,8 @@ export const noMainCommitGithub = {
       `the user explicitly asks. Wait for explicit user instruction.`
     );
   },
-  // Explicit override-OK: workflow rules are intentionally
-  // overridable. Mirrors `noMainCommit`'s posture. Without this
-  // field the schema defaults to `defaultNoOverride: true`
-  // (fail-closed), making the rule non-overridable and contradicting
-  // the JSDoc above.
-  noOverride: false,
+  // Explicit strict: non-overridable (issue #79) — mirrors
+  // `noMainCommit`. Explicit field pins this even against config
+  // `defaultNoOverride: false`.
+  noOverride: true,
 } as const satisfies Rule;

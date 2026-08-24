@@ -379,7 +379,8 @@ export type InnerValue<K extends PluginPredicateKey> =
 
 /**
  * Built-in non-registry leaves attached to a {@link Rule.when}
- * clause — outer flavor.
+ * clause — outer flavor. All leaves present in this block are
+ * ANDed — the clause fires only when every leaf fires.
  *
  * These predicates ship with the engine itself (not via a plugin),
  * so they aren't in {@link PiSteeringPredicates} but DO need to
@@ -547,7 +548,10 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
 
 /**
  * Inner-flavor non-registry built-in leaves. Lives on
- * {@link TopLevelWhenClauseNoRecurse} (the body of `not:`). `cwd?:`
+ * {@link TopLevelWhenClauseNoRecurse} (the body of `not:`). Leaves
+ * inside a `not:` block are ANDed too — every inner leaf must match
+ * for the combined verdict to be `true`, and `not:` inverts that
+ * combined verdict. `cwd?:`
  * accepts `Pattern | Pattern[] | { pattern }` — NO leaf-level
  * `onUnknown?:`. Modifiers live at the not-block level via
  * `& PredicateModifiers`, matching the constraint registry-driven
@@ -596,7 +600,10 @@ export type BuiltInWhenLeaves<Writes extends string = string> =
   BuiltInWhenLeavesOuter<Writes>;
 
 /**
- * Top-level when-clause attached to a {@link Rule}. Each
+ * Top-level when-clause attached to a {@link Rule}. All leaves
+ * present in this block are ANDed — the clause fires only when every
+ * leaf fires. An empty/undefined clause trivially matches (the rule
+ * fires regardless of `when:`). Each
  * plugin-registered predicate (filtered for reserved keys) gets a
  * leaf-level field accepting the bare or spread form. The `not?:`
  * operator allows one level of negation (no recursion).
@@ -656,6 +663,8 @@ export type TopLevelWhenClause<Writes extends string = string> = {
  * Body of a `not:` block: predicates with their bare / spreadBase
  * forms (NO leaf-level modifiers — modifiers live at this block's top
  * level via `& PredicateModifiers`). No nested `not:` (no recursion).
+ * All leaves inside this block are ANDed — the block fires only when
+ * every leaf fires, and `not:` inverts that combined verdict.
  *
  * Generic over `Writes` so the built-in `missing?:` leaf inherits
  * the same compile-time event-narrowing as the outer level.
@@ -916,7 +925,12 @@ export interface BaseRule<
   unless?: Pattern | PredicateFn;
 
   /**
-   * Composable predicate block. See {@link TopLevelWhenClause}.
+   * Composable predicate block. All leaves present in this block are
+   * ANDed — the clause fires only when every leaf fires. An
+   * empty/undefined clause trivially matches (the rule fires
+   * regardless of `when:`). `not:` wraps ONE inner clause and inverts
+   * its verdict (single level; no recursion). See
+   * {@link TopLevelWhenClause}.
    *
    * `Writes` is the union of session-entry event literals the rule's
    * `when.missing.event` is allowed to reference. Threaded through by

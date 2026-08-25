@@ -22,6 +22,13 @@
  *                             `["no-main-commit-github"]` or opt out
  *                             of the whole plugin with
  *                             `disabledPlugins: ["git"]`.
+ *                             Plus the destructive-command rails
+ *                             migrated from the engine's former
+ *                             `DEFAULT_RULES` (issue #72):
+ *                             `no-force-push` (sealed, issue #65 —
+ *                             every remote-history-rewrite form) and
+ *                             `no-hard-reset`. Both override-comment
+ *                             eligible.
  *   - `trackers.branch`    - sequential `git checkout` / `git switch`
  *                             branch tracker. See `./trackers/branch-tracker.ts`.
  *   - `trackerExtensions.cwd.git`
@@ -55,8 +62,9 @@
  * See `./helpers/git-ops.ts` for the helper contract (all collapse
  * failure modes to `null`; caller decides what to do with it).
  *
- * Opt-in since the v0.1.x monorepo split: `DEFAULT_PLUGINS` is empty,
- * so this plugin is registered ONLY when the user declares it:
+ * Opt-in: there are NO engine-injected default plugins or rules
+ * (issue #72), so this plugin is registered ONLY when the user
+ * declares it:
  *
  * ```ts
  * import gitPlugin from "@cad0p/pi-steering/plugins/git";
@@ -65,11 +73,12 @@
  *
  * Declaring it explicitly also feeds its rule / predicate names into
  * `defineConfig`'s type unions (typo-checking on `disabledRules` /
- * `disabledPlugins`); relying on a default would silently widen the
- * union and let typos through.
+ * `disabledPlugins`); an undeclared plugin's names are NOT in the
+ * inferred union, so typos surface as compile errors instead of
+ * silent no-ops.
  *
- * Tests build configs via `loadHarness({ includeDefaults: false })`
- * and pass the plugin explicitly.
+ * Tests construct configs explicitly and pass the plugin in the
+ * `plugins` array.
  *
  * ## Note for plugin authors
  *
@@ -80,7 +89,6 @@
  */
 
 import type { Tracker } from "@cad0p/unbash-walker";
-import type { DEFAULT_PLUGINS } from "../../defaults.ts";
 import type {
   AnyPredicateHandler,
   BuiltInWhenLeaves,
@@ -97,6 +105,8 @@ import { remote } from "./predicates/remote.ts";
 import { upstream } from "./predicates/upstream.ts";
 import { noMainCommit } from "./rules/no-main-commit.ts";
 import { noMainCommitGithub } from "./rules/no-main-commit-github.ts";
+import { noForcePush } from "./rules/no-force-push.ts";
+import { noHardReset } from "./rules/no-hard-reset.ts";
 import { branchTracker } from "./trackers/branch-tracker.ts";
 import { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
 
@@ -210,7 +220,7 @@ export const predicates: Record<string, AnyPredicateHandler> = {
 };
 
 /**
- * Suggested rules for the git plugin.
+ * Rules for the git plugin.
  *
  * **Order matters — first-match-wins.** The github-specific rule
  * (`no-main-commit-github`) is placed BEFORE the generic
@@ -221,10 +231,18 @@ export const predicates: Record<string, AnyPredicateHandler> = {
  * `remote:` predicate doesn't match → the engine falls through to
  * the generic `no-main-commit`. Reordering for stylistic reasons
  * breaks this routing; pinned via a unit test in `./index.test.ts`.
+ *
+ * The two commit-on-main rules route between themselves only — the
+ * pattern-based rails (`no-force-push`, `no-hard-reset`, migrated
+ * from the engine's former `DEFAULT_RULES` in issue #72) target
+ * disjoint command shapes, so their position relative to the pair
+ * carries no routing weight.
  */
 export const rules = [
   noMainCommitGithub,
   noMainCommit,
+  noForcePush,
+  noHardReset,
 ] as const satisfies readonly Rule[];
 
 /**
@@ -300,4 +318,9 @@ export {
   NO_CHECKOUT_IN_CHAIN,
 } from "./trackers/branch-tracker.ts";
 export { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
-export { noMainCommit, noMainCommitGithub };
+export {
+  noForcePush,
+  noHardReset,
+  noMainCommit,
+  noMainCommitGithub,
+};

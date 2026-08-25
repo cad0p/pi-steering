@@ -8,33 +8,36 @@
  * canonical TypeScript form. Drop this file in at
  * `.pi/steering.ts` (or `.pi/steering/index.ts`) to activate.
  *
- * NOTE (issue #65): the shipped `DEFAULT_RULES.no-force-push` is now
- * SEALED — it blocks every remote-history-rewrite form
- * (`--force`, `--force-with-lease`, `--force-if-includes`, bundled
- * shorts like `-uf`, leading-`+` refspecs like `git push origin
- * +main`, and `--mirror`) with a dedicated reason message. That means
- * this pack is REDUNDANT for its original purpose: the default now
- * covers everything here, and more. The pack is kept as a REFERENCE
- * for the disable-and-replace idiom — dropping a default via
+ * NOTE (issue #65): the git plugin's `no-force-push` rule is SEALED —
+ * it blocks every remote-history-rewrite form (`--force`,
+ * `--force-with-lease`, `--force-if-includes`, bundled shorts like
+ * `-uf`, leading-`+` refspecs like `git push origin +main`, and
+ * `--mirror`) with a dedicated reason message. That makes this pack
+ * REDUNDANT for its original purpose: the plugin's rule covers
+ * everything here, and more. The pack is kept as a REFERENCE for the
+ * disable-and-replace idiom — dropping a shipped rule via
  * `disabledRules` and installing your own rule under a new name —
  * which is the mechanism you'd use to customize (or loosen) any
- * default. Its rule pattern mirrors the sealed default.
+ * shipped rule. Its rule pattern mirrors the sealed one.
  *
  * Shape:
  *
- *   - `disabledRules: ["no-force-push"]` drops the default rule so
- *     ours owns the block message (otherwise the default's message
- *     would win on `git push --force`).
+ *   - `plugins: [gitPlugin]` declares the shipping plugin — since
+ *     issue #72 nothing is engine-injected, so the rules only exist
+ *     if the plugin is declared (and its names only typo-check if it
+ *     is).
+ *   - `disabledRules: ["no-force-push"]` drops the plugin's rule so
+ *     ours owns the block message (otherwise its message would win
+ *     on `git push --force`).
  *   - `no-force-push-strict` fires on `--force` (any suffix, any
  *     position), bundled short flags (`-f`, `-uf`, `-fu`, `-nfv`),
  *     leading-`+` refspecs (`git push origin +main`), and `--mirror`.
- *     Matches the same pre-subcommand flag patterns as the default
- *     (`git -C /path push --force`, `git -c key=val push --force`,
- *     `git --git-dir=/x push -f`).
+ *     Matches the same pre-subcommand flag patterns as the sealed
+ *     rule (`git -C /path push --force`,
+ *     `git -c key=val push --force`, `git --git-dir=/x push -f`).
  *
- * Scope note: the git plugin's `no-main-commit` fires on top of this
- * rule when the plugin is declared (`plugins: [gitPlugin]`, opt-in).
- * If that's not wanted, omit the plugin or add
+ * Scope note: the git plugin's `no-main-commit` also fires once the
+ * plugin is declared. If that's not wanted, add
  * `disabledRules: ["no-force-push", "no-main-commit"]`.
  */
 
@@ -43,18 +46,18 @@ import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
   plugins: [gitPlugin],
-  // Disable-and-replace idiom (kept as a reference): drop the shipped
-  // default so our custom rule owns the block-reason message. Since
-  // issue #65 the default is already strict — you only need this
+  // Disable-and-replace idiom (kept as a reference): drop the plugin's
+  // shipped rule so our custom rule owns the block-reason message.
+  // Since issue #65 that rule is already strict — you only need this
   // idiom when you want a DIFFERENT policy or message than the
-  // default provides.
+  // shipped one provides.
   disabledRules: ["no-force-push"],
   rules: [
     {
       name: "no-force-push-strict",
       tool: "bash",
       field: "command",
-      // Mirrors the SEALED DEFAULT_RULES.no-force-push pattern
+      // Mirrors the SEALED plugins/git no-force-push pattern
       // (issue #65): --force* via word boundary, bundled shorts,
       // leading-+ refspecs, --mirror.
       pattern:

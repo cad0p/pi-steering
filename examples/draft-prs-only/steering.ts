@@ -12,13 +12,18 @@
  * teams that require a human review step before flipping a PR from
  * draft to ready.
  *
- * Scope note: does NOT conflict with any shipped `DEFAULT_RULES`.
- * The rule is additive.
+ * Scope note: the rule is additive. Since issue #72 nothing is
+ * engine-injected — the rm / async declarations below restore the
+ * classic filesystem + loop rails; drop them if you want THIS PACK
+ * ONLY. The git plugin isn't declared here, so its rules stay inert.
  */
 
 import { defineConfig } from "@cad0p/pi-steering";
+import asyncPlugin from "@cad0p/pi-steering/plugins/async";
+import rmPlugin from "@cad0p/pi-steering/plugins/rm";
 
 export default defineConfig({
+  plugins: [rmPlugin, asyncPlugin],
   rules: [
     {
       name: "pr-create-must-be-draft",

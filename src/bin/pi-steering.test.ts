@@ -578,6 +578,15 @@ describe("pi-steering list", () => {
     writeSteeringDirConfig(
       scratch,
       `export default {
+				rules: [
+					{
+						name: "no-force-push",
+						tool: "bash",
+						field: "command",
+						pattern: /^git\\s+push/,
+						reason: "no",
+					},
+				],
 				exemptions: [
 					{ rule: "no-force-push", when: { cwd: /\\/vault\\// } },
 				],
@@ -587,9 +596,9 @@ describe("pi-steering list", () => {
     assert.equal(r.code, 0);
     assert.match(r.stdout, /Exemptions:/);
     assert.match(r.stdout, /no-force-push ← config \(when: cwd\)/);
-    // No orphan diagnostic: DEFAULT_RULES names are part of the CLI's
-    // rule universe (the CLI passes defaults=undefined while
-    // disableDefaults is false).
+    // No orphan diagnostic: the exemption targets a rule declared in
+    // this very config (post-#72 there are no engine-injected rails
+    // to lean on).
     assert.equal(r.stderr, "");
   });
 
@@ -600,6 +609,15 @@ describe("pi-steering list", () => {
 				plugins: [
 					{
 						name: "napkin",
+						rules: [
+							{
+								name: "no-force-push",
+								tool: "bash",
+								field: "command",
+								pattern: /^git\\s+push/,
+								reason: "no",
+							},
+						],
 						exemptions: [
 							{ rule: "no-force-push", when: { cwd: /\\/vault\\// } },
 						],
@@ -619,9 +637,27 @@ describe("pi-steering list", () => {
 				plugins: [
 					{
 						name: "napkin",
+						rules: [
+							{
+								name: "no-force-push",
+								tool: "bash",
+								field: "command",
+								pattern: /^git\\s+push/,
+								reason: "no",
+							},
+						],
 						exemptions: [
 							{ rule: "no-force-push", when: { cwd: /\\/vault\\// } },
 						],
+					},
+				],
+				rules: [
+					{
+						name: "no-long-running-commands",
+						tool: "bash",
+						field: "command",
+						pattern: /^npm\\s+run\\s+dev/,
+						reason: "no",
 					},
 				],
 				exemptions: [

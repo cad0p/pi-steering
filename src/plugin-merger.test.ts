@@ -166,6 +166,48 @@ describe("resolvePlugins: rule collision (soft)", () => {
     assert.equal(state.diagnostics.length, 1);
     assert.equal(state.diagnostics[0]?.kind, "rule-collision");
   });
+
+  it("inline-rule-vs-plugin-rule: user-config copy wins, plugin copy dropped with a warning (#72 precedence delta)", () => {
+    // Pre-cut, an inline user rule sharing a default's name silently
+    // overrode it (defaults layered outermost, inner-wins). Post-cut,
+    // the same inline rule collides with the declared plugin's rule:
+    // warning-class `rule-collision`, user config kept (it registers
+    // first — the runtime composes [...userRules, ...pluginRules]).
+    // The plugin's copy is DROPPED so exactly one rule per name
+    // survives, matching the old single-winner outcome but loudly.
+    const userCopy = mkRule("no-force-push");
+    const pluginCopy = mkRule("no-force-push");
+    const gitPlugin: Plugin = { name: "git", rules: [pluginCopy] };
+    const state = resolvePlugins([gitPlugin], {
+      rules: [userCopy],
+    });
+    assert.equal(state.rules.length, 0, "plugin copy must be dropped");
+    const collisions = state.diagnostics.filter(
+      (d) => d.kind === "rule-collision",
+    );
+    assert.equal(collisions.length, 1);
+    assert.equal(collisions[0]?.type, "warning");
+    assert.match(collisions[0]!.message, /user-config rule/);
+    assert.match(
+      collisions[0]!.message,
+      /first-registered \(user config\) wins/,
+    );
+  });
+
+  it("inline-vs-plugin collision check skips names the user already disabled", () => {
+    // disabledRules applies across buckets; a name the user disabled
+    // is by-design silence, not an authoring mistake worth flagging.
+    const gitPlugin: Plugin = { name: "git", rules: [mkRule("shared")] };
+    const state = resolvePlugins([gitPlugin], {
+      rules: [mkRule("shared")],
+      disabledRules: ["shared"],
+    });
+    assert.equal(state.rules.length, 0);
+    assert.equal(
+      state.diagnostics.some((d) => d.kind === "rule-collision"),
+      false,
+    );
+  });
 });
 
 describe("resolvePlugins: tracker collision (error-class diagnostic)", () => {
@@ -875,7 +917,7 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
         exemptions: [{ rule: "no-such-rule", when: { cwd: "/v/" } }],
       },
     ];
-    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    const { diagnostics } = runMergerPipeline(layers, []);
     const d = diagnostics.find((d) => d.kind === "exemption-orphan");
     assert.ok(d, "expected exemption-orphan diagnostic");
     assert.equal(d?.type, "warning");
@@ -894,7 +936,7 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
         exemptions: [{ rule: "no-main-commit", when: { cwd: "/v/" } }],
       },
     ];
-    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    const { diagnostics } = runMergerPipeline(layers, []);
     assert.equal(
       diagnostics.some((d) => d.kind === "exemption-orphan"),
       false,
@@ -909,34 +951,47 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
         exemptions: [{ rule: "no-main-commit", when: { cwd: "/v/" } }],
       },
     ];
-    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    const { diagnostics } = runMergerPipeline(layers, []);
     assert.equal(
       diagnostics.some((d) => d.kind === "exemption-orphan"),
       false,
     );
   });
 
-  it("does NOT flag a DEFAULT_RULES target when defaults are active", () => {
+  it("does NOT flag an ex-default target when the shipping plugin IS declared", () => {
+    // Post-cut (#72): `no-force-push` lives in the git plugin. Its
+    // name is part of the universe iff the plugin (or a rule with
+    // that name) is declared.
+    const gitPlugin: Plugin = {
+      name: "git",
+      rules: [mkRule("no-force-push")],
+    };
     const { diagnostics } = runMergerPipeline(
-      [{ exemptions: [{ rule: "no-force-push", when: { cwd: "/v/" } }] }],
-      undefined,
+      [
+        {
+          plugins: [gitPlugin],
+          exemptions: [{ rule: "no-force-push", when: { cwd: "/v/" } }],
+        },
+      ],
       [],
     );
     assert.equal(
       diagnostics.some((d) => d.kind === "exemption-orphan"),
       false,
-      "default rule names are part of the universe even with defaults=undefined",
+      "a declared plugin's rule names are part of the universe",
     );
   });
 
-  it("flags a DEFAULT_RULES target when disableDefaults removes the defaults", () => {
+  it("flags an ex-engine-default target when the shipping plugin is NOT declared", () => {
+    // Post-cut (#72): there are no engine-injected defaults, so a
+    // leftover exemption targeting `no-force-push` without the git
+    // plugin is an orphan — the carve-out can never match.
     const layers: SteeringConfig[] = [
       {
-        disableDefaults: true,
         exemptions: [{ rule: "no-force-push", when: { cwd: "/v/" } }],
       },
     ];
-    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    const { diagnostics } = runMergerPipeline(layers, []);
     const d = diagnostics.find((d) => d.kind === "exemption-orphan");
     assert.ok(d, "expected exemption-orphan diagnostic");
   });
@@ -952,11 +1007,7 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
       name: "napkin",
       exemptions: [{ rule: "no-such-rule", when: { cwd: "/v/" } }],
     };
-    const { diagnostics } = runMergerPipeline(
-      [{ plugins: [plugin] }],
-      undefined,
-      [],
-    );
+    const { diagnostics } = runMergerPipeline([{ plugins: [plugin] }], []);
     const d = diagnostics.find((d) => d.kind === "exemption-orphan");
     assert.ok(d, "expected exemption-orphan diagnostic");
     assert.equal(d?.type, "error");
@@ -978,7 +1029,7 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
         exemptions: [{ rule: "no-such-config", when: { cwd: "/v/" } }],
       },
     ];
-    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    const { diagnostics } = runMergerPipeline(layers, []);
     const orphans = diagnostics.filter((d) => d.kind === "exemption-orphan");
     assert.equal(orphans.length, 2);
     const configOrphan = orphans.find((d) => /\(config\)/.test(d.message));
@@ -1011,7 +1062,7 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
         disabledPlugins: ["git"],
       },
     ];
-    const { diagnostics } = runMergerPipeline(layers, undefined, []);
+    const { diagnostics } = runMergerPipeline(layers, []);
     assert.equal(
       diagnostics.some((d) => d.kind === "exemption-orphan"),
       false,

@@ -21,10 +21,9 @@
  *   - config.disabledRules / config.disabledPlugins — filter rules and
  *     whole plugins by name. Disabled entries are surfaced via
  *     `console.info` breadcrumbs (NOT diagnostics, since disabling is
- *     by-design behavior). `config.disableDefaults` is the caller's
- *     problem:
- *     the caller chooses whether to include DEFAULT_PLUGINS in the input
- *     list (handled upstream by the extension runtime).
+ *     by-design behavior). The caller composes the plugin list that
+ *     reaches this module — there are no engine-injected default
+ *     plugins to account for (issue #72).
  *
  * The composed trackers map returned here is what the runtime passes to
  * `walk()`; the raw `trackers` map from individual plugins is kept on
@@ -153,12 +152,9 @@ export function validateName(
  * stdout, then production refuses to start on the same config.
  *
  * Operates on the raw user-authored `layers` array — NOT on the
- * post-merge `SteeringConfig`. The merged config can include
- * default rules injected by `buildConfig` (when `disableDefaults`
- * is false); validating those would attribute package-controlled
- * names to a `(user config)` source, which is a misnomer. Default
- * rule names ship in `DEFAULT_RULES` and are package-controlled —
- * they don't pass through this validator.
+ * post-merge `SteeringConfig`. Every rule reached here is
+ * user-authored; package-controlled names ship via plugins and are
+ * validated by {@link resolvePlugins} instead.
  *
  * Note: `layer.observers` covers user-authored observers only.
  * Plugin-shipped observers live under `layer.plugins[].observers`
@@ -313,10 +309,9 @@ function composeTracker(
  * Merge a list of plugins together, applying the config's `disabledRules` /
  * `disabledPlugins` filters along the way.
  *
- * The caller is responsible for composing the plugin list — including
- * whether to prepend DEFAULT_PLUGINS. This function does not consult
- * `config.disableDefaults`; that decision sits one layer up in the
- * extension runtime.
+ * The caller is responsible for composing the plugin list. This
+ * function does not load or discover plugins; it only merges what it
+ * is given.
  *
  * Collision semantics per the ADR:
  *   - predicate / observer / plugin-shipped-rule name collision — first
@@ -591,6 +586,24 @@ export function resolvePlugins(
   // it again on the config side.
   const rules: Rule[] = [];
   const ruleOwner = new Map<string, string>();
+  // Cross-bucket collision universe: names declared by user-authored
+  // config rules. User rules evaluate FIRST (the runtime composes
+  // `[...userRules, ...pluginRules]`), so on a name match the
+  // user-config copy is the first-registered rule and wins — the
+  // plugin's copy would otherwise double-register under the same name,
+  // which the git-plugin README documents as a customization footgun.
+  // Since the engine no longer ships default rules (issue #72), this
+  // is also the post-cut form of the old inner-wins defaults override:
+  // same outcome (one surviving rule per name, user copy kept), but
+  // now LOUD — a warning-class `rule-collision` diagnostic instead of
+  // a silent layer-merge replacement. Disabled user rules are exempt
+  // from the check (mirroring within-layer mergeRules): a name the
+  // user already disabled isn't an authoring mistake worth flagging.
+  const userRuleNames = new Set(
+    (config.rules ?? [])
+      .map((r) => r.name)
+      .filter((name) => !disabledRules.has(name)),
+  );
   for (const plugin of activePlugins) {
     if (!plugin.rules) continue;
     for (const rule of plugin.rules) {
@@ -604,6 +617,17 @@ export function resolvePlugins(
           `[pi-steering] rule "${rule.name}" (from plugin "${plugin.name}") ` +
             `disabled via config.disabledRules`,
         );
+        continue;
+      }
+      if (userRuleNames.has(rule.name)) {
+        diagnostics.push({
+          type: "warning",
+          kind: "rule-collision",
+          message:
+            `duplicate rule "${rule.name}" — the user-config rule ` +
+            `(kept) and plugin "${plugin.name}"'s rule (ignored); ` +
+            "first-registered (user config) wins",
+        });
         continue;
       }
       const prior = ruleOwner.get(rule.name);

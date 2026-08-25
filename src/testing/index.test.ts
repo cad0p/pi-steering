@@ -6,8 +6,11 @@
  *
  * Coverage axis:
  *   - `loadHarness`         — evaluator + dispatcher built from a
- *                              minimal config; includeDefaults on/off;
- *                              plugin merging; config.disabledRules; custom
+ *                              minimal config; explicit plugin
+ *                              declaration (the former defaults-
+ *                              injection harness flag is gone — issue
+ *                              #72); plugin
+ *                              merging; config.disabledRules; custom
  *                              host override.
  *   - `mockContext`         — default shape; per-option overrides; exec
  *                              stubbing + unstubbed reject; findEntries
@@ -34,6 +37,7 @@ import {
 } from "../evaluator.ts";
 import { buildWalkRegistry } from "../internal/walk-registry.ts";
 import { resolvePlugins } from "../plugin-merger.ts";
+import gitPlugin from "../plugins/git/index.ts";
 import type {
   Observer,
   ObserverContext,
@@ -115,8 +119,11 @@ describe("loadHarness", () => {
     assert.deepEqual(h.resolved.observers, []);
   });
 
-  it("includeDefaults: true injects DEFAULT_RULES (no-force-push fires)", async () => {
-    const h = loadHarness({ config: {}, includeDefaults: true });
+  it("declared git plugin's no-force-push fires (explicit plugin construction)", async () => {
+    // The former defaults-injection harness flag is gone (#72):
+    // harness callers construct configs explicitly, declaring each
+    // shipping plugin they want active.
+    const h = loadHarness({ config: { plugins: [gitPlugin] } });
     const res = await h.evaluate(
       {
         type: "tool_call",
@@ -131,7 +138,7 @@ describe("loadHarness", () => {
     assert.match(res.reason ?? "", /\[steering:no-force-push@[^\]]+\]/);
   });
 
-  it("includeDefaults: false (default) does NOT inject defaults", async () => {
+  it("empty config stays rule-free (nothing is injected)", async () => {
     const h = loadHarness({ config: {} });
     const res = await h.evaluate(
       {
@@ -184,8 +191,7 @@ describe("loadHarness", () => {
 
   it("applies config.disabledRules to named rules", async () => {
     const h = loadHarness({
-      config: { disabledRules: ["no-force-push"] },
-      includeDefaults: true,
+      config: { plugins: [gitPlugin], disabledRules: ["no-force-push"] },
     });
     // Rule was filtered out → force-push no longer blocks.
     const res = await h.evaluate(
@@ -199,6 +205,44 @@ describe("loadHarness", () => {
       0,
     );
     assert.equal(res, undefined);
+  });
+
+  it("inline rule vs declared plugin's same-named rule: warning + user copy wins (#72 precedence delta)", async () => {
+    // End-to-end twin of the resolvePlugins unit test: an inline rule
+    // sharing `no-force-push` with the declared git plugin collides
+    // loudly (warning-class rule-collision) and the inline copy — the
+    // first-registered rule in the evaluator's [...userRules,
+    // ...pluginRules] order — owns the block reason.
+    const h = loadHarness({
+      config: {
+        plugins: [gitPlugin],
+        rules: [
+          {
+            name: "no-force-push",
+            tool: "bash",
+            field: "command",
+            pattern: "^git\\b.*push\\b.*--force",
+            reason: "user copy",
+          },
+        ],
+      },
+    });
+    const collision = h.diagnostics.find((d) => d.kind === "rule-collision");
+    assert.ok(collision, "expected a rule-collision warning");
+    assert.equal(collision.type, "warning");
+    const res = await h.evaluate(
+      {
+        type: "tool_call",
+        toolCallId: "t",
+        toolName: "bash",
+        input: { command: "git push --force origin main" },
+      },
+      makeExtCtx(),
+      0,
+    );
+    assert.ok(res && res.block === true);
+    assert.match(res.reason ?? "", /\[steering:no-force-push@user\]/);
+    assert.doesNotMatch(res.reason ?? "", /@git\]/);
   });
 
   it("respects a custom host option", async () => {

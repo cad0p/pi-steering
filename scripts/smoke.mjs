@@ -19,11 +19,17 @@
 //
 // Usage:
 //   pnpm -r build                                   # build the extension
-//   node scripts/smoke.mjs                          # run against defaults only
+//   node scripts/smoke.mjs                          # run against declared plugins only
 //   node scripts/smoke.mjs /path/to/steering-dir    # + user rules from that dir's .pi/steering/
 //                                                     (v2 TS config: <dir>/.pi/steering/index.ts)
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
@@ -87,7 +93,8 @@ async function fireBashToolCall(mock, command, cwd) {
 /** @type {SmokeCase[]} */
 const CASES = [
   {
-    label: "default no-force-push blocks `git push --force origin main`",
+    label:
+      "declared git plugin's no-force-push blocks `git push --force origin main`",
     command: "git push --force origin main",
     expect: "block",
     expectRule: "no-force-push",
@@ -98,22 +105,23 @@ const CASES = [
     expect: "allow",
   },
   {
-    label: "`git commit --amend` is allowed (no-amend not in defaults)",
+    label:
+      "`git commit --amend` is allowed (commit-on-main pair disabled in the fixture config)",
     command: 'git commit --amend -m "x"',
     expect: "allow",
   },
   {
     label: "override comment unblocks no-force-push and audits the override",
-    // Both default no-force-push and user test-no-force-push match this
-    // command. Overriding just no-force-push would advance to
-    // test-no-force-push (which would still block — see the multi-rule
-    // firing tests). For an isolated 'override accepted' assertion we
-    // override both so the chain passes through cleanly and we can
-    // observe the no-force-push audit entry.
+    // Both the plugin's no-force-push and the user test-no-force-push
+    // match this command. Overriding just no-force-push would advance
+    // to test-no-force-push (which would still block — see the
+    // multi-rule firing tests). For an isolated 'override accepted'
+    // assertion we override both so the chain passes through cleanly
+    // and we can observe the no-force-push audit entry.
     command:
       "git push --force origin main " +
-      "# steering-override: no-force-push \u2014 smoke test " +
-      "# steering-override: test-no-force-push \u2014 smoke test",
+      "# steering-override: no-force-push — smoke test " +
+      "# steering-override: test-no-force-push — smoke test",
     expect: "allow+audit",
     expectRule: "no-force-push",
   },
@@ -123,28 +131,27 @@ const CASES = [
     expect: "allow",
   },
   {
-    label: "no-rm-rf-slash (noOverride) blocks `rm -rf /`",
+    label: "declared rm plugin's no-rm-rf-slash (noOverride) blocks `rm -rf /`",
     command: "rm -rf /",
     expect: "block",
     expectRule: "no-rm-rf-slash",
   },
   {
     label: "no-rm-rf-slash ignores override comment (noOverride)",
-    command: "rm -rf / # steering-override: no-rm-rf-slash \u2014 nope",
+    command: "rm -rf / # steering-override: no-rm-rf-slash — nope",
     expect: "block",
     expectRule: "no-rm-rf-slash",
   },
   {
     label:
-      "user-defined test-no-force-push fires first (v2 merges user rules before defaults)",
+      "user-defined test-no-force-push fires first (user rules evaluate before plugin rules)",
     command: "git push --force origin main",
     expect: "block",
-    // v2 merges inner-first: defaults are pushed to the END of the
-    // effective layer list, so the user rule lands BEFORE the
-    // defaults and test-no-force-push wins over no-force-push. Assert
-    // the user rule's name so a hypothetical reorder to
-    // defaults-first fails loudly instead of passing via the
-    // no-force-push substring inside the source tag.
+    // The evaluator composes [...userRules, ...pluginRules]: the user
+    // rule lands BEFORE the git plugin's no-force-push, so
+    // test-no-force-push wins on this command. Assert the user rule's
+    // name so a hypothetical reorder fails loudly instead of passing
+    // via the no-force-push substring inside the source tag.
     expectRule: "test-no-force-push",
     requiresUserRule: true,
   },
@@ -153,7 +160,7 @@ const CASES = [
       "user rule genuinely loads: overriding no-force-push alone still blocks via test-no-force-push",
     command:
       "git push --force origin main " +
-      "# steering-override: no-force-push \u2014 smoke pin",
+      "# steering-override: no-force-push — smoke pin",
     expect: "block",
     expectRule: "test-no-force-push",
   },
@@ -179,12 +186,33 @@ async function main() {
     sessionDir = mkdtempSync(join(tmpdir(), "pi-poc-smoke-"));
     mkdirSync(join(sessionDir, ".pi", "steering"), { recursive: true });
     // The `satisfies import(...)` is type-only (erased at transform), so
-    // jiti never resolves the package at runtime.
-    const userRuleConfig = `export default {
+    // jiti never resolves the package at runtime. The PLUGIN imports are
+    // real runtime imports: post-issue-72 there are no engine-injected
+    // default rails, so the smoke config declares each shipping plugin
+    // explicitly — via absolute dist paths, because a temp dir can't
+    // resolve bare package names. The commit-on-main pair is disabled
+    // because this harness has no pi.exec stub (the branch predicate
+    // would fail-closed on every `git commit`).
+    const distPlugin = (name) => {
+      const entry = join(repoRoot, "dist", "plugins", name, "index.js");
+      if (!existsSync(entry)) {
+        throw new Error(
+          `smoke harness: built plugin entry not found at ${entry} — run \`pnpm build\` first`,
+        );
+      }
+      return entry;
+    };
+    const userRuleConfig = `import gitPlugin from ${JSON.stringify(distPlugin("git"))};
+import rmPlugin from ${JSON.stringify(distPlugin("rm"))};
+import asyncPlugin from ${JSON.stringify(distPlugin("async"))};
+
+export default {
   // v2 override policy is fail-closed (defaultNoOverride defaults to
   // true) — the harness exercises the override path, so it opts in
   // explicitly, mirroring a real v2 config that uses overrides.
   defaultNoOverride: false,
+  plugins: [gitPlugin, rmPlugin, asyncPlugin],
+  disabledRules: ["no-main-commit", "no-main-commit-github"],
   rules: [
     {
       name: "test-no-force-push",
@@ -194,8 +222,8 @@ async function main() {
       reason: "blocked by smoke-test rule",
     },
   ],
-} satisfies import("@cad0p/pi-steering").SteeringConfig;
-`;
+} satisfies import("@cad0p/pi-steering").SteeringConfig;`;
+
     writeFileSync(
       join(sessionDir, ".pi", "steering", "index.ts"),
       userRuleConfig,

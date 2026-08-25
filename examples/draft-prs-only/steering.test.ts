@@ -40,7 +40,7 @@ describe("example: draft-prs-only", () => {
     );
   });
 
-  it("does not disable any default rules (additive)", () => {
+  it("declares its plugins explicitly (additive)", () => {
     assert.ok(
       config.disabledRules === undefined || config.disabledRules.length === 0,
     );

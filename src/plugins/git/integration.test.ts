@@ -14,8 +14,8 @@
  *
  *   1. Plugin resolution - predicates, rules, trackers, and
  *      trackerExtensions land in the resolved state.
- *   2. `DEFAULT_RULES` still block basic force-push regardless of the
- *      plugin (sanity: plugin wiring hasn't broken the core).
+ *   2. The migrated `no-force-push` rail (ex-engine-default, issue #72)
+ *      still blocks basic force-push when declared explicitly.
  *   3. Branch predicate against a fake git `exec` - fires on main,
  *      allows on feature.
  *   4. `-C /other` cwd extension doesn't accidentally bypass the rule.
@@ -32,7 +32,6 @@ import type {
   ExecResult as PiExecResult,
 } from "@earendil-works/pi-coding-agent";
 import { makeCtx, makeTrackedHost } from "../../__test-helpers__.ts";
-import { DEFAULT_RULES } from "../../defaults.ts";
 import { buildEvaluator } from "../../evaluator.ts";
 import { resolvePlugins } from "../../plugin-merger.ts";
 import type { SteeringConfig } from "../../schema.ts";
@@ -52,9 +51,9 @@ function bashEvent(command: string): BashToolCallEvent {
 }
 
 /**
- * Build an evaluator that mirrors the realistic wiring: defaults +
- * the git plugin + any extra user rules. Uses `makeTrackedHost` for
- * a controllable `exec` stub.
+ * Build an evaluator that mirrors the realistic wiring: the git
+ * plugin + any extra user rules. Uses `makeTrackedHost` for a
+ * controllable `exec` stub.
  */
 function buildRuntime(
   config: SteeringConfig,
@@ -74,7 +73,7 @@ function buildRuntime(
   // (`src/index.ts`) passes the same list.
   const resolved = resolvePlugins(plugins, config, ["cwd"]);
   const evaluator = buildEvaluator(
-    { ...config, rules: config.rules ?? [...DEFAULT_RULES] },
+    { ...config, rules: config.rules ?? [] },
     resolved,
     host,
   );
@@ -149,12 +148,15 @@ describe("git plugin: registration + resolution", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. DEFAULT_RULES still work with the plugin loaded
+// 2. The migrated no-force-push rail works with the plugin loaded
 // ---------------------------------------------------------------------------
 
-describe("git plugin: does not break DEFAULT_RULES", () => {
-  it("`git push --force` still blocks via no-force-push", async () => {
-    const { evaluator } = buildRuntime({ plugins: [gitPlugin] });
+describe("git plugin: migrated no-force-push rail (issue #72)", () => {
+  it("`git push --force` blocks via no-force-push", async () => {
+    const { evaluator } = buildRuntime({
+      plugins: [gitPlugin],
+      rules: [], // only plugin-shipped rules; nothing is engine-injected
+    });
     const res = await evaluator.evaluate(
       bashEvent("git push --force origin main"),
       makeCtx("/repo"),
@@ -174,7 +176,7 @@ describe("git plugin: no-main-commit via branch predicate", () => {
     const { evaluator } = buildRuntime(
       {
         plugins: [gitPlugin],
-        rules: [], // only plugin-shipped rules, no DEFAULT_RULES to confuse
+        rules: [], // only plugin-shipped rules; nothing is engine-injected
       },
       branchExec("main"),
     );

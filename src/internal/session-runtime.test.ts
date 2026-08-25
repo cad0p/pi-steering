@@ -22,6 +22,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
+  makeCtx,
   useIsolatedHome,
   writeSteeringSingleFileConfig,
 } from "../__test-helpers__.ts";
@@ -30,6 +31,7 @@ import {
   buildSessionRuntime,
   formatAggregatedDiagnostics,
   formatSingleLineDiagnostic,
+  runMergerPipeline,
 } from "./session-runtime.ts";
 
 /** Minimal evaluator host; the strict-mode tests don't drive evaluation. */
@@ -70,12 +72,53 @@ describe("buildSessionRuntime: strict-mode contract", () => {
   });
 
   it("returns evaluator + dispatcher when there are no diagnostics", async () => {
-    // No config layers, no plugins, no diagnostics. Defaults inject
-    // rules + plugins; both are clean.
+    // No config layers, no plugins, no diagnostics. There are no
+    // engine-injected defaults (issue #72), so an empty home yields
+    // a clean, rule-free runtime.
     const result = await buildSessionRuntime(tmpHome, noopHost);
     assert.ok(result.evaluator);
     assert.ok(result.dispatcher);
     assert.deepEqual(warnings, []);
+  });
+
+  it("fresh-empty config: zero active rules — nothing blocks (issue #72 headline)", async () => {
+    // THE headline behavior change of the defaults cut: a fresh
+    // install with NO steering config has NO implicit rails. Every
+    // former default (no-force-push, no-rm-rf-slash, …) is inert
+    // until its shipping plugin is declared. Assert end-to-end that
+    // the canonical destructive commands evaluate to undefined.
+    const result = await buildSessionRuntime(tmpHome, noopHost);
+    const event = (command: string) => ({
+      type: "tool_call" as const,
+      toolCallId: "t1",
+      toolName: "bash",
+      input: { command },
+    });
+    const ctx = makeCtx(tmpHome);
+    assert.equal(
+      await result.evaluator.evaluate(event("git push --force"), ctx, 0),
+      undefined,
+      "no-force-push must NOT fire without the git plugin declared",
+    );
+    assert.equal(
+      await result.evaluator.evaluate(event("rm -rf /"), ctx, 0),
+      undefined,
+      "no-rm-rf-slash must NOT fire without the rm plugin declared",
+    );
+    assert.equal(
+      await result.evaluator.evaluate(event("npm run dev"), ctx, 0),
+      undefined,
+      "no-long-running-commands must NOT fire without the async plugin declared",
+    );
+  });
+
+  it("fresh-empty merged config: the merged universe is empty", async () => {
+    // Merge-level twin of the e2e assertion above: the empty-config
+    // universe is EMPTY (no implicit rails to inherit).
+    const { merged, diagnostics } = runMergerPipeline([], []);
+    assert.equal(merged.rules, undefined);
+    assert.equal(merged.plugins, undefined);
+    assert.deepEqual(diagnostics, []);
   });
 
   it("throws on a warning-class diagnostic by default (failOnWarnings undefined)", async () => {
@@ -86,7 +129,6 @@ describe("buildSessionRuntime: strict-mode contract", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				rules: [
 					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
 					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
@@ -108,7 +150,6 @@ describe("buildSessionRuntime: strict-mode contract", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				failOnWarnings: false,
 				rules: [
 					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
@@ -146,7 +187,6 @@ describe("buildSessionRuntime: strict-mode contract", () => {
       tmpHome,
       `const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
-				disableDefaults: true,
 				failOnWarnings: false,
 				plugins: [
 					{ name: "pa", trackers: { branch: t } },
@@ -182,7 +222,6 @@ describe("buildSessionRuntime: strict-mode contract", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				plugins: [
 					{
 						name: "forge-plugin",
@@ -218,7 +257,6 @@ describe("buildSessionRuntime: strict-mode contract", () => {
       tmpHome,
       `const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
-				disableDefaults: true,
 				plugins: [
 					{ name: "pa", trackers: { branch: t } },
 					{ name: "pb", trackers: { branch: t } },
@@ -258,7 +296,6 @@ describe("buildSessionRuntime: strict-mode contract", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				rules: [
 					{
 						name: "phony] BAD",
@@ -294,7 +331,6 @@ describe("buildSessionRuntime: strict-mode contract", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				rules: [
 					{
 						name: "phony] BAD",
@@ -347,7 +383,6 @@ describe("buildSessionRuntime: strict-mode contract", () => {
       tmpHome,
       `const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
-				disableDefaults: true,
 				plugins: [
 					{ name: "pa", trackers: { branch: t } },
 					{ name: "pb", trackers: { branch: t } },
@@ -419,7 +454,6 @@ describe("buildSessionRuntime: project-trust gate", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				rules: [
 					{ name: "proj-rule", tool: "bash", field: "command", pattern: /^A/, reason: "proj" },
 				],
@@ -427,7 +461,6 @@ describe("buildSessionRuntime: project-trust gate", () => {
     );
     writeGlobalConfig(
       `export default {
-				disableDefaults: true,
 				rules: [
 					{ name: "global-rule", tool: "bash", field: "command", pattern: /^B/, reason: "global" },
 				],
@@ -480,7 +513,6 @@ describe("buildSessionRuntime: project-trust gate", () => {
     // Make the global layer warning-producing (within-layer duplicate).
     writeGlobalConfig(
       `export default {
-				disableDefaults: true,
 				rules: [
 					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
 					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
@@ -517,7 +549,6 @@ describe("buildSessionRuntime: project-trust gate", () => {
     writeTrustGateFixture();
     writeGlobalConfig(
       `export default {
-				disableDefaults: true,
 				failOnWarnings: false,
 				rules: [
 					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
@@ -555,7 +586,6 @@ describe("buildSessionRuntime: project-trust gate", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				rules: [
 					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
 					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
@@ -617,7 +647,6 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				disabledRules: ["consumer"],
 				observers: [
 					{
@@ -660,7 +689,6 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				observers: [
 					{
 						name: "obs-x",
@@ -703,7 +731,6 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				observers: [
 					{
 						name: "obs-x",

@@ -225,7 +225,6 @@ describe("schema: shape smoke tests", () => {
       defaultNoOverride: true,
       disabledRules: ["no-force-push"],
       disabledPlugins: ["git"],
-      disableDefaults: false,
       plugins: [],
       rules: [],
       observers: [],

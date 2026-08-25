@@ -28,6 +28,14 @@
 			"types": "./dist/plugins/git/index.d.ts",
 			"import": "./dist/plugins/git/index.js"
 		},
+		"./plugins/rm": {
+			"types": "./dist/plugins/rm/index.d.ts",
+			"import": "./dist/plugins/rm/index.js"
+		},
+		"./plugins/async": {
+			"types": "./dist/plugins/async/index.d.ts",
+			"import": "./dist/plugins/async/index.js"
+		},
 		"./testing": {
 			"types": "./dist/testing/index.d.ts",
 			"import": "./dist/testing/index.js"

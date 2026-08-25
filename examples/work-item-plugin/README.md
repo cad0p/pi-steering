@@ -100,4 +100,4 @@ In a real project, you'd replace `@examples/work-item-plugin` with your own publ
 
 - **A `Tracker`** — the git plugin (`src/plugins/git/`) is the canonical reference for tracker + trackerExtension authoring. This plugin keeps the surface minimal.
 - **Production-grade regexes** — the `[PROJ-N]` pattern is a placeholder. Real adopters replace with their project's actual ticket format (e.g. `JIRA-\d+`, `AWF-\d+`).
-- **Override customization** — each rule uses the engine defaults around `noOverride`. See the main README's "Authoring rules" section for how overrides work.
+- **Override customization** — each rule inherits the plugin-level `defaultNoOverride` policy (fail-closed unless the plugin opts out). See the main README's "Authoring rules" section for how overrides work.

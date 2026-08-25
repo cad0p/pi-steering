@@ -95,9 +95,7 @@ import { finalizePluginState } from "./finalize-plugin-state.ts";
  * this formula. There are no engine-injected default rules (issue
  * #72): the universe is exactly what the config declares.
  */
-function detectExemptionOrphans(
-  merged: SteeringConfig,
-): SteeringDiagnostic[] {
+function detectExemptionOrphans(merged: SteeringConfig): SteeringDiagnostic[] {
   const universe = new Set<string>();
   for (const rule of merged.rules ?? []) universe.add(rule.name);
   for (const plugin of merged.plugins ?? []) {
@@ -153,8 +151,7 @@ export function runMergerPipeline(
   resolved: ResolvedPluginState | null;
   diagnostics: SteeringDiagnostic[];
 } {
-  const { config: merged, diagnostics: mergeDiagnostics } =
-    buildConfig(layers);
+  const { config: merged, diagnostics: mergeDiagnostics } = buildConfig(layers);
   const userConfigNameDiagnostics = validateUserConfigNames(layers);
   const exemptionOrphanDiagnostics = detectExemptionOrphans(merged);
   if (mergeDiagnostics.some((d) => d.type === "error")) {

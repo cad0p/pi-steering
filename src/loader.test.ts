@@ -1020,18 +1020,9 @@ describe("loader: buildConfig", () => {
     assert.equal(buildConfig([]).config.defaultNoOverride, undefined);
   });
 
-  it("inner `disableDefaults` wins", () => {
-    assert.equal(
-      buildConfig([{ disableDefaults: true }, { disableDefaults: false }])
-        .config.disableDefaults,
-      true,
-    );
-    assert.equal(buildConfig([]).config.disableDefaults, undefined);
-  });
-
   it("inner `failOnWarnings` wins; default left undefined when no layer specifies", () => {
-    // Inner-wins precedence is identical to `disableDefaults` /
-    // `defaultNoOverride` since all three flow through `mergeBool`.
+    // Inner-wins precedence is identical to `defaultNoOverride`
+    // since both flow through `mergeBool`.
     assert.equal(
       buildConfig([{ failOnWarnings: false }, { failOnWarnings: true }]).config
         .failOnWarnings,
@@ -1229,70 +1220,41 @@ describe("loader: buildConfig", () => {
     );
   });
 
-  it("applies `defaults` as the outermost layer", () => {
-    const { config: merged } = buildConfig(
-      [
-        {
-          rules: [
-            {
-              name: "user",
-              tool: "bash",
-              field: "command",
-              pattern: /u/,
-              reason: "u",
-            },
-          ],
-        },
-      ],
+  it("cross-layer same-name rules override silently (inner wins)", () => {
+    // Post-cut (#72) there is no engine defaults layer; the documented
+    // customization path (declare a same-named rule in an inner layer)
+    // keeps its silent inner-wins merge.
+    const { config: merged } = buildConfig([
       {
         rules: [
           {
-            name: "built-in",
+            name: "user",
+            tool: "bash",
+            field: "command",
+            pattern: /u/,
+            reason: "u",
+          },
+        ],
+      },
+      {
+        rules: [
+          {
+            name: "user",
             tool: "bash",
             field: "command",
             pattern: /b/,
-            reason: "b",
+            reason: "outer",
           },
         ],
         defaultNoOverride: true,
       },
-    );
-    assert.deepEqual(merged.rules?.map((r) => r.name).sort(), [
-      "built-in",
-      "user",
     ]);
-    assert.equal(merged.defaultNoOverride, true);
-  });
-
-  it("user rule shadows a defaults rule of the same name", () => {
-    const { config: merged } = buildConfig(
-      [
-        {
-          rules: [
-            {
-              name: "shared",
-              tool: "bash",
-              field: "command",
-              pattern: /USER/,
-              reason: "user",
-            },
-          ],
-        },
-      ],
-      {
-        rules: [
-          {
-            name: "shared",
-            tool: "bash",
-            field: "command",
-            pattern: /DEFAULT/,
-            reason: "default",
-          },
-        ],
-      },
+    assert.deepEqual(
+      merged.rules?.map((r) => r.name),
+      ["user"],
     );
-    assert.equal(merged.rules?.length, 1);
-    assert.equal(merged.rules?.[0]?.reason, "user");
+    assert.equal(merged.rules?.[0]?.reason, "u");
+    assert.equal(merged.defaultNoOverride, true);
   });
 
   it("unions exemptions across layers — ACCUMULATION, no inner-wins", () => {
@@ -1319,15 +1281,6 @@ describe("loader: buildConfig", () => {
       { disabledRules: ["x"] },
     ]);
     assert.equal(merged.exemptions, undefined);
-  });
-
-  it("merges exemptions from the defaults layer too (outermost position)", () => {
-    const defaults: SteeringConfig = {
-      exemptions: [{ rule: "no-force-push", when: { cwd: "/d/" } }],
-    };
-    const { config: merged } = buildConfig([], defaults);
-    assert.equal(merged.exemptions?.length, 1);
-    assert.deepEqual(merged.exemptions?.[0]?.when, { cwd: "/d/" });
   });
 });
 
@@ -1362,26 +1315,6 @@ describe("loader: loadSteeringConfig", () => {
     const { config: merged, diagnostics } = await loadSteeringConfig(cwd);
     assert.equal(merged.rules?.length, 1);
     assert.equal(merged.rules?.[0]?.name, "r");
-    assert.deepEqual(diagnostics, []);
-  });
-
-  it("applies caller-supplied defaults when no layer sets a field", async () => {
-    const cwd = join(tmp, "p");
-    mkdirSync(cwd, { recursive: true });
-    const { config: merged, diagnostics } = await loadSteeringConfig(cwd, {
-      defaultNoOverride: true,
-      rules: [
-        {
-          name: "built-in",
-          tool: "bash",
-          field: "command",
-          pattern: /b/,
-          reason: "b",
-        },
-      ],
-    });
-    assert.equal(merged.defaultNoOverride, true);
-    assert.equal(merged.rules?.[0]?.name, "built-in");
     assert.deepEqual(diagnostics, []);
   });
 
@@ -1553,10 +1486,10 @@ describe("loader: loadSteeringConfig", () => {
   });
 
   it("forwards projectLayerTrusted opts to the loader (trust-gate parity)", async () => {
-    // Embedder parity (D5): `loadSteeringConfig(cwd, defaults?, opts?)`
-    // must gate the project layer exactly like `loadConfigs` — an
-    // embedder building its own bridge or pre-flight sees the same
-    // diagnostic stream as the production runtime.
+    // Embedder parity (D5): `loadSteeringConfig(cwd, opts?)` must
+    // gate the project layer exactly like `loadConfigs` — an embedder
+    // building its own bridge or pre-flight sees the same diagnostic
+    // stream as the production runtime.
     const proj = join(tmp, "proj");
     mkdirSync(proj, { recursive: true });
     writeConfig(
@@ -1567,7 +1500,7 @@ describe("loader: loadSteeringConfig", () => {
       join(tmp, ".pi", "agent", "steering", "index.ts"),
       configModule("{ disabledRules: ['global'] }"),
     );
-    const { config, diagnostics } = await loadSteeringConfig(proj, undefined, {
+    const { config, diagnostics } = await loadSteeringConfig(proj, {
       projectLayerTrusted: false,
     });
     // Only the global layer's disabledRules survived the gate.

@@ -138,8 +138,10 @@ export type AllObserverNames<
  * `disabledPlugins` entry without a declared plugin is a compile
  * error.
  */
-export type AllPluginNames<P extends readonly Plugin[]> =
-  ProjectField<P, "name">;
+export type AllPluginNames<P extends readonly Plugin[]> = ProjectField<
+  P,
+  "name"
+>;
 
 // ---------------------------------------------------------------------------
 // AllRuleNames — union of rule `.name` literals across plugins + user rules.

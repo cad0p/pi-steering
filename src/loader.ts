@@ -638,9 +638,10 @@ function detectTrackerNameCollisions(
  * in `resolvePlugins`, not here — buildConfig handles cross-layer and
  * within-layer name-collision shapes only.
  */
-export function buildConfig(
-  layers: readonly SteeringConfig[],
-): { config: SteeringConfig; diagnostics: SteeringDiagnostic[] } {
+export function buildConfig(layers: readonly SteeringConfig[]): {
+  config: SteeringConfig;
+  diagnostics: SteeringDiagnostic[];
+} {
   const effective: SteeringConfig[] = [...layers];
 
   const diagnostics: SteeringDiagnostic[] = [];

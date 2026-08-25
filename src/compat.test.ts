@@ -135,7 +135,6 @@ describe("compat: fromJSON rejections", () => {
       "disablePlugins",
       "disabledPlugins",
       "disabledRules",
-      "disableDefaults",
     ]) {
       let caught: unknown;
       try {

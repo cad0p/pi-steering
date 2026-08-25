@@ -14,13 +14,11 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type {
-  DefaultPluginName,
-  DefaultRuleName,
-  PluginExemptionsCheck,
-} from "./define-config.ts";
+import type { PluginExemptionsCheck } from "./define-config.ts";
 import { defineConfig } from "./define-config.ts";
+import shippedAsyncPlugin from "./plugins/async/index.ts";
 import shippedGitPlugin from "./plugins/git/index.ts";
+import shippedRmPlugin from "./plugins/rm/index.ts";
 import type { Observer, Plugin, PredicateContext } from "./schema.ts";
 
 // Type-equality helper for direct type-identity assertions. Pinning
@@ -573,36 +571,34 @@ describe("defineConfig: bare-annotation footgun (ADR §8 authoring pattern)", ()
   });
 });
 
-describe("defineConfig: default rule + plugin names in typo-check union", () => {
-  // `AllRuleNames` and `AllPluginNames` include the names of
-  // `DEFAULT_RULES` / `DEFAULT_PLUGINS` directly, so disabling an
-  // engine-shipped default typechecks without a cast — the same as
-  // disabling a plugin or user rule. Pins the contract that
-  // `defaults.ts` keeps `as const satisfies readonly Rule[]` /
-  // `readonly Plugin[]` so literal `name` values survive into the
-  // unions; if either annotation regresses to a bare `Rule[]` /
-  // `Plugin[]`, these `@ts-expect-error` directives stop firing and
-  // the file fails to compile.
+describe("defineConfig: rule + plugin name unions track declared plugins", () => {
+  // Post-cut (#72): `AllRuleNames` / `AllPluginNames` project ONLY
+  // from declared plugins + inline rules — there is no engine-default
+  // arm. A stale `disabledRules` entry targeting an ex-default rule
+  // name without its shipping plugin declared is a COMPILE ERROR;
+  // declaring the plugin re-enters the name via `FromPluginField`.
 
-  it("disabledRules accepts a single default-rule name without a cast", () => {
+  it("disabledRules accepts a shipped rule name once its plugin is declared", () => {
     const cfg = defineConfig({
+      plugins: [shippedGitPlugin],
       disabledRules: ["no-force-push"],
     });
     assert.deepEqual(cfg.disabledRules, ["no-force-push"]);
   });
 
-  it("disabledRules accepts every other shipped default name", () => {
+  it("disabledRules rejects an ex-default name WITHOUT its shipping plugin (compile error)", () => {
     const cfg = defineConfig({
-      disabledRules: [
-        "no-hard-reset",
-        "no-rm-rf-slash",
-        "no-long-running-commands",
-      ],
+      plugins: [shippedAsyncPlugin, shippedRmPlugin],
+      // @ts-expect-error — "no-force-push" ships with the git plugin,
+      // which this config does NOT declare. Since #72 there are no
+      // engine defaults to keep the name in the union; a leftover
+      // disable of a never-declared rule is a compile-time error.
+      disabledRules: ["no-force-push"],
     });
-    assert.equal(cfg.disabledRules?.length, 3);
+    assert.equal(cfg.disabledRules?.length, 1);
   });
 
-  it("disabledRules accepts a mix of default + plugin + user rule names", () => {
+  it("disabledRules accepts names across several shipping plugins + user rules", () => {
     const plugin = {
       name: "p",
       rules: [
@@ -616,7 +612,7 @@ describe("defineConfig: default rule + plugin names in typo-check union", () => 
       ],
     } as const satisfies Plugin;
     const cfg = defineConfig({
-      plugins: [plugin],
+      plugins: [shippedGitPlugin, shippedRmPlugin, plugin],
       rules: [
         {
           name: "user-rule",
@@ -626,16 +622,21 @@ describe("defineConfig: default rule + plugin names in typo-check union", () => 
           reason: "r",
         },
       ],
-      disabledRules: ["no-force-push", "plugin-rule", "user-rule"],
+      disabledRules: [
+        "no-force-push",
+        "no-rm-rf-slash",
+        "plugin-rule",
+        "user-rule",
+      ],
     });
-    assert.equal(cfg.disabledRules?.length, 3);
+    assert.equal(cfg.disabledRules?.length, 4);
   });
 
-  it("disabledRules rejects misspellings of default-rule names", () => {
+  it("disabledRules rejects misspellings of a shipped rule name", () => {
     const cfg = defineConfig({
-      // @ts-expect-error — "no-force-pushh" is a typo of the default
-      // rule "no-force-push". Default rule names are part of the
-      // typo-check union; misspellings are rejected at compile time.
+      plugins: [shippedGitPlugin],
+      // @ts-expect-error — "no-force-pushh" is a typo of the git
+      // plugin's "no-force-push".
       disabledRules: ["no-force-pushh"],
     });
     assert.equal(cfg.disabledRules?.length, 1);
@@ -643,12 +644,9 @@ describe("defineConfig: default rule + plugin names in typo-check union", () => 
 
   it("disabledPlugins rejects a plugin name that was never declared", () => {
     const cfg = defineConfig({
-      // @ts-expect-error — "git" is NOT a default plugin since the
-      // monorepo split: DEFAULT_PLUGINS is empty and the git plugin
-      // is opt-in. Disabling an undeclared plugin is a typo or a
-      // misunderstanding — rejected at compile time (this is the
-      // divergence fix: runtime defaults and type-level visibility
-      // can no longer drift apart).
+      // @ts-expect-error — "git" is opt-in and undeclared here;
+      // disabling an undeclared plugin is a typo or a misunderstanding
+      // — rejected at compile time.
       disabledPlugins: ["git"],
     });
     assert.equal(cfg.disabledPlugins?.length, 1);
@@ -674,30 +672,15 @@ describe("defineConfig: default rule + plugin names in typo-check union", () => 
     assert.equal(cfg.disabledPlugins?.length, 1);
   });
 
-  // Direct type-identity assertions. The behavioral typo tests above
-  // pin the unions transitively (a `string` regression would stop the
-  // `@ts-expect-error` directives from firing). The assertions below
-  // pin the exact literal set: dropping one default name or hand-rolling
-  // `DefaultRuleName` to a partial enumeration is a typecheck failure
-  // here even when the positive tests above happen to cover the
-  // remaining literals.
-  type _RuleUnionCheck = Equal<
-    DefaultRuleName,
-    | "no-force-push"
-    | "no-hard-reset"
-    | "no-rm-rf-slash"
-    | "no-long-running-commands"
-  >;
-  const _ruleUnionCheck: _RuleUnionCheck = true;
-  void _ruleUnionCheck;
-
-  // DEFAULT_PLUGINS is empty since the monorepo split (git plugin is
-  // opt-in), so the default plugin-name union is `never` — any
-  // `disabledPlugins` entry without a matching declared plugin is a
-  // compile error.
-  type _PluginUnionCheck = Equal<DefaultPluginName, never>;
-  const _pluginUnionCheck: _PluginUnionCheck = true;
-  void _pluginUnionCheck;
+  it("empty config: both unions collapse to never (any disable entry errors)", () => {
+    // With nothing declared there is nothing to disable — the
+    // headline type-level guarantee of the cut.
+    const cfg = defineConfig({
+      // @ts-expect-error — no rules declared at all.
+      disabledRules: ["no-force-push"],
+    });
+    assert.equal(cfg.disabledRules?.length, 1);
+  });
 });
 
 describe("defineConfig: cross-module plugin typo detection (F2 regression fence)", () => {
@@ -928,7 +911,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
     assert.equal(cfg.exemptions, undefined);
   });
 
-  it("exemptions[].rule accepts registered rule names (plugin + user + default)", () => {
+  it("exemptions[].rule accepts registered rule names (plugins + inline)", () => {
     const plugin = {
       name: "p",
       rules: [
@@ -942,7 +925,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
       ],
     } as const satisfies Plugin;
     const cfg = defineConfig({
-      plugins: [plugin],
+      plugins: [plugin, shippedGitPlugin],
       rules: [
         {
           name: "user-rule",
@@ -955,7 +938,8 @@ describe("defineConfig: exemption typing + runtime copy", () => {
       exemptions: [
         { rule: "plugin-rule", when: { cwd: "/v/" } },
         { rule: "user-rule", when: { cwd: "/v/" } },
-        // Default rule names are part of the union too.
+        // Shipped rule names are part of the union once their plugin
+        // is declared.
         { rule: "no-force-push", when: { cwd: "/v/" } },
       ],
     });
@@ -1217,10 +1201,13 @@ describe("defineConfig: plugin-shipped exemption targets (issue #29)", () => {
   > = true;
   void _pinHappy;
 
-  it("accepts targets that resolve to default, inline, or self-shipped rules", () => {
-    // "no-force-push" is an engine default — always in the universe.
-    const cfgDefault = defineConfig({ plugins: [napkinDefault] });
-    assert.equal(cfgDefault.plugins?.length, 1);
+  it("accepts targets that resolve to a declared plugin's, inline, or self-shipped rules", () => {
+    // "no-force-push" ships with the git plugin (#72) — the target
+    // resolves only because the git plugin is listed alongside.
+    const cfgDefault = defineConfig({
+      plugins: [napkinDefault, shippedGitPlugin],
+    });
+    assert.equal(cfgDefault.plugins?.length, 2);
     // "user-inline-rule" is registered as an inline rule in this config.
     const cfgInline = defineConfig({
       plugins: [napkinInlineTarget],

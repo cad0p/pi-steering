@@ -44,6 +44,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import type {
   ExtensionAPI,
   ToolCallEvent,
@@ -227,7 +228,6 @@ describe("session_start: throws on diagnostics", () => {
       tmpHome,
       `const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
-				disableDefaults: true,
 				plugins: [
 					{ name: "pa", trackers: { branch: t } },
 					{ name: "pb", trackers: { branch: t } },
@@ -258,7 +258,6 @@ describe("session_start: throws on diagnostics", () => {
       tmpHome,
       `const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
-				disableDefaults: true,
 				plugins: [
 					{ name: "pa", trackers: { events: t } },
 				],
@@ -276,7 +275,6 @@ describe("session_start: throws on diagnostics", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				plugins: [
 					{
 						name: "pa",
@@ -302,7 +300,6 @@ describe("session_start: throws on diagnostics", () => {
       tmpHome,
       `const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
-				disableDefaults: true,
 				failOnWarnings: false,
 				plugins: [
 					{ name: "pa", trackers: { branch: t } },
@@ -334,7 +331,6 @@ describe("session_start: throws on diagnostics", () => {
     writeFileSync(
       join(tmpHome, ".pi", "agent", "steering.ts"),
       `export default {
-				disableDefaults: true,
 				plugins: [{ name: "shared" }],
 			};`,
       "utf8",
@@ -374,7 +370,6 @@ describe("session_start: throws on diagnostics", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				plugins: [
 					{
 						name: "pa",
@@ -399,7 +394,6 @@ describe("session_start: throws on diagnostics", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				plugins: [
 					{
 						name: "pa",
@@ -428,7 +422,6 @@ describe("session_start: throws on diagnostics", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				exemptions: [
 					{ rule: "no-such-rule", when: { cwd: "/vault/" } },
 				],
@@ -446,7 +439,6 @@ describe("session_start: throws on diagnostics", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				failOnWarnings: false,
 				exemptions: [
 					{ rule: "no-such-rule", when: { cwd: "/vault/" } },
@@ -475,7 +467,6 @@ describe("session_start: throws on diagnostics", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				failOnWarnings: false,
 				plugins: [
 					{
@@ -499,7 +490,6 @@ describe("session_start: throws on diagnostics", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				plugins: [
 					{
 						name: "pa",
@@ -546,7 +536,6 @@ describe("session_start: does NOT throw", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				failOnWarnings: false,
 				plugins: [
 					{
@@ -596,7 +585,6 @@ describe("session_start: does NOT throw", () => {
     writeFileSync(
       join(tmpHome, ".pi", "agent", "steering.ts"),
       `export default {
-				disableDefaults: true,
 				disabledPlugins: ["shared"],
 				plugins: [{ name: "shared" }],
 			};`,
@@ -619,7 +607,6 @@ describe("session_start: does NOT throw", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				plugins: [
 					{
 						name: "pa",
@@ -655,7 +642,6 @@ describe("session_start: aggregated render snapshot", () => {
       tmpHome,
       `const t = { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" };
 			export default {
-				disableDefaults: true,
 				plugins: [
 					{
 						name: "plugin-a",
@@ -769,7 +755,6 @@ describe("session_start: notify content pin", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				plugins: [
 					{
 						name: "pa",
@@ -867,7 +852,6 @@ describe("session_start: unsteered → reload recovery", () => {
     writeSteeringSingleFileConfig(
       tmpHome,
       `export default {
-				disableDefaults: true,
 				exemptions: [{ rule: "no-such-rule", when: { cwd: "/vault/" } }],
 			};`,
     );
@@ -887,9 +871,17 @@ describe("session_start: unsteered → reload recovery", () => {
       "failed build must leave the session unsteered",
     );
 
-    // Fix the config, then simulate `/reload`: a FRESH instance
+    // Fix the config (declare the git plugin so no-force-push is
+    // active post-#72), then simulate `/reload`: a FRESH instance
     // whose session_start fires with reason "reload".
-    writeSteeringSingleFileConfig(tmpHome, "export default {};");
+    const gitPluginPath = fileURLToPath(
+      new URL("./plugins/git/index.ts", import.meta.url),
+    );
+    writeSteeringSingleFileConfig(
+      tmpHome,
+      `import gitPlugin from ${JSON.stringify(gitPluginPath)};
+export default { plugins: [gitPlugin] };`,
+    );
     const mock2 = makeMockPi();
     await register(mock2.api as ExtensionAPI);
     await fireSessionStart(mock2, tmpHome, "reload");
@@ -967,7 +959,14 @@ describe("session_start: pre-build gating", () => {
   useSessionStartScratchHome();
 
   it("tool_call gated on built runtime; second session_start no-op; agent_start before build fine", async () => {
-    writeSteeringSingleFileConfig(tmpHome, "export default {};");
+    const gitPluginPath = fileURLToPath(
+      new URL("./plugins/git/index.ts", import.meta.url),
+    );
+    writeSteeringSingleFileConfig(
+      tmpHome,
+      `import gitPlugin from ${JSON.stringify(gitPluginPath)};
+export default { plugins: [gitPlugin] };`,
+    );
     const mock = makeMockPi();
     await register(mock.api as ExtensionAPI);
 
@@ -1005,7 +1004,7 @@ describe("session_start: deleted ctx.cwd edge", () => {
   useSessionStartScratchHome();
   captureErrors();
 
-  it("deleted ctx.cwd loads cleanly — no throw, no notify; defaults still apply", async () => {
+  it("deleted ctx.cwd loads cleanly — no throw, no notify; declared rails only", async () => {
     // A session whose directory was deleted: the loader's existsSync
     // gates (loader.ts) make the project + global layer discovery a
     // clean no-op — no config found, no diagnostics, no crash.
@@ -1018,11 +1017,10 @@ describe("session_start: deleted ctx.cwd edge", () => {
     assert.equal(notifications.messages.length, 0, "notify must NOT fire");
     assert.equal(capturedErrors.length, 0, "console.error must NOT fire");
 
-    // No config under the missing cwd → the merged config is the
-    // default ruleset; the session is still steered (defaults are
-    // injected, NOT skipped).
+    // No config under the missing cwd → an empty merged config.
+    // Post-#72 nothing is engine-injected, so former default rails
+    // stay inert; the load itself stays clean either way.
     const result = await fireBashToolCall(mock, "git push --force", missing);
-    assert.equal(result?.block, true);
-    assert.match(result?.reason ?? "", /no-force-push/);
+    assert.equal(result, undefined);
   });
 });

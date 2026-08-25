@@ -103,10 +103,10 @@ import { hasStagedChanges } from "./predicates/has-staged-changes.ts";
 import { isClean } from "./predicates/is-clean.ts";
 import { remote } from "./predicates/remote.ts";
 import { upstream } from "./predicates/upstream.ts";
-import { noMainCommit } from "./rules/no-main-commit.ts";
-import { noMainCommitGithub } from "./rules/no-main-commit-github.ts";
 import { noForcePush } from "./rules/no-force-push.ts";
 import { noHardReset } from "./rules/no-hard-reset.ts";
+import { noMainCommit } from "./rules/no-main-commit.ts";
+import { noMainCommitGithub } from "./rules/no-main-commit-github.ts";
 import { branchTracker } from "./trackers/branch-tracker.ts";
 import { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
 
@@ -318,9 +318,4 @@ export {
   NO_CHECKOUT_IN_CHAIN,
 } from "./trackers/branch-tracker.ts";
 export { gitCwdExtensions } from "./trackers/cwd-extensions.ts";
-export {
-  noForcePush,
-  noHardReset,
-  noMainCommit,
-  noMainCommitGithub,
-};
+export { noForcePush, noHardReset, noMainCommit, noMainCommitGithub };

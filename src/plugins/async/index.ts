@@ -38,9 +38,7 @@ import { noLongRunningCommands } from "./rules/no-long-running-commands.ts";
 /**
  * Rules shipped by the async plugin.
  */
-export const rules = [
-  noLongRunningCommands,
-] as const satisfies readonly Rule[];
+export const rules = [noLongRunningCommands] as const satisfies readonly Rule[];
 
 /**
  * The async plugin. Default export so `import asyncPlugin from

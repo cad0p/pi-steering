@@ -161,8 +161,6 @@ export {
 } from "@cad0p/unbash-walker";
 // JSON compat — convert v1 JSON configs to v2 TS configs.
 export { FromJSONError, fromJSON } from "./compat.ts";
-// Defaults — bundled rule and plugin starter set.
-export { DEFAULT_PLUGINS, DEFAULT_RULES } from "./defaults.ts";
 export type { DefineConfigInput } from "./define-config.ts";
 // Config helper (preferred entry point).
 export { defineConfig } from "./define-config.ts";

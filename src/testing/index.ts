@@ -49,7 +49,6 @@ import type {
   ToolCallEvent,
   ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_PLUGINS, DEFAULT_RULES } from "../defaults.ts";
 import {
   buildEvaluator,
   EVALUATOR_BUILTIN_TRACKERS,
@@ -188,9 +187,9 @@ export interface Harness {
   readonly resolved: ResolvedPluginState;
   /**
    * Every {@link SteeringDiagnostic} produced while building the
-   * harness — merge-side (within-layer collisions, cross-config
-   * collisions when {@link LoadHarnessOptions.includeDefaults} is
-   * `true`) and plugin-merger-side (predicate / observer / rule /
+   * harness — merge-side (within-layer collisions, cross-bucket
+   * rule-collision warnings between inline rules and plugin-shipped
+   * rules) and plugin-merger-side (predicate / observer / rule /
    * extension-orphan / reserved-name / invalid-name diagnostics,
    * plus user-config rule and observer name validation).
    *
@@ -227,17 +226,6 @@ export interface LoadHarnessOptions {
   readonly config: SteeringConfig;
 
   /**
-   * Prepend {@link DEFAULT_PLUGINS} to `config.plugins` and
-   * {@link DEFAULT_RULES} to `config.rules` at the innermost
-   * position. Mirrors the production flag via
-   * `!config.disableDefaults`, but kept explicit here so tests can
-   * exercise default rules without editing the config under test.
-   *
-   * Default: `false`.
-   */
-  readonly includeDefaults?: boolean;
-
-  /**
    * Host to drive `exec` / `appendEntry` off. Defaults to an
    * in-memory stub whose `exec` rejects with a clear error (tests
    * needing exec must stub it explicitly) and whose `appendEntry`
@@ -253,7 +241,6 @@ export interface LoadHarnessOptions {
  */
 export function loadHarness(options: LoadHarnessOptions): Harness {
   const inputConfig = options.config;
-  const includeDefaults = options.includeDefaults ?? false;
 
   // Run the same merge that production does (single layer here, since
   // loadHarness operates on an in-memory config rather than a
@@ -263,18 +250,15 @@ export function loadHarness(options: LoadHarnessOptions): Harness {
   // `tracker-name-collision` flagged by `buildConfig` is not also
   // re-flagged by `resolvePlugins`. The diagnostics surface within-
   // layer rule-name and observer-name collisions, plus tracker-name
-  // collisions and the cross-config plugin-name collisions that
-  // `includeDefaults: true` can introduce against DEFAULT_PLUGINS.
-  const defaults: SteeringConfig | undefined = includeDefaults
-    ? { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS }
-    : undefined;
+  // collisions and cross-bucket rule-collision warnings between
+  // inline rules and declared plugins' shipped rules.
   const {
     merged: mergedConfig,
     resolved,
     diagnostics,
-  } = runMergerPipeline([inputConfig], defaults, EVALUATOR_BUILTIN_TRACKERS);
+  } = runMergerPipeline([inputConfig], EVALUATOR_BUILTIN_TRACKERS);
 
-  // Apply `config.disabledRules` to user + default rules. Plugin-shipped
+  // Apply `config.disabledRules` to user rules. Plugin-shipped
   // rules are filtered inside `resolvePlugins`. Mirrors
   // `buildSessionRuntime`.
   const disabled = new Set(mergedConfig.disabledRules ?? []);

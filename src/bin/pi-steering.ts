@@ -235,8 +235,10 @@ async function runList(args: string[]): Promise<number> {
   }
 
   // Load project layer (cwd) + global layer (agent dir) and merge.
-  // CLI deliberately omits DEFAULT_PLUGINS / DEFAULT_RULES; runtime
-  // injects them. The project layer is gated on pi's project-trust
+  // The CLI loads exactly what the configs declare — there are no
+  // engine-injected default plugins or rules (issue #72), so `list`
+  // output is fully truthful (every rule has a declared provenance).
+  // The project layer is gated on pi's project-trust
   // formula (mirrored in `resolveCliProjectTrust` below); info-class
   // diagnostics (the trust skip) flow through `recordDiagnostic` to
   // stderr like every other severity.
@@ -482,7 +484,6 @@ function runCliMergeWithInfoCapture(layers: readonly SteeringConfig[]): {
   try {
     const { merged, resolved, diagnostics } = runMergerPipeline(
       layers,
-      undefined,
       EVALUATOR_BUILTIN_TRACKERS,
     );
     // Skipped on merge short-circuit; without resolved we can't
@@ -556,6 +557,8 @@ EXAMPLES
  */
 const KNOWN_PLUGIN_SOURCES: Record<string, string> = {
   git: "pi-steering/plugins/git",
+  rm: "pi-steering/plugins/rm",
+  async: "pi-steering/plugins/async",
 };
 
 /**
@@ -568,7 +571,6 @@ const KNOWN_PLUGIN_SOURCES: Record<string, string> = {
  *     userObservers: [{ name, writes }],
  *     disabled: { rules: [...], plugins: [...] },
  *     defaultNoOverride: bool|null,
- *     disableDefaults: bool|null,
  *     projectLayerTrusted: bool
  *   }
  */
@@ -606,7 +608,6 @@ function renderListJSON(
       plugins: config.disabledPlugins ?? [],
     },
     defaultNoOverride: config.defaultNoOverride ?? null,
-    disableDefaults: config.disableDefaults ?? null,
     projectLayerTrusted,
   };
 }
@@ -619,7 +620,6 @@ function emptyListJSON(projectLayerTrusted: boolean): unknown {
     exemptions: [],
     disabled: { rules: [], plugins: [] },
     defaultNoOverride: null,
-    disableDefaults: null,
     projectLayerTrusted,
   };
 }

@@ -578,7 +578,7 @@ function mergeExemptions(
  */
 export function mergeBool(
   layers: readonly SteeringConfig[],
-  key: "defaultNoOverride" | "disableDefaults" | "failOnWarnings",
+  key: "defaultNoOverride" | "failOnWarnings",
 ): boolean | undefined {
   for (const layer of layers) {
     const v = layer[key];
@@ -627,9 +627,9 @@ function detectTrackerNameCollisions(
 
 /**
  * Merge `layers` (inner-first) into a single effective
- * {@link SteeringConfig}. An optional `defaults` config is treated as
- * the OUTERMOST layer — its fields apply when no real layer specifies
- * them, otherwise real layers override.
+ * {@link SteeringConfig}. There are no engine-injected defaults
+ * (issue #72): the merged config contains exactly what the layers
+ * declare.
  *
  * Cross-layer plugin name collisions, within-layer rule + observer
  * name collisions, and cross-layer tracker name collisions surface
@@ -640,12 +640,8 @@ function detectTrackerNameCollisions(
  */
 export function buildConfig(
   layers: readonly SteeringConfig[],
-  defaults?: SteeringConfig,
 ): { config: SteeringConfig; diagnostics: SteeringDiagnostic[] } {
-  // Build the effective inner-first layer list. `defaults` goes at
-  // the END (outermost position) so inner real layers override it.
   const effective: SteeringConfig[] = [...layers];
-  if (defaults !== undefined) effective.push(defaults);
 
   const diagnostics: SteeringDiagnostic[] = [];
 
@@ -679,8 +675,6 @@ export function buildConfig(
   if (defaultNoOverride !== undefined) {
     out.defaultNoOverride = defaultNoOverride;
   }
-  const disableDefaults = mergeBool(effective, "disableDefaults");
-  if (disableDefaults !== undefined) out.disableDefaults = disableDefaults;
   const failOnWarnings = mergeBool(effective, "failOnWarnings");
   if (failOnWarnings !== undefined) out.failOnWarnings = failOnWarnings;
 
@@ -710,7 +704,6 @@ export function buildConfig(
  */
 export async function loadSteeringConfig(
   cwd: string,
-  defaults?: SteeringConfig,
   opts?: LoadConfigsOptions,
 ): Promise<{ config: SteeringConfig; diagnostics: SteeringDiagnostic[] }> {
   const { layers, diagnostics: loaderDiagnostics } = await loadConfigs(
@@ -719,7 +712,6 @@ export async function loadSteeringConfig(
   );
   const { merged, diagnostics: mergeAndResolveDiagnostics } = runMergerPipeline(
     layers,
-    defaults,
     EVALUATOR_BUILTIN_TRACKERS,
   );
   return {

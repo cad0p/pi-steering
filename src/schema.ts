@@ -1894,24 +1894,28 @@ export interface SteeringConfig {
    * Rules to disable by name. Additive union across layers.
    *
    * Past-participle form (`disabledRules`) reads as a predicate on
-   * state - "these are the rules that are disabled." Distinct from
-   * the imperative flag {@link disableDefaults} (action: disable
-   * the default plugins + rules).
+   * state - "these are the rules that are disabled." There is no
+   * engine-wide kill switch: rules only exist when their shipping
+   * plugin is declared (or they're authored inline), so scoping a
+   * disable to the rule name is always sufficient.
    *
    * Disabling a rule is by-design behavior, not a configuration
    * issue — it does NOT contribute to the diagnostic stream. See
    * {@link SteeringDiagnosticKind} for the by-design-vs-issue carveout.
    *
    * **Navigation note:** these are string literals projected from
-   * `DEFAULT_RULES` (engine defaults), `plugin.rules[*].name`, and
-   * inline `rules[*].name`. Ctrl+Click on a literal jumps to the
-   * `AllRuleNames` union, NOT the rule's source — TypeScript-language
-   * limitation on string-literal union members. To inspect a shipped
-   * default's `reason` / `pattern`, import `DEFAULT_RULES` directly:
+   * `plugin.rules[*].name` and inline `rules[*].name`. Ctrl+Click on a
+   * literal jumps to the `AllRuleNames` union, NOT the rule's source —
+   * TypeScript-language limitation on string-literal union members. To
+   * inspect a shipped rule's `reason` / `pattern`, open its plugin
+   * module directly (e.g. `@cad0p/pi-steering/plugins/git` for
+   * `no-force-push` / `no-hard-reset`, `.../plugins/rm` for
+   * `no-rm-rf-slash`, `.../plugins/async` for
+   * `no-long-running-commands`) and hover the exported rule binding:
    *
    * ```ts
-   * import { DEFAULT_RULES } from "@cad0p/pi-steering";
-   * // hover DEFAULT_RULES[0] to see the rule body
+   * import { noForcePush } from "@cad0p/pi-steering/plugins/git";
+   * // hover noForcePush to see the rule body
    * ```
    */
   disabledRules?: readonly string[];
@@ -1928,26 +1932,15 @@ export interface SteeringConfig {
    * **Navigation note:** same TypeScript-language limitation as
    * {@link disabledRules} — Ctrl+Click on a string literal jumps to
    * the `AllPluginNames` union, not the plugin's source. To inspect a
-   * shipped default plugin, import `DEFAULT_PLUGINS` directly:
+   * shipped plugin, open its subpath module directly (e.g.
+   * `@cad0p/pi-steering/plugins/git`):
    *
    * ```ts
-   * import { DEFAULT_PLUGINS } from "@cad0p/pi-steering";
-   * // hover DEFAULT_PLUGINS[0] to see the plugin body
+   * import gitPlugin from "@cad0p/pi-steering/plugins/git";
+   * // hover gitPlugin to see the plugin body
    * ```
    */
   disabledPlugins?: readonly string[];
-
-  /**
-   * Skip the package's built-in default plugins + default rules.
-   * Handy for isolated test harnesses or strict minimal configs.
-   *
-   * Kept in imperative form (action flag: "disable the defaults")
-   * to distinguish shape at a glance from the past-participle
-   * {@link disabledRules} / {@link disabledPlugins} lists.
-   *
-   * Layer merge: inner (project) layer wins when specified.
-   */
-  disableDefaults?: boolean;
 
   /**
    * Strict-mode opt-out. When `true` (default), any warning-class
@@ -1961,8 +1954,8 @@ export interface SteeringConfig {
    * (e.g. tracker name collision, reserved name violation) — the
    * engine cannot operate safely with those issues present.
    *
-   * Layer merge: inner (project) layer wins when specified, identical to
-   * {@link disableDefaults}.
+   * Layer merge: inner (project) layer wins when specified, identical
+   * to the other inner-wins boolean fields (`defaultNoOverride`).
    *
    * Prior art: Rollup's `failAfterWarnings`, Maven's `failOnWarning`.
    */
@@ -2138,8 +2131,8 @@ export type SteeringDiagnosticKind =
   | "extension-orphan"
   /**
    * An exemption targets a rule name that doesn't exist in the final
-   * merged rule universe (merged rules + plugin-shipped rules +
-   * defaults, honoring `disableDefaults`). The carve-out can never
+   * merged rule universe (merged rules + plugin-shipped rules). The
+   * carve-out can never
    * match anything and is dropped. Two-tier severity: plugin-shipped
    * orphans are error-class (broken plugin/config contract — the
    * runtime always throws regardless of `failOnWarnings`, the CLI

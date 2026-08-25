@@ -32,7 +32,6 @@
  * loud via pi's `Extension "..." error:` rendering.
  */
 
-import { DEFAULT_PLUGINS, DEFAULT_RULES } from "../defaults.ts";
 import {
   buildEvaluator,
   EVALUATOR_BUILTIN_TRACKERS,
@@ -43,7 +42,6 @@ import {
   buildConfig,
   type LoadConfigsOptions,
   loadConfigs,
-  mergeBool,
 } from "../loader.ts";
 import {
   buildObserverDispatcher,
@@ -56,7 +54,6 @@ import {
 } from "../plugin-merger.ts";
 import type {
   Exemption,
-  Plugin,
   SteeringConfig,
   SteeringDiagnostic,
 } from "../schema.ts";
@@ -87,8 +84,7 @@ import { finalizePluginState } from "./finalize-plugin-state.ts";
  * Universe formula (single source of truth for runtime, CLI, and
  * `loadHarness` — all three funnel through `runMergerPipeline`):
  *
- *   `merged.rules` ∪ rule names across `merged.plugins` ∪
- *   (disableDefaults ? ∅ : DEFAULT_RULES ∪ DEFAULT_PLUGINS rule names)
+ *   `merged.rules` ∪ rule names across `merged.plugins`
  *
  * `merged.plugins` intentionally includes DISABLED plugins (loader's
  * `mergePlugins` keeps them; `resolvePlugins` filters them from
@@ -96,30 +92,16 @@ import { finalizePluginState } from "./finalize-plugin-state.ts";
  * in the universe, so an exemption targeting it is inert, silent, and
  * NOT orphaned (by-design disable, consistent with the disabled-rule
  * `console.info` breadcrumb). `resolved.rules` is redundant under
- * this formula. Defaults are included unless `disableDefaults` is
- * true — computed via `mergeBool(layers, "disableDefaults")`, NOT
- * `defaults === undefined`, because the CLI passes `undefined`
- * defaults while `disableDefaults` is false.
+ * this formula. There are no engine-injected default rules (issue
+ * #72): the universe is exactly what the config declares.
  */
 function detectExemptionOrphans(
   merged: SteeringConfig,
-  layers: readonly SteeringConfig[],
 ): SteeringDiagnostic[] {
   const universe = new Set<string>();
   for (const rule of merged.rules ?? []) universe.add(rule.name);
   for (const plugin of merged.plugins ?? []) {
     for (const rule of plugin.rules ?? []) universe.add(rule.name);
-  }
-  const disableDefaults = mergeBool(layers, "disableDefaults") === true;
-  if (!disableDefaults) {
-    for (const rule of DEFAULT_RULES) universe.add(rule.name);
-    // `DEFAULT_PLUGINS` is `[] as const` today — the cast is required
-    // because iterating a literal empty tuple types the element as
-    // `never`. Count-locked (see defaults.test.ts); the loop is the
-    // latent-parity guard for a future default plugin shipping rules.
-    for (const plugin of DEFAULT_PLUGINS as readonly Plugin[]) {
-      for (const rule of plugin.rules ?? []) universe.add(rule.name);
-    }
   }
 
   const diagnostics: SteeringDiagnostic[] = [];
@@ -165,19 +147,16 @@ function detectExemptionOrphans(
  */
 export function runMergerPipeline(
   layers: readonly SteeringConfig[],
-  defaults: SteeringConfig | undefined,
   builtinTrackers: readonly string[],
 ): {
   merged: SteeringConfig;
   resolved: ResolvedPluginState | null;
   diagnostics: SteeringDiagnostic[];
 } {
-  const { config: merged, diagnostics: mergeDiagnostics } = buildConfig(
-    layers,
-    defaults,
-  );
+  const { config: merged, diagnostics: mergeDiagnostics } =
+    buildConfig(layers);
   const userConfigNameDiagnostics = validateUserConfigNames(layers);
-  const exemptionOrphanDiagnostics = detectExemptionOrphans(merged, layers);
+  const exemptionOrphanDiagnostics = detectExemptionOrphans(merged);
   if (mergeDiagnostics.some((d) => d.type === "error")) {
     return {
       merged,
@@ -239,12 +218,11 @@ export function formatSingleLineDiagnostic(d: SteeringDiagnostic): string {
 
 /**
  * Build the per-session evaluator + observer dispatcher from the walk-
- * up config rooted at `cwd`. Honors `disableDefaults` via inner-wins
- * peek before injecting `DEFAULT_*`. Throws on any error-class
- * diagnostic and on warning-class diagnostics when
- * `failOnWarnings !== false`; otherwise emits surviving warnings via
- * `console.warn`. See {@link runMergerPipeline} for the merge contract
- * and `finalizePluginState` for observer-drop.
+ * up config rooted at `cwd`. Throws on any error-class diagnostic and
+ * on warning-class diagnostics when `failOnWarnings !== false`;
+ * otherwise emits surviving warnings via `console.warn`. See {@link
+ * runMergerPipeline} for the merge contract and `finalizePluginState`
+ * for observer-drop.
  *
  * `opts` is forwarded to {@link loadConfigs} — `projectLayerTrusted:
  * false` gates the project layer behind pi's resolved project-trust
@@ -280,16 +258,11 @@ export async function buildSessionRuntime(
     if (d.type === "info") console.info(formatSingleLineDiagnostic(d));
   }
 
-  const disableDefaults = mergeBool(rawLayers, "disableDefaults") === true;
-  const defaults: SteeringConfig | undefined = disableDefaults
-    ? undefined
-    : { rules: DEFAULT_RULES, plugins: DEFAULT_PLUGINS };
-
   const {
     merged,
     resolved,
     diagnostics: mergeAndResolveDiagnostics,
-  } = runMergerPipeline(rawLayers, defaults, EVALUATOR_BUILTIN_TRACKERS);
+  } = runMergerPipeline(rawLayers, EVALUATOR_BUILTIN_TRACKERS);
   aggregated.push(...mergeAndResolveDiagnostics);
 
   const failOnWarnings = merged.failOnWarnings;

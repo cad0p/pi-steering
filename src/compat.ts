@@ -81,7 +81,6 @@ export function fromJSON(json: unknown): SteeringConfig {
     "disablePlugins",
     "disabledPlugins",
     "disabledRules",
-    "disableDefaults",
   ] as const) {
     if (forbidden in json) {
       throw new FromJSONError(

@@ -37,7 +37,6 @@
  * is "use via defineConfig".
  */
 
-import type { DEFAULT_PLUGINS, DEFAULT_RULES } from "./defaults.ts";
 import type {
   BuiltInWhenLeavesOuter,
   Exemption,
@@ -122,49 +121,25 @@ export type AllObserverNames<
 > = FromPluginField<P, "observers", "name"> | ProjectField<Inline, "name">;
 
 // ---------------------------------------------------------------------------
-// Default-rule + default-plugin name unions
-// ---------------------------------------------------------------------------
-
-/**
- * Union of {@link DEFAULT_RULES} `name` literals — the names of rules
- * shipped by the engine itself. Folded into {@link AllRuleNames}; the
- * live list is the `name` field of each entry in {@link DEFAULT_RULES}.
- *
- * Relies on {@link DEFAULT_RULES} being authored as
- * `as const satisfies readonly Rule[]` so the literal `name` values
- * survive through the array — a bare `Rule[]` annotation widens to
- * `string` and collapses this union.
- */
-export type DefaultRuleName = (typeof DEFAULT_RULES)[number]["name"];
-
-/**
- * Union of {@link DEFAULT_PLUGINS} `name` literals. Folded into
- * {@link AllPluginNames} so `disabledPlugins` typechecks against
- * shipped defaults without a cast.
- */
-export type DefaultPluginName = (typeof DEFAULT_PLUGINS)[number]["name"];
-
-// ---------------------------------------------------------------------------
 // AllPluginNames — union of plugin `.name` literals across loaded plugins.
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the union of plugin names registered in the `plugins` tuple,
- * **plus** the names of {@link DEFAULT_PLUGINS} (those plugins ship
- * pre-loaded by the engine and `disabledPlugins` honors them at
- * runtime).
+ * Extract the union of plugin names registered in the `plugins` tuple.
  *
  * Used to constrain {@link SteeringConfig.disabledPlugins} so typos
- * surface as compile errors. Default-plugin names are always part of
- * this union, even when the user passes no `plugins` themselves.
+ * surface as compile errors. There are no engine-injected default
+ * plugins (issue #72): a name only enters this union by declaring the
+ * shipping plugin in `plugins`, which is exactly the runtime
+ * registration contract — type-level visibility and runtime state
+ * cannot diverge.
  *
- * Falls back to just {@link DefaultPluginName} when no user plugins
- * are registered — typing `disabledPlugins` against an empty
- * user-tuple still accepts the engine defaults.
+ * Falls back to `never` when no plugins are registered — ANY
+ * `disabledPlugins` entry without a declared plugin is a compile
+ * error.
  */
 export type AllPluginNames<P extends readonly Plugin[]> =
-  | DefaultPluginName
-  | ProjectField<P, "name">;
+  ProjectField<P, "name">;
 
 // ---------------------------------------------------------------------------
 // AllRuleNames — union of rule `.name` literals across plugins + user rules.
@@ -172,25 +147,22 @@ export type AllPluginNames<P extends readonly Plugin[]> =
 
 /**
  * Extract the union of rule names across:
- *   - every {@link DEFAULT_RULES} entry (engine-shipped defaults),
- *   - every plugin's `rules: Rule[]` array, AND
+ *   - every declared plugin's `rules: Rule[]` array, AND
  *   - the top-level inline `rules: Rule[]` array.
  *
  * Used to constrain {@link SteeringConfig.disabledRules} so typos
- * surface as compile errors. Default rule names are always part of
- * this union — disabling a default (`disabledRules: ["no-force-push"]`)
- * typechecks the same as disabling a user or plugin rule.
+ * surface as compile errors. There are no engine-shipped default
+ * rules (issue #72): a name only enters this union via a declared
+ * plugin or an inline rule — disabling `no-force-push` typechecks iff
+ * the git plugin (its shipping plugin) is declared.
  *
- * Falls back to just {@link DefaultRuleName} when no plugin or user
- * rules are registered.
+ * Falls back to `never` when no plugin or user rules are registered —
+ * any `disabledRules` entry is then a compile error.
  */
 export type AllRuleNames<
   P extends readonly Plugin[],
   R extends readonly Rule[],
-> =
-  | DefaultRuleName
-  | FromPluginField<P, "rules", "name">
-  | ProjectField<R, "name">;
+> = FromPluginField<P, "rules", "name"> | ProjectField<R, "name">;
 
 // ---------------------------------------------------------------------------
 // PluginExemptionsCheck — plugin-shipped exemption targets vs. rule names.
@@ -257,9 +229,6 @@ type PluginExemptionTargets<P extends readonly Plugin[]> = P extends readonly [
  *     layers' rule universes before the `detectExemptionOrphans`
  *     backstop runs. Keep a plugin and its target's shipping plugin
  *     in the same layer.
- *   - `disableDefaults: true` is a blind spot shared with the
- *     existing user-exemption typing (`AllRuleNames` always includes
- *     default rule names).
  *
  * On failure, the `plugins` slot of the config parameter gains a
  * synthetic per-element property `__steeringExemption` carrying the
@@ -353,7 +322,7 @@ export interface DefineConfigInput<
   disabledPlugins?: readonly AllPluginNames<P>[];
   /**
    * Guard-rule carve-outs, typed so `rule` must name a real rule
-   * (default rules, plugin rules, or inline rules — same union as
+   * (plugin rules or inline rules — same union as
    * {@link disabledRules}) and `when.missing.event` narrows against
    * the config's `writes` union. See {@link Exemption} for the
    * accumulation + fail-closed semantics.
@@ -475,9 +444,6 @@ export function defineConfig<
   }
   if (config.disabledPlugins !== undefined) {
     out.disabledPlugins = [...config.disabledPlugins];
-  }
-  if (config.disableDefaults !== undefined) {
-    out.disableDefaults = config.disableDefaults;
   }
   if (config.failOnWarnings !== undefined) {
     out.failOnWarnings = config.failOnWarnings;

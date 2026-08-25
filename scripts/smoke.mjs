@@ -23,7 +23,13 @@
 //   node scripts/smoke.mjs /path/to/steering-dir    # + user rules from that dir's .pi/steering/
 //                                                     (v2 TS config: <dir>/.pi/steering/index.ts)
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
@@ -187,8 +193,15 @@ async function main() {
     // resolve bare package names. The commit-on-main pair is disabled
     // because this harness has no pi.exec stub (the branch predicate
     // would fail-closed on every `git commit`).
-    const distPlugin = (name) =>
-      join(repoRoot, "dist", "plugins", name, "index.js");
+    const distPlugin = (name) => {
+      const entry = join(repoRoot, "dist", "plugins", name, "index.js");
+      if (!existsSync(entry)) {
+        throw new Error(
+          `smoke harness: built plugin entry not found at ${entry} — run \`pnpm build\` first`,
+        );
+      }
+      return entry;
+    };
     const userRuleConfig = `import gitPlugin from ${JSON.stringify(distPlugin("git"))};
 import rmPlugin from ${JSON.stringify(distPlugin("rm"))};
 import asyncPlugin from ${JSON.stringify(distPlugin("async"))};

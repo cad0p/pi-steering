@@ -521,6 +521,47 @@ describe("session_start: throws on diagnostics", () => {
       /duplicate rule "dup"/,
     ]);
   });
+
+  it("throws on inline-user-rule vs plugin-shipped-rule collision", async () => {
+    // The cross-bucket variant of the test above: the colliding name
+    // comes from the user's inline `rules:` (not another plugin).
+    // User rules evaluate first, so the plugin's copy is dropped with
+    // a warning-class `rule-collision` diagnostic — this pins that
+    // the diagnostic survives aggregation into buildSessionRuntime's
+    // warning path at session-start level, not just at unit level.
+    writeSteeringSingleFileConfig(
+      tmpHome,
+      `export default {
+				rules: [
+					{
+						name: "dup",
+						tool: "bash",
+						field: "command",
+						pattern: /^never-user$/,
+						reason: "inline user rule",
+					},
+				],
+				plugins: [
+					{
+						name: "pa",
+						rules: [{
+							name: "dup",
+							tool: "bash",
+							field: "command",
+							pattern: /^never-plugin$/,
+							reason: "from pa",
+						}],
+					},
+				],
+			};`,
+    );
+    const mock = makeMockPi();
+    await register(mock.api as ExtensionAPI);
+    await expectSessionStartThrow(mock, tmpHome, [
+      /\[warning\]/,
+      /rule-collision|duplicate rule "dup" — the user-config rule \(kept\)/,
+    ]);
+  });
 });
 
 /* -------------------------------------------------------------------------- */

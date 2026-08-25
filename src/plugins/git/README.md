@@ -4,18 +4,18 @@ Git plugin for [pi-steering](../../../README.md) — branch
 awareness, upstream checks, and git-specific cwd tracking on top of
 the core steering engine.
 
-> **Opt-in since the v0.1.x monorepo split.** This plugin is NOT
-> registered automatically: `DEFAULT_PLUGINS` is empty. Declare it via
-> `plugins: [gitPlugin]` (import from `pi-steering/plugins/git`) to get
-> the predicates, rules, tracker, and cwd extensions — see
-> [Usage](#usage) below.
+> **Opt-in.** This plugin is NOT registered automatically — nothing is
+> since issue #72 (there are no engine-injected default rules or
+> plugins). Declare it via `plugins: [gitPlugin]` (import from
+> `@cad0p/pi-steering/plugins/git`) to get the predicates, rules,
+> tracker, and cwd extensions — see [Usage](#usage) below.
 
 ## What it ships
 
 | Surface | Names | Purpose |
 |---|---|---|
 | Predicates | `branch`, `upstream`, `commitsAhead`, `hasStagedChanges`, `isClean`, `remote` | New `when.<key>` slots for rules |
-| Rules | `no-main-commit`, `no-main-commit-github` | Block direct commits to protected branches; the `-github` variant emits PR-flow guidance on github.com clones |
+| Rules | `no-main-commit`, `no-main-commit-github`, `no-force-push`, `no-hard-reset` | Block direct commits to protected branches (`-github` variant emits PR-flow guidance); block force pushes (sealed, #65) and hard resets |
 | Trackers | `branch` | Walker-threaded branch state (`git checkout X` advances) |
 | Tracker extensions | `cwd.git` | `--git-dir=` / `--work-tree=` flag parsing on top of the built-in cwd tracker |
 
@@ -45,8 +45,8 @@ export default defineConfig({
 });
 ```
 
-Explicit import still works (e.g. in tests driving `loadHarness`
-with `includeDefaults: false`):
+Explicit import still works (e.g. in tests constructing configs
+directly):
 
 ```ts
 import { defineConfig } from "@cad0p/pi-steering";
@@ -62,9 +62,8 @@ export default defineConfig({
 
 Disabling snippets declare `plugins: [gitPlugin]` first — that's what
 feeds the rule / plugin names into `defineConfig`'s generics for
-typo-checking. (Since the monorepo split, `DEFAULT_PLUGINS` is empty:
-there is no default registration to lean on, and disabling an
-undeclared plugin is a compile error.)
+typo-checking. (There is no default registration to lean on, so
+disabling an undeclared plugin is a compile error.)
 
 Keep the predicates + tracker, drop the shipped rule:
 
@@ -91,16 +90,9 @@ export default defineConfig({
 });
 ```
 
-Drop EVERYTHING shipped — `DEFAULT_RULES` (and whatever plugins
-you declared):
-
-```ts
-import { defineConfig } from "@cad0p/pi-steering";
-
-export default defineConfig({
-  disableDefaults: true,
-});
-```
+Don't want this plugin at all? Don't declare it — there is no
+engine-level kill switch (and no `rm` / `async` rails either unless
+you declare those plugins).
 
 ## Predicate reference
 

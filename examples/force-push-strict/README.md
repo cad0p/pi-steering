@@ -2,7 +2,7 @@
 
 A rule pack that blocks **every** form of `git push --force`, including `--force-with-lease`.
 
-> **Redundant since issue [#65](https://github.com/cad0p/pi-steering/issues/65).** The shipped `no-force-push` default is now *sealed*: it blocks every remote-history-rewrite form — `--force`, `--force-with-lease`, `--force-if-includes`, bundled short flags (`-uf`, `-fu`, `-nfv`), leading-`+` refspecs (`git push origin +main`), and `--mirror`. The default now covers everything this pack does, and more. The pack is kept as a **reference for the disable-and-replace idiom**: dropping a default via `disabledRules` and installing your own rule under a new name.
+> **Redundant since issue [#65](https://github.com/cad0p/pi-steering/issues/65).** The git plugin's `no-force-push` rule is *sealed*: it blocks every remote-history-rewrite form — `--force`, `--force-with-lease`, `--force-if-includes`, bundled short flags (`-uf`, `-fu`, `-nfv`), leading-`+` refspecs (`git push origin +main`), and `--mirror`. The shipped rule covers everything this pack does, and more. The pack is kept as a **reference for the disable-and-replace idiom**: dropping a shipped rule via `disabledRules` and installing your own rule under a new name (declare the shipping plugin first — since issue #72 nothing is engine-injected).
 
 ## What it enforces
 
@@ -15,22 +15,23 @@ A rule pack that blocks **every** form of `git push --force`, including `--force
 
 The pattern also handles git pre-subcommand flags (`git -C /other push --force`, `git -c key=val push -f`) and wrapper bypasses (`sh -c 'git push --force'`, `sudo xargs git push --force`, …) — all transparently, via the AST backend.
 
-## How it relates to the default
+## How it relates to the shipped rule
 
-Historically, the built-in `no-force-push` rule permitted `--force-with-lease` (the documented "safe" way to update a branch after a rebase), and this pack existed to close that carve-out for strict-history teams. Issue #65 sealed the default instead: every history-rewrite form now blocks out of the box, with a dedicated reason message.
+Historically, the built-in `no-force-push` rule permitted `--force-with-lease` (the documented "safe" way to update a branch after a rebase), and this pack existed to close that carve-out for strict-history teams. Issue #65 sealed the shipped rule instead: every history-rewrite form now blocks out of the box (once the git plugin is declared), with a dedicated reason message.
 
 What remains interesting here is the **mechanism**, not the policy:
 
-1. `disabledRules: ["no-force-push"]` turns the shipped default off.
-2. A custom rule (`no-force-push-strict`) takes its place with its own pattern and reason message.
+1. `plugins: [gitPlugin]` declares the shipping plugin (required post-#72 — no implicit rails).
+2. `disabledRules: ["no-force-push"]` turns the shipped rule off.
+3. A custom rule (`no-force-push-strict`) takes its place with its own pattern and reason message.
 
-That's the idiom to reach for whenever you want a *different* policy or block message than a default provides — including loosening one (e.g. re-allowing lease pushes behind your own narrower rule).
+That's the idiom to reach for whenever you want a *different* policy or block message than a shipped rule provides — including loosening one (e.g. re-allowing lease pushes behind your own narrower rule).
 
 ## When to use
 
 - You want a custom force-push reason message or a tweaked pattern on top of the sealed semantics
-- As a template for disable-and-replace overrides of any other default
-- Strict-history environments that pin an explicit in-repo policy file rather than relying on package defaults
+- As a template for disable-and-replace overrides of any other shipped rule
+- Strict-history environments that pin an explicit in-repo policy file rather than relying on shipped plugin rules
 
 ## Install
 
@@ -58,8 +59,10 @@ plugin-registered predicate keys (`when.<customKey>`), `when.not`,
 and `when.condition` are TypeScript-only — equivalently, any `when`
 clause member other than `when.cwd` is rejected.
 
-The `disable` entry below turns off the built-in `no-force-push`;
-the new `no-force-push-strict` rule takes its place:
+The JSON `disable` entry is the v1-era spelling of
+`disabledRules`; it migrates to `disabledRules: ["no-force-push"]`
+and turns off the git plugin's shipped rule — the new
+`no-force-push-strict` rule takes its place:
 
 ```json
 {

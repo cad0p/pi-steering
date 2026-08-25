@@ -14,7 +14,7 @@
  *
  *   1. Plugin resolution - predicates, rules, trackers, and
  *      trackerExtensions land in the resolved state.
- *   2. The migrated `no-force-push` rail (ex-DEFAULT_RULES, issue #72)
+ *   2. The migrated `no-force-push` rail (ex-engine-default, issue #72)
  *      still blocks basic force-push when declared explicitly.
  *   3. Branch predicate against a fake git `exec` - fires on main,
  *      allows on feature.
@@ -176,7 +176,7 @@ describe("git plugin: no-main-commit via branch predicate", () => {
     const { evaluator } = buildRuntime(
       {
         plugins: [gitPlugin],
-        rules: [], // only plugin-shipped rules, no DEFAULT_RULES to confuse
+        rules: [], // only plugin-shipped rules; nothing is engine-injected
       },
       branchExec("main"),
     );

@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Breaking
+
+- **Default rules redistributed into domain plugins** (issue [#72](https://github.com/cad0p/pi-steering/issues/72)): the engine no longer ships implicit rails. Fresh configs load with ZERO active rules. Each former default now lives in the plugin that owns its surface:
+
+  | Rule | New home |
+  | --- | --- |
+  | `no-force-push` | `@cad0p/pi-steering/plugins/git` (new export file `rules/no-force-push.ts`) |
+  | `no-hard-reset` | `@cad0p/pi-steering/plugins/git` |
+  | `no-rm-rf-slash` | NEW `@cad0p/pi-steering/plugins/rm` (keeps `noOverride: true`) |
+  | `no-long-running-commands` | NEW `@cad0p/pi-steering/plugins/async` |
+
+  Patterns and reason texts moved byte-identical. **Migration:** declare the plugins you want — `plugins: [gitPlugin, rmPlugin, asyncPlugin]`. New subpath exports `./plugins/rm` and `./plugins/async` mirror `./plugins/git`.
+- **Removed the engine-defaults machinery:**
+  - `DEFAULT_RULES` / `DEFAULT_PLUGINS` are no longer exported from the package root; import rule bindings from their plugin subpaths instead.
+  - The `disableDefaults` config field is gone. A leftover key is a **silent no-op at runtime** (the loader performs no key validation) and an excess-property compile error for `defineConfig` / `satisfies` authors. No compat shim is provided.
+  - `DefaultRuleName` / `DefaultPluginName` types are gone; `AllRuleNames` / `AllPluginNames` project from declared plugins + inline rules only, so a stale `disabledRules` / exemptions entry without its shipping plugin is now a compile error.
+  - `buildConfig(layers, defaults?)` and `loadSteeringConfig(cwd, defaults?, opts?)` lost their second parameters; embedders pass layers/options only.
+  - `loadHarness({ includeDefaults })` option removed — harness callers construct configs explicitly.
+- **Precedence delta:** defaults previously layered OUTERMOST, so an inline user rule sharing a default's name silently overrode it (inner-wins). Post-cut, that same inline rule collides with the declared plugin's rule → warning-class `rule-collision` diagnostic, user-config copy wins (first-registered — user rules evaluate before plugin rules), and the plugin's copy is dropped.
+- **`pi-steering list --format=json` contract change:** the `disableDefaults` key was removed from list output (and `emptyListJSON`); `KNOWN_PLUGIN_SOURCES` gained truthful `rm` / `async` source labels.
+
 ## [0.2.0] - 2026-08-11
 
 <!-- USER-EDITABLE SECTION START -->

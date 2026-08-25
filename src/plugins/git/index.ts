@@ -24,7 +24,7 @@
  *                             `disabledPlugins: ["git"]`.
  *                             Plus the destructive-command rails
  *                             migrated from the engine's former
- *                             `DEFAULT_RULES` (issue #72):
+ *                             default-rule bundle (issue #72):
  *                             `no-force-push` (sealed, issue #65 —
  *                             every remote-history-rewrite form) and
  *                             `no-hard-reset`. Both override-comment
@@ -234,7 +234,7 @@ export const predicates: Record<string, AnyPredicateHandler> = {
  *
  * The two commit-on-main rules route between themselves only — the
  * pattern-based rails (`no-force-push`, `no-hard-reset`, migrated
- * from the engine's former `DEFAULT_RULES` in issue #72) target
+ * from the engine's former default-rule bundle in issue #72) target
  * disjoint command shapes, so their position relative to the pair
  * carries no routing weight.
  */

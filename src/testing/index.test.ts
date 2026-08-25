@@ -7,8 +7,9 @@
  * Coverage axis:
  *   - `loadHarness`         — evaluator + dispatcher built from a
  *                              minimal config; explicit plugin
- *                              declaration (the former includeDefaults
- *                              flag is gone — issue #72); plugin
+ *                              declaration (the former defaults-
+ *                              injection harness flag is gone — issue
+ *                              #72); plugin
  *                              merging; config.disabledRules; custom
  *                              host override.
  *   - `mockContext`         — default shape; per-option overrides; exec
@@ -119,7 +120,7 @@ describe("loadHarness", () => {
   });
 
   it("declared git plugin's no-force-push fires (explicit plugin construction)", async () => {
-    // The former `includeDefaults: true` harness flag is gone (#72):
+    // The former defaults-injection harness flag is gone (#72):
     // harness callers construct configs explicitly, declaring each
     // shipping plugin they want active.
     const h = loadHarness({ config: { plugins: [gitPlugin] } });

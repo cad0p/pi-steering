@@ -5,7 +5,7 @@
  * `no-long-running-commands` rule for the async plugin — the
  * dev-server / watcher availability guard.
  *
- * Moved out of the engine's former `DEFAULT_RULES` (issue #72): every
+ * Moved out of the engine's former default-rule bundle (issue #72): every
  * rail now lives in the domain plugin that owns its surface. This one
  * is qualitatively different from the destructive-command rails (it
  * protects loop AVAILABILITY, not data), which is why it ships under

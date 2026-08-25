@@ -8,7 +8,7 @@
  *
  *   - Ship-surface count lock: EXACTLY FOUR rules — the two
  *     commit-on-main rules plus the two rails migrated from the
- *     engine's former DEFAULT_RULES (issue #72). Any addition or
+ *     engine's former default-rule bundle (issue #72). Any addition or
  *     removal is a deliberate ship-surface change and must update the
  *     assertion explicitly.
  *   - First-match-wins ordering. The github-specific rule

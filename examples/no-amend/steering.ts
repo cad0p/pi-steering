@@ -13,20 +13,25 @@
  * amend rewrites the SHA, which breaks reviewers' cross-push diff
  * tracking).
  *
- * Scope note: does NOT conflict with any shipped `DEFAULT_RULES`.
- * The rule is additive.
+ * Scope note: the rule is additive and independent of the git plugin
+ * (plain pattern, no predicates). The rm / async declarations below
+ * restore the classic filesystem + loop rails post-#72; drop them if
+ * you want THIS RULE ONLY.
  */
 
 import { defineConfig } from "@cad0p/pi-steering";
+import asyncPlugin from "@cad0p/pi-steering/plugins/async";
+import rmPlugin from "@cad0p/pi-steering/plugins/rm";
 
 export default defineConfig({
+  plugins: [rmPlugin, asyncPlugin],
   rules: [
     {
       name: "no-amend",
       tool: "bash",
       field: "command",
-      // Mirrors the pre-subcommand flag slot used by
-      // DEFAULT_RULES.no-force-push so `git -C /path commit --amend`,
+      // Mirrors the pre-subcommand flag slot used by the git
+      // plugin's no-force-push so `git -C /path commit --amend`,
       // `git -c key=val commit --amend`, and
       // `git --git-dir=/x commit --amend` are all caught.
       pattern:

@@ -51,7 +51,7 @@ export default defineConfig({
 });
 ```
 
-`DEFAULT_RULES` (e.g. `no-force-push`, `no-rm-rf-slash`) are included automatically. `DEFAULT_PLUGINS` is empty by design — plugins are opt-in (declare `plugins: [gitPlugin]`), which keeps `defineConfig`'s type unions (typo-checking on `disabledRules` / `disabledPlugins`) in sync with what's actually loaded. Disable defaults via `disabledRules: ["name"]` or opt out entirely with `disableDefaults: true`.
+There are NO engine-shipped default rules (issue #72): every rail lives in an opt-in domain plugin — declare `plugins: [gitPlugin, rmPlugin, asyncPlugin]` to get `no-force-push` / `no-hard-reset`, `no-rm-rf-slash`, and `no-long-running-commands`. Declaring a plugin is also what feeds its rule / plugin names into `defineConfig`'s type unions (typo-checking on `disabledRules` / `disabledPlugins`), keeping the types in sync with what's actually loaded. Disable individual rules via `disabledRules: ["name"]`; simply don't declare a plugin you don't want.
 
 ## Git plugin (branch / upstream / commits-ahead predicates)
 
@@ -83,7 +83,9 @@ import { expectAllows, expectBlocks, loadHarness } from "@cad0p/pi-steering/test
 import config from "./index.ts";
 
 describe("my steering config", () => {
-  const harness = loadHarness({ config, includeDefaults: true });
+  // The old defaults-injection harness flag is gone (#72): declare
+  // plugins in the config itself when you want their rails under test.
+  const harness = loadHarness({ config });
 
   it("blocks dangerous-command", async () => {
     await expectBlocks(harness, { command: "dangerous-command run" });

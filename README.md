@@ -97,9 +97,9 @@ export default defineConfig({
       field: "command",
       // `\b` after `--force` is enough to catch `--force-with-lease`
       // too: `-` is a non-word character, so a word boundary sits
-      // between `e` and `-`. The shipped default goes further — it
-      // also blocks bundled short flags (`-uf`), leading-`+` refspecs
-      // (`git push origin +main`), and `--mirror`.
+      // between `e` and `-`. The shipped plugin rule goes further —
+      // it also blocks bundled short flags (`-uf`), leading-`+`
+      // refspecs (`git push origin +main`), and `--mirror`.
       pattern: /^git\s+push.*--force\b/,
       reason:
         "Force pushes rewrite remote history. Create a new commit instead, or ask the user to run one manually.",
@@ -111,38 +111,46 @@ export default defineConfig({
 With this config:
 
 - `git push --force`, `sh -c 'git push --force'`, and `cd /repo && git push --force` all block via your rule.
-- `git push --force-with-lease` is blocked too — the sealed default treats every history-rewrite form as unsafe (see [Defaults](#defaults)).
+- `git push --force-with-lease` is blocked too once you declare the git plugin — its sealed `no-force-push` rule treats every history-rewrite form as unsafe (see [Defaults](#defaults) below).
 - `git commit` on `main` / `master` / `mainline` / `trunk` blocks via the git plugin's `no-main-commit` rule (opt-in — declare `plugins: [gitPlugin]`, see [Defaults](#defaults) below).
 - `echo 'git push --force'` correctly does not block — the AST extraction anchors patterns on real command refs, not substrings of arguments.
 
 ## Defaults
 
-One default bundle ships with the package and is layered onto every config automatically:
+**There are none.** Since issue [#72](https://github.com/cad0p/pi-steering/issues/72), the package ships no implicit rules or plugins: a fresh config loads with ZERO active rails, and every guard on your session is something you declared. Protection is explicit, visible, and `pi-steering list`-truthful.
 
-- **`DEFAULT_RULES`** — `no-force-push`, `no-hard-reset`, `no-rm-rf-slash`, `no-long-running-commands`. Domain-agnostic safety rails. See [`src/defaults.ts`](./src/defaults.ts) for the exact patterns. As of issue [#65](https://github.com/cad0p/pi-steering/issues/65), `no-force-push` is sealed: it blocks every remote-history-rewrite form (`--force`, `--force-with-lease`, `--force-if-includes`, bundled shorts like `-uf`, leading-`+` refspecs like `git push origin +main`, and `--mirror`). To re-allow lease pushes, disable the default via `disabledRules: ["no-force-push"]` and add your own rule.
-
-**`DEFAULT_PLUGINS` is deliberately empty** — domain plugins are opt-in. The [git plugin](./src/plugins/git/README.md) (the `branch` / `upstream` / `commitsAhead` / `hasStagedChanges` / `isClean` / `remote` predicates, the `no-main-commit` and `no-main-commit-github` rules (non-overridable — see issue #79; use `disabledRules`, same-name project-layer redeclarations, or cwd-scoped exemptions instead), the branch tracker (tool_call-scoped `git checkout` awareness), and the `cwd.git` tracker extension (`--git-dir=` / `--work-tree=` parsing)) is enabled by declaring it:
+The four safety rails that used to be engine-injected now live in domain plugins, one declaration each:
 
 ```ts
 import { defineConfig } from "@cad0p/pi-steering";
 import gitPlugin from "@cad0p/pi-steering/plugins/git";
+import rmPlugin from "@cad0p/pi-steering/plugins/rm";
+import asyncPlugin from "@cad0p/pi-steering/plugins/async";
 
-export default defineConfig({ plugins: [gitPlugin] });
+export default defineConfig({
+  plugins: [gitPlugin, rmPlugin, asyncPlugin],
+});
 ```
 
-Declaring the plugin is what gives `defineConfig`'s generics the rule / plugin name unions for typo-checking on `disabledRules` / `disabledPlugins` — relying on a default would silently widen the union and let typos through. That is why the default is empty: runtime registration and type-level visibility must not diverge.
+What each plugin ships:
+
+- **[git](./src/plugins/git/README.md)** — `no-force-push` and `no-hard-reset` (the destructive-git rails; `no-force-push` is sealed per issue [#65](https://github.com/cad0p/pi-steering/issues/65): it blocks every remote-history-rewrite form — `--force`, `--force-with-lease`, `--force-if-includes`, bundled shorts like `-uf`, leading-`+` refspecs like `git push origin +main`, and `--mirror`), plus the non-overridable `no-main-commit` / `no-main-commit-github` pair (issue #79), the `branch` / `upstream` / `commitsAhead` / `hasStagedChanges` / `isClean` / `remote` predicates, the branch tracker, and the `cwd.git` tracker extension.
+- **rm** — `no-rm-rf-slash`, the recursive-force-delete-from-root guard. Non-overridable (`noOverride: true`).
+- **async** — `no-long-running-commands`, the dev-server / watcher availability guard. Override-comment eligible like `no-force-push`.
+
+Declaring a plugin is also what feeds its rule / plugin names into `defineConfig`'s generics for typo-checking on `disabledRules` / `disabledPlugins` — an undeclared plugin's names are NOT in the inferred union, so a stale disable entry is a compile error instead of a silent no-op. Runtime registration and type-level visibility cannot diverge.
+
+Customization works per rule, not per bundle:
 
 ```ts
 import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
-// Drop the shipped rule but keep the git predicates + tracker:
-defineConfig({ plugins: [gitPlugin], disabledRules: ["no-main-commit"] });
-
-// Drop EVERYTHING shipped — DEFAULT_RULES (and whatever plugins you declared):
-defineConfig({ disableDefaults: true });
+// Keep the git predicates + trackers and every other shipped rule;
+// drop just one:
+defineConfig({ plugins: [gitPlugin], disabledRules: ["no-force-push"] });
 ```
 
-All three fields are typo-checked by `defineConfig`'s generics (see [Compile-time safety](#compile-time-safety-via-defineconfig)).
+**Migrating from ≤ 0.2.0:** add the three declarations above (or just the plugins you want). The old opt-out-of-everything config flag is gone — see the changelog for the full breaking sweep. Rule bindings import from their plugin subpaths now (e.g. `import { noForcePush } from "@cad0p/pi-steering/plugins/git"`).
 
 **Typecheck payoff.** Declare anything that should be typo-checked:
 
@@ -562,7 +570,7 @@ export default defineConfig({
 });
 ```
 
-**Plugin-shipped exemption targets are checked too.** A plugin's `exemptions` carve out rules by name — possibly rules shipped by another plugin. Those targets are cross-checked against the same rule-name universe as user-written `exemptions` / `disabledRules` (default rules + listed plugins' rules + inline rules): a plugin whose carve-outs target rules shipped by a plugin you didn't list fails to compile, pointing at the offending plugin element (the message names the missing rule(s) and hints to install the shipping plugin). Two by-design gaps: a `: Plugin` annotation widens `exemptions[].rule` to `string` and silently skips the check (the runtime `exemption-orphan` backstop still covers those authors — plugin-shipped orphans are error-class at merge, so the session always throws regardless of `failOnWarnings` and the CLI exits 1), and cross-layer config splits (plugin in global, its target's shipping plugin in a project layer) can false-positive because the check is per-file while the runtime merges universes — keep the plugin and its target's shipping plugin in the same layer.
+**Plugin-shipped exemption targets are checked too.** A plugin's `exemptions` carve out rules by name — possibly rules shipped by another plugin. Those targets are cross-checked against the same rule-name universe as user-written `exemptions` / `disabledRules` (listed plugins' rules + inline rules): a plugin whose carve-outs target rules shipped by a plugin you didn't list fails to compile, pointing at the offending plugin element (the message names the missing rule(s) and hints to install the shipping plugin). Two by-design gaps: a `: Plugin` annotation widens `exemptions[].rule` to `string` and silently skips the check (the runtime `exemption-orphan` backstop still covers those authors — plugin-shipped orphans are error-class at merge, so the session always throws regardless of `failOnWarnings` and the CLI exits 1), and cross-layer config splits (plugin in global, its target's shipping plugin in a project layer) can false-positive because the check is per-file while the runtime merges universes — keep the plugin and its target's shipping plugin in the same layer.
 
 **Authoring gotcha.** For cross-reference checking to work, TypeScript must preserve literal types. Use `as const satisfies` on reusable constants:
 

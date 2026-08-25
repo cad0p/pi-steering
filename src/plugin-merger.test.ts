@@ -982,7 +982,7 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
     );
   });
 
-  it("flags an ex-DEFAULT_RULES target when the shipping plugin is NOT declared", () => {
+  it("flags an ex-engine-default target when the shipping plugin is NOT declared", () => {
     // Post-cut (#72): there are no engine-injected defaults, so a
     // leftover exemption targeting `no-force-push` without the git
     // plugin is an orphan — the carve-out can never match.

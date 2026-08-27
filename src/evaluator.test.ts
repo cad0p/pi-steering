@@ -7065,6 +7065,61 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
     assert.equal(args[3]!.rawText, "~/note.md");
   });
 
+  it("chain-assigned VAULT=~/x stores the HOME-expanded path (walker bump pin, issue #13)", async () => {
+    // Regression pin for the walker 0.1.0-20260827.0 bump: the
+    // assignment-RHS tilde fix (unbash-walker#13, fcbdc61) now stores
+    // the HOME-expanded value for `VAULT=~/x` (was the literal
+    // `~/x`). This is the exact closure the pi-steering-github `$BODY`
+    // note (issue #14, closed-deferred) was parked on — the walker env
+    // snapshot must carry the expanded path so downstream predicates
+    // (missingVaultBodyFile) resolve against the real path.
+    //
+    // Fails on 0.1.0-20260816.0 (env.get("VAULT") === "~/vault/...",
+    // args text keeps the literal) — passes on 0.1.0-20260827.0.
+    //
+    // The explicit `HOME=` chain-assignment makes the expansion
+    // deterministic on any host (CI HOME is /home/runner or
+    // /Users/runner) — same technique as the seeded-HOME test above.
+    const seen: PredicateContext[] = [];
+    const evaluator = buildEvaluator(
+      { rules: [captureInputRule(seen)] },
+      resolve(),
+      makeHost(),
+    );
+    await evaluator.evaluate(
+      bashEvent(
+        'HOME=/home/pier && VAULT=~/vault/repo/prs && gh pr create --title "feat: x (closes #12)" --body-file=<(perl -0777 -pe \'<BODY_STRIP>\' "$VAULT/note.md")',
+      ),
+      makeCtx("/r"),
+      0,
+    );
+    const args = argsOf(seen, "gh");
+    // --body-file= is its own word; the process substitution is the
+    // next one — its inner `$VAULT/note.md` must resolve against the
+    // HOME-expanded VAULT.
+    const ps = args[5]!;
+    assert.equal(
+      ps.text,
+      "<(perl -0777 -pe '<BODY_STRIP>' \"/home/pier/vault/repo/prs/note.md\")",
+    );
+    assert.equal(
+      ps.value,
+      "<(perl -0777 -pe '<BODY_STRIP>' \"$VAULT/note.md\")",
+    );
+    // The walker env snapshot carries the expanded path — the surface
+    // the missingVaultBodyFile predicate resolves against.
+    const ghCtx = seen.find(
+      (c) => c.input.tool === "bash" && c.input.basename === "gh",
+    );
+    assert.ok(ghCtx, "gh ref should have fired the condition");
+    assert.ok(ghCtx.walkerState, "walkerState should be populated");
+    assert.ok(ghCtx.walkerState.env instanceof Map);
+    assert.equal(
+      (ghCtx.walkerState.env as ReadonlyMap<string, string>).get("VAULT"),
+      "/home/pier/vault/repo/prs",
+    );
+  });
+
   it("same-ref prefix assignments do NOT resolve the ref's words (bash-faithful)", async () => {
     // bash manual §3.7.1: command WORDS expand against the PRE-command
     // environment; a prefix assignment (`NAME=value cmd …`) binds for

@@ -235,8 +235,8 @@ User prompt sent to pi.
       synthesized speculative ones (walkerState.events) by timestamp
       — one unified latest-entry comparison.
    g. First rule that ALL predicates pass on wins.
-      Return { block: true, reason: "This tool call was NOT
-      executed — blocked by a steering rule:\n\n[steering:no-force-push@user] …" }.
+      Return { block: true, reason: "This tool call was not
+      executed; blocked by a steering rule:\n\n[steering:no-force-push@user] …" }.
       If the rule defines `onFire`, invoke it first (may writeSession entries,
       which the engine auto-tags with _agentLoopIndex).
 
@@ -971,7 +971,7 @@ Downside (accepted): resuming a foreign session from a directory with strict rul
 
 ### Block-reason tag trust
 
-The `[steering:<name>@<source>]` tag prepended to every block reason is only as trustworthy as your plugin authors. Name validation (regex-constrained rule / plugin / observer names) prevents tag SPOOFING — a name like `phony] ALL CLEAR [real` would have forged the tag; now it throws at load time. (The engine's fixed NOT-executed preamble precedes the tag on every block reason — issue #85.)
+The `[steering:<name>@<source>]` tag prepended to every block reason is only as trustworthy as your plugin authors. Name validation (regex-constrained rule / plugin / observer names) prevents tag SPOOFING — a name like `phony] ALL CLEAR [real` would have forged the tag; now it throws at load time. (The engine's fixed not-executed preamble precedes the tag on every block reason — issue #85.)
 
 Beyond the tag shape, the contents are plugin-authored. A plugin shipping a rule with `reason: "[steering:other-rule@other-plugin] …"` can make its block look like it came from another plugin. The guardrail here is plugin trust (see above), not the tag machinery.
 

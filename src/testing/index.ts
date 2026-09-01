@@ -1250,7 +1250,7 @@ export interface ExpectBlocksOptions {
  * Block reasons are prefixed with {@link BLOCK_REASON_PREAMBLE} (rule
  * path) or {@link ENGINE_ERROR_PREAMBLE} (engine-error path) followed
  * by `\n\n` (issue #85 — every steering message must state the tool
- * call was NOT executed). Matching helpers that anchor on the
+ * call was not executed). Matching helpers that anchor on the
  * `[steering:…]` tag apply this first so their `^` anchors stay
  * correct. Backward-compatible: reasons in the pre-preamble format
  * (or anything else) pass through unchanged.

@@ -259,7 +259,7 @@ The important bits worth stressing:
 
 - **One parse, many rules.** The AST walk happens once per tool call; every rule sees the same extracted refs and walker state. Adding rules is cheap.
 - **Per-ref evaluation.** `cd /tmp && git log` evaluates the `git log` rule AT cwd `/tmp`, not at `/original`. Walker trackers (cwd by default; branch via the git plugin) update state as refs flow through the command chain.
-- **Source-tagged reasons.** Block reasons carry `[steering:<rule>@<source>]` where source is `user` or the shipping plugin name. The agent can see both what fired and where to look it up. Every block reason is prefixed with a fixed preamble — `This tool call was NOT executed — blocked by a steering rule:` — so the message always states the tool call never executed (issue #85).
+- **Source-tagged reasons.** Block reasons carry `[steering:<rule>@<source>]` where source is `user` or the shipping plugin name. The agent can see both what fired and where to look it up. Every block reason is prefixed with a fixed preamble — `This tool call was not executed; blocked by a steering rule:` — so the message always states the tool call never executed (issue #85).
 - **First match wins.** Rule order matters within a layer, and the project layer beats the global layer on rule-name collision.
 
 ## Authoring rules
@@ -301,7 +301,7 @@ The **reason** is written for the agent. Include what was blocked and what the s
 }
 ```
 
-Reason functions are awaited, and the result is prefixed the same way as string reasons (`[steering:<rule>@<source>] …`), after the engine's fixed preamble (`This tool call was NOT executed — blocked by a steering rule:`, see `BLOCK_REASON_PREAMBLE`). If the function throws or rejects, the engine logs the error with `console.warn` and emits a fail-safe fallback body (`(reason failed to format; see log)`) so the block verdict still lands without leaking the raw error to the agent.
+Reason functions are awaited, and the result is prefixed the same way as string reasons (`[steering:<rule>@<source>] …`), after the engine's fixed preamble (`This tool call was not executed; blocked by a steering rule:`, see `BLOCK_REASON_PREAMBLE`). If the function throws or rejects, the engine logs the error with `console.warn` and emits a fail-safe fallback body (`(reason failed to format; see log)`) so the block verdict still lands without leaking the raw error to the agent.
 
 ### `TopLevelWhenClause`
 

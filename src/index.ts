@@ -172,7 +172,7 @@ export { definePredicate } from "./define-predicate.ts";
 export { AGENT_LOOP_INDEX_KEY } from "./evaluator-internals/context.ts";
 // Block-reason preambles — fixed prefixes prepended to every steering
 // block reason (rule path and engine-error path respectively) so the
-// agent-facing message ALWAYS states the tool call was NOT executed
+// agent-facing message ALWAYS states the tool call was not executed
 // (issue #85). Consumers matching on the `[steering:…]` tag should
 // strip the preamble first (see `stripPreamble` in `testing`).
 export {

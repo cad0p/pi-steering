@@ -469,7 +469,7 @@ function effectiveNoOverride(rule: Rule, defaultNoOverride: boolean): boolean {
  * `\n\n` — the emitted shape is:
  *
  * ```
- * This tool call was NOT executed — blocked by a steering rule:
+ * This tool call was not executed; blocked by a steering rule:
  *
  * [steering:<rule-name>@<source>] …[ To override, …]
  * ```

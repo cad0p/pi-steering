@@ -6,7 +6,7 @@
  * {@link formatReason} in `../evaluator.ts`).
  *
  * The preamble makes unambiguous what the tagged reason alone never
- * stated: the entire tool call was NOT executed. Live incidents
+ * stated: the entire tool call was not executed. Live incidents
  * (2026-08-29 pcad.it-infra #176, 2026-08-31 cad0p/pi#2) showed
  * agents chasing ghost state for hours after a compound bash chain
  * (`cp … && cat … && gh pr edit …`) was blocked as ONE tool call —
@@ -18,7 +18,7 @@
  * `../testing/index.ts`).
  */
 export const BLOCK_REASON_PREAMBLE =
-  "This tool call was NOT executed — blocked by a steering rule:";
+  "This tool call was not executed; blocked by a steering rule:";
 
 /**
  * Preamble for the engine-error fail-closed safety block (evaluator
@@ -30,4 +30,4 @@ export const BLOCK_REASON_PREAMBLE =
  * wrong there.
  */
 export const ENGINE_ERROR_PREAMBLE =
-  "This tool call was NOT executed — the steering engine failed and blocked it as a safety measure:";
+  "This tool call was not executed; the steering engine failed and blocked it as a safety measure:";

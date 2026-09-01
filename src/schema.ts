@@ -93,7 +93,7 @@ export type PredicateFn = (ctx: PredicateContext) => boolean | Promise<boolean>;
  * to the LLM.
  *
  * The engine additionally prepends a fixed preamble
- * (`BLOCK_REASON_PREAMBLE` — "This tool call was NOT executed …")
+ * (`BLOCK_REASON_PREAMBLE` — "This tool call was not executed; blocked by a steering rule:")
  * before the source tag on every rule-fired block reason (issue
  * #85); see {@link formatReason} in `../evaluator.ts`. The engine-
  * error path uses a distinct preamble
@@ -975,7 +975,7 @@ export interface BaseRule<
    * prefixes every block reason with `[steering:<rule>@<source>] `
    * so the agent sees which rule fired and where it came from
    * (ADR §11). The engine prepends a fixed preamble —
-   * "This tool call was NOT executed — blocked by a steering rule:"
+   * "This tool call was not executed; blocked by a steering rule:"
    * (`BLOCK_REASON_PREAMBLE`) — before the tag, so the message
    * always states the tool call never executed (issue #85); the
    * engine-error path uses a distinct preamble
@@ -989,7 +989,7 @@ export interface BaseRule<
    * and applies the source-tag prefix identically to the string form.
    *
    * Note: the emitted block reason is the preamble
-   * ("This tool call was NOT executed — blocked by a steering
+   * ("This tool call was not executed; blocked by a steering
    * rule:", `BLOCK_REASON_PREAMBLE`) + `\n\n` + this source-tagged
    * text (issue #85).
    *

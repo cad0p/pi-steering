@@ -996,7 +996,9 @@ export interface BaseRule<
    * Fail-safe on throw: if the reason function throws synchronously
    * or its returned promise rejects, the evaluator logs the error
    * with `console.warn` and emits a fallback message
-   * (`[steering:<rule>@<source>] (reason failed to format; see log)`).
+   * (preamble + `[steering:<rule>@<source>] (reason failed to
+   * format; see log)` — same `BLOCK_REASON_PREAMBLE` prefix as any
+   * other rule-fired reason).
    * The block verdict still lands - a broken reason doesn't release
    * the rule's guard or leak raw error text to the LLM.
    *

@@ -92,6 +92,13 @@ export type PredicateFn = (ctx: PredicateContext) => boolean | Promise<boolean>;
  * see log)`) so a broken reason doesn't leak its raw error message
  * to the LLM.
  *
+ * The engine additionally prepends a fixed preamble
+ * (`BLOCK_REASON_PREAMBLE` — "This tool call was not executed; blocked by a steering rule:")
+ * before the source tag on every rule-fired block reason (issue
+ * #85); see {@link formatReason} in `../evaluator.ts`. The engine-
+ * error path uses a distinct preamble
+ * (`ENGINE_ERROR_PREAMBLE`).
+ *
  * Use the function form when the block's human-readable context
  * depends on runtime state — e.g. "Could not verify upstream at
  * effective cwd \${ctx.walkerState.cwd}". Plain string reasons are
@@ -967,7 +974,12 @@ export interface BaseRule<
    * (e.g. "Use `git commit --no-verify` to bypass"). The evaluator
    * prefixes every block reason with `[steering:<rule>@<source>] `
    * so the agent sees which rule fired and where it came from
-   * (ADR §11).
+   * (ADR §11). The engine prepends a fixed preamble —
+   * "This tool call was not executed; blocked by a steering rule:"
+   * (`BLOCK_REASON_PREAMBLE`) — before the tag, so the message
+   * always states the tool call never executed (issue #85); the
+   * engine-error path uses a distinct preamble
+   * (`ENGINE_ERROR_PREAMBLE`).
    *
    * A {@link ReasonFn} is invoked with the same
    * {@link PredicateContext} the predicates saw. Use the function
@@ -976,10 +988,17 @@ export interface BaseRule<
    * pulled from `ctx.findEntries`. The evaluator awaits the return
    * and applies the source-tag prefix identically to the string form.
    *
+   * Note: the emitted block reason is the preamble
+   * ("This tool call was not executed; blocked by a steering
+   * rule:", `BLOCK_REASON_PREAMBLE`) + `\n\n` + this source-tagged
+   * text (issue #85).
+   *
    * Fail-safe on throw: if the reason function throws synchronously
    * or its returned promise rejects, the evaluator logs the error
    * with `console.warn` and emits a fallback message
-   * (`[steering:<rule>@<source>] (reason failed to format; see log)`).
+   * (preamble + `[steering:<rule>@<source>] (reason failed to
+   * format; see log)` — same `BLOCK_REASON_PREAMBLE` prefix as any
+   * other rule-fired reason).
    * The block verdict still lands - a broken reason doesn't release
    * the rule's guard or leak raw error text to the LLM.
    *
@@ -2165,7 +2184,9 @@ export type SteeringDiagnosticKind =
    * config references, or in override-comment targets. Always an
    * error — names flow into user-visible strings and a malformed
    * (or maliciously-crafted) name lets a config author forge
-   * block reasons that deceive the agent. Allowed: letters,
+   * block reasons that deceive the agent. (The tag is the SECOND
+   * line of a block reason — the engine prepends its fixed
+   * not-executed preamble first, issue #85.) Allowed: letters,
    * digits, underscores, dashes; must start with a letter or
    * digit. Rename the offending object in source.
    */

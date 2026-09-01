@@ -35,6 +35,7 @@ import {
   EVALUATOR_BUILTIN_TRACKERS,
   type EvaluatorHost,
 } from "../evaluator.ts";
+import { BLOCK_REASON_PREAMBLE } from "../helpers/block-reason-preamble.ts";
 import { buildWalkRegistry } from "../internal/walk-registry.ts";
 import { resolvePlugins } from "../plugin-merger.ts";
 import gitPlugin from "../plugins/git/index.ts";
@@ -1357,6 +1358,31 @@ describe("expectBlocks / expectAllows / expectRuleFires", () => {
     await assert.rejects(
       () => expectBlocks(harness, { command: "x" }, { rule: "other-rule" }),
       /expected rule "other-rule" to fire/,
+    );
+  });
+
+  it("expectBlocks { rule } resolves through the reason preamble (N4)", async () => {
+    // The rule-fired block reason now carries the engine preamble;
+    // `extractRuleName` must strip it before matching the tag, and
+    // `expected.reason` matching must run against the stripped
+    // (rule-authored) portion — both the string-equality branch
+    // (below) and the RegExp branch (a `^`-anchored pattern that
+    // would fail against the raw preamble-prefixed reason).
+    const harness = loadHarness({ config: { rules: [blockAllRule] } });
+    const result = await expectBlocks(
+      harness,
+      { command: "x" },
+      { rule: "block-all", reason: "[steering:block-all@user] test block" },
+    );
+    assert.ok(
+      result.reason?.startsWith(
+        `${BLOCK_REASON_PREAMBLE}\n\n[steering:block-all@user]`,
+      ),
+    );
+    await expectBlocks(
+      harness,
+      { command: "x" },
+      { rule: "block-all", reason: /^\[steering:block-all@user\] test block/ },
     );
   });
 

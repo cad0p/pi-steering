@@ -61,6 +61,10 @@ import {
   isPlainObject,
 } from "../evaluator-internals/context.ts";
 import type { SyntheticEntry } from "../evaluator-internals/speculative-synthesis.ts";
+import {
+  BLOCK_REASON_PREAMBLE,
+  ENGINE_ERROR_PREAMBLE,
+} from "../helpers/block-reason-preamble.ts";
 import { finalizePluginState } from "../internal/finalize-plugin-state.ts";
 import { runMergerPipeline } from "../internal/session-runtime.ts";
 import { WATCH_DEFAULT_WALK } from "../internal/walk-registry.ts";
@@ -1240,13 +1244,33 @@ export interface ExpectBlocksOptions {
 }
 
 /**
+ * Strip a leading block-reason preamble from `reason`, returning the
+ * remainder (the source-tagged portion).
+ *
+ * Block reasons are prefixed with {@link BLOCK_REASON_PREAMBLE} (rule
+ * path) or {@link ENGINE_ERROR_PREAMBLE} (engine-error path) followed
+ * by `\n\n` (issue #85 — every steering message must state the tool
+ * call was not executed). Matching helpers that anchor on the
+ * `[steering:…]` tag apply this first so their `^` anchors stay
+ * correct. Backward-compatible: reasons in the pre-preamble format
+ * (or anything else) pass through unchanged.
+ */
+function stripPreamble(reason: string): string {
+  for (const p of [BLOCK_REASON_PREAMBLE, ENGINE_ERROR_PREAMBLE]) {
+    if (reason.startsWith(`${p}\n\n`)) return reason.slice(p.length + 2);
+  }
+  return reason;
+}
+
+/**
  * Extract the rule name from a block reason. Reasons are source-tagged
- * as `[steering:<rule>@<source>] …`; we return the `<rule>` portion
+ * as `[steering:<rule>@<source>] …` (after the engine's preamble — see
+ * {@link stripPreamble}); we return the `<rule>` portion
  * so callers can assert by name without caring which plugin shipped
  * the rule.
  */
 function extractRuleName(reason: string): string | null {
-  const m = reason.match(/^\[steering:([^@\]]+)(?:@[^\]]+)?\]/);
+  const m = stripPreamble(reason).match(/^\[steering:([^@\]]+)(?:@[^\]]+)?\]/);
   return m?.[1] ?? null;
 }
 
@@ -1274,7 +1298,10 @@ function interpretResult(result: ToolCallEventResult | void): {
  * Optional `expected.rule` / `expected.reason` narrow the assertion:
  *   - `rule: "no-force-push"` — the fired rule's name must match.
  *   - `reason: /force-push/` — the reason string must match (exact
- *     string or regex).
+ *     string or regex). Matching runs against the rule-authored
+ *     portion of the reason (the engine's preamble is stripped
+ *     first — see {@link stripPreamble}), so `^`-anchored patterns
+ *     and exact strings keep working across the preamble format.
  */
 export async function expectBlocks(
   harness: Harness,
@@ -1308,8 +1335,8 @@ export async function expectBlocks(
   if (expected.reason !== undefined && reason !== null) {
     const matches =
       expected.reason instanceof RegExp
-        ? expected.reason.test(reason)
-        : expected.reason === reason;
+        ? expected.reason.test(stripPreamble(reason))
+        : expected.reason === stripPreamble(reason);
     if (!matches) {
       throw new Error(
         `expectBlocks: reason did not match expected pattern\n` +

@@ -79,6 +79,10 @@ import {
   type SpeculativeEventsByRef,
   synthesizeSpeculativeEntries,
 } from "./evaluator-internals/speculative-synthesis.ts";
+import {
+  BLOCK_REASON_PREAMBLE,
+  ENGINE_ERROR_PREAMBLE,
+} from "./helpers/block-reason-preamble.ts";
 import { mergeObserversUserFirst } from "./internal/merge-observers.ts";
 import {
   refToTextResolved,
@@ -460,10 +464,26 @@ function effectiveNoOverride(rule: Rule, defaultNoOverride: boolean): boolean {
 }
 
 /**
- * Format the block reason shown to the agent. Appends an override hint
- * ONLY when the rule is overridable — rules with
- * `noOverride: true` (or the fail-closed default) omit it to avoid
- * advertising a nonexistent escape hatch.
+ * Format the block reason shown to the agent. The returned string is
+ * ALWAYS prefixed with {@link BLOCK_REASON_PREAMBLE} followed by
+ * `\n\n` — the emitted shape is:
+ *
+ * ```
+ * This tool call was NOT executed — blocked by a steering rule:
+ *
+ * [steering:<rule-name>@<source>] …[ To override, …]
+ * ```
+ *
+ * The preamble states explicitly that the entire tool call never
+ * executed (issue #85 — live incidents showed agents chasing ghost
+ * state after a compound bash chain was blocked as ONE tool call).
+ * The tag stays the second line, the machine-detectable anchor for
+ * consumers (`stripPreamble` in `../testing/index.ts` strips the
+ * preamble before matching).
+ *
+ * Appends an override hint ONLY when the rule is overridable — rules
+ * with `noOverride: true` (or the fail-closed default) omit it to
+ * avoid advertising a nonexistent escape hatch.
  *
  * Source-tagged (per ADR §11): `[steering:<rule-name>@<source>] …`
  * where `<source>` is the originating plugin name for plugin-shipped
@@ -514,12 +534,13 @@ async function formatReason(
   // contract; this line implements the trigger detection.
   const multiPara = body.includes("\n\n") || body.includes("\r\n\r\n");
   const separator = multiPara ? "\n\n" : " ";
-  if (noOverride) return `${tag}${separator}${body}`;
+  if (noOverride)
+    return `${BLOCK_REASON_PREAMBLE}\n\n${tag}${separator}${body}`;
   const leader = tool === "bash" ? "#" : "//";
   const hint =
     `To override, include a comment: ` +
     `\`${leader} steering-override: ${rule.name} — <reason>\`.`;
-  return `${tag}${separator}${body}${separator}${hint}`;
+  return `${BLOCK_REASON_PREAMBLE}\n\n${tag}${separator}${body}${separator}${hint}`;
 }
 
 /**
@@ -944,6 +965,7 @@ async function evaluateEvent(
     return {
       block: true,
       reason:
+        `${ENGINE_ERROR_PREAMBLE}\n\n` +
         "[steering:engine@internal] steering engine error; " +
         "tool blocked as a safety measure",
     };

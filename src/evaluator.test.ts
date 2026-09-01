@@ -32,12 +32,22 @@ import type {
   WriteToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { makeCtx, makeTrackedHost as makeHost } from "./__test-helpers__.ts";
+
+/** Escape a literal string for safe interpolation into a RegExp. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 import {
   buildEvaluator,
   EVALUATOR_BUILTIN_TRACKERS,
   type EvaluatorHost,
 } from "./evaluator.ts";
 import { evaluateWhen } from "./evaluator-internals/predicates.ts";
+import {
+  BLOCK_REASON_PREAMBLE,
+  ENGINE_ERROR_PREAMBLE,
+} from "./helpers/block-reason-preamble.ts";
 import type { ResolvedPluginState } from "./plugin-merger.ts";
 import { resolvePlugins } from "./plugin-merger.ts";
 import type {
@@ -3767,7 +3777,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
     assert.ok(res);
     assert.equal(
       (res as { reason: string }).reason,
-      "[steering:dyn-reason@user] cannot rm at /work/proj",
+      `${BLOCK_REASON_PREAMBLE}\n\n[steering:dyn-reason@user] cannot rm at /work/proj`,
     );
   });
 
@@ -3791,7 +3801,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
     assert.ok(res);
     assert.equal(
       (res as { reason: string }).reason,
-      "[steering:async-reason@user] async at /work",
+      `${BLOCK_REASON_PREAMBLE}\n\n[steering:async-reason@user] async at /work`,
     );
   });
 
@@ -3808,7 +3818,12 @@ describe("buildEvaluator: Rule.reason function form", () => {
     const res = await evaluator.evaluate(bashEvent("rm foo"), makeCtx("/x"), 0);
     assert.ok(res);
     const reason = (res as { reason: string }).reason;
-    assert.match(reason, /^\[steering:overridable-dyn@user\] dynamic body/);
+    assert.match(
+      reason,
+      new RegExp(
+        `^${escapeRegExp(BLOCK_REASON_PREAMBLE)}\n\n\\[steering:overridable-dyn@user\\] dynamic body`,
+      ),
+    );
     assert.match(
       reason,
       /To override, include a comment: `# steering-override: overridable-dyn/,
@@ -3842,7 +3857,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
       assert.ok(res, "block verdict preserved even when reason fn throws");
       assert.equal(
         (res as { reason: string }).reason,
-        "[steering:broken-reason@user] (reason failed to format; see log)",
+        `${BLOCK_REASON_PREAMBLE}\n\n[steering:broken-reason@user] (reason failed to format; see log)`,
       );
       // Warn message format pinned so tests can detect the throw in CI
       // output.
@@ -3886,7 +3901,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
       assert.ok(res);
       assert.equal(
         (res as { reason: string }).reason,
-        "[steering:async-broken@user] (reason failed to format; see log)",
+        `${BLOCK_REASON_PREAMBLE}\n\n[steering:async-broken@user] (reason failed to format; see log)`,
       );
       assert.ok(
         warnings.some((w) => /reason function threw: async boom/.test(w)),
@@ -3922,7 +3937,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
     assert.ok(res);
     assert.equal(
       (res as { reason: string }).reason,
-      "[steering:cwd-reporter@user] walker could not resolve cwd statically",
+      `${BLOCK_REASON_PREAMBLE}\n\n[steering:cwd-reporter@user] walker could not resolve cwd statically`,
     );
   });
 });
@@ -3950,7 +3965,7 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
     assert.ok(res);
     assert.equal(
       (res as { reason: string }).reason,
-      "[steering:single-line@user] a single-line body",
+      `${BLOCK_REASON_PREAMBLE}\n\n[steering:single-line@user] a single-line body`,
     );
   });
 
@@ -3972,7 +3987,7 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
     assert.ok(res);
     assert.equal(
       (res as { reason: string }).reason,
-      "[steering:multi-para@user]\n\nfirst paragraph.\n\nsecond paragraph.",
+      `${BLOCK_REASON_PREAMBLE}\n\n[steering:multi-para@user]\n\nfirst paragraph.\n\nsecond paragraph.`,
     );
   });
 
@@ -3996,7 +4011,7 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
     assert.ok(res);
     assert.equal(
       (res as { reason: string }).reason,
-      "[steering:single-newline@user] line one\nline two",
+      `${BLOCK_REASON_PREAMBLE}\n\n[steering:single-newline@user] line one\nline two`,
     );
   });
 
@@ -4027,7 +4042,9 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
     const reason = (res as { reason: string }).reason;
     assert.match(
       reason,
-      /^\[steering:multi-para-overridable@user\]\n\nfirst\.\n\nsecond\./,
+      new RegExp(
+        `^${escapeRegExp(BLOCK_REASON_PREAMBLE)}\n\n\\[steering:multi-para-overridable@user\\]\\n\\nfirst\\.\\n\\nsecond\\.`,
+      ),
     );
     assert.match(reason, /\n\nTo override, include a comment: /);
   });
@@ -4059,7 +4076,9 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
     // CRLF-encoded; only the tag separator is normalized.
     assert.match(
       reason,
-      /^\[steering:crlf-multi-para@user\]\n\nfirst paragraph\.\r\n\r\nsecond paragraph\./,
+      new RegExp(
+        `^${escapeRegExp(BLOCK_REASON_PREAMBLE)}\n\n\\[steering:crlf-multi-para@user\\]\\n\\nfirst paragraph\\.\\r\\n\\r\\nsecond paragraph\\.`,
+      ),
     );
   });
 });
@@ -4116,9 +4135,12 @@ describe("buildEvaluator: override comments", () => {
     assert.equal(host.appended.length, 0);
     // Golden-string: noOverride:true must OMIT the override hint tail.
     // Tighter than a `doesNotMatch(/To override/)` — pins the whole
-    // reason including the `[steering:…]` prefix and lack of trailing
-    // punctuation.
-    assert.equal(res!.reason, "[steering:no-force-push@user] no force push");
+    // reason including the engine preamble, the `[steering:…]` prefix
+    // and lack of trailing punctuation.
+    assert.equal(
+      res!.reason,
+      `${BLOCK_REASON_PREAMBLE}\n\n[steering:no-force-push@user] no force push`,
+    );
   });
 
   it("defaultNoOverride=true (default) blocks even with override comment", async () => {
@@ -4186,12 +4208,15 @@ describe("buildEvaluator: override comments", () => {
       0,
     );
     // Not overridable → no hint tail.
-    assert.equal(r1!.reason, "[steering:no-force-push@user] no force push");
+    assert.equal(
+      r1!.reason,
+      `${BLOCK_REASON_PREAMBLE}\n\n[steering:no-force-push@user] no force push`,
+    );
     // Overridable → hint tail uses the `#` bash leader, em dash, and
     // backticked comment template.
     assert.equal(
       r2!.reason,
-      "[steering:no-force-push@user] no force push To override, " +
+      `${BLOCK_REASON_PREAMBLE}\n\n[steering:no-force-push@user] no force push To override, ` +
         "include a comment: `# steering-override: no-force-push \u2014 <reason>`.",
     );
   });
@@ -4396,7 +4421,7 @@ describe("buildEvaluator: write / edit", () => {
     assert.ok(res && res.block === true);
     assert.equal(
       res!.reason,
-      "[steering:no-private-key@user] no private keys To override, " +
+      `${BLOCK_REASON_PREAMBLE}\n\n[steering:no-private-key@user] no private keys To override, ` +
         "include a comment: `// steering-override: no-private-key \u2014 <reason>`.",
     );
   });
@@ -5185,7 +5210,12 @@ describe("buildEvaluator: plugin-shipped rules", () => {
       0,
     );
     assert.ok(res && res.block === true);
-    assert.match(res!.reason!, /^\[steering:no-force-push@git-plugin\]/);
+    assert.match(
+      res!.reason!,
+      new RegExp(
+        `^${escapeRegExp(BLOCK_REASON_PREAMBLE)}\n\n\\[steering:no-force-push@git-plugin\\]`,
+      ),
+    );
   });
 
   it("user rules get @user source tag", async () => {
@@ -5203,7 +5233,12 @@ describe("buildEvaluator: plugin-shipped rules", () => {
       0,
     );
     assert.ok(res && res.block === true);
-    assert.match(res!.reason!, /^\[steering:my-rule@user\]/);
+    assert.match(
+      res!.reason!,
+      new RegExp(
+        `^${escapeRegExp(BLOCK_REASON_PREAMBLE)}\n\n\\[steering:my-rule@user\\]`,
+      ),
+    );
   });
 
   it("honors config.disabledRules to skip plugin rule", async () => {
@@ -5256,7 +5291,12 @@ describe("buildEvaluator: plugin-shipped rules", () => {
       0,
     );
     assert.ok(res && res.block === true);
-    assert.match(res!.reason!, /^\[steering:same@user\]/);
+    assert.match(
+      res!.reason!,
+      new RegExp(
+        `^${escapeRegExp(BLOCK_REASON_PREAMBLE)}\n\n\\[steering:same@user\\]`,
+      ),
+    );
     assert.match(res!.reason!, /user/); // pins which reason text won
   });
 
@@ -5296,7 +5336,12 @@ describe("buildEvaluator: plugin-shipped rules", () => {
       0,
     );
     assert.ok(res && res.block === true);
-    assert.match(res!.reason!, /^\[steering:same@user\]/);
+    assert.match(
+      res!.reason!,
+      new RegExp(
+        `^${escapeRegExp(BLOCK_REASON_PREAMBLE)}\n\n\\[steering:same@user\\]`,
+      ),
+    );
   });
 
   it("plugin-vs-plugin collision — surviving rule tags with the winning plugin name (G4)", async () => {
@@ -5344,7 +5389,12 @@ describe("buildEvaluator: plugin-shipped rules", () => {
       0,
     );
     assert.ok(res && res.block === true);
-    assert.match(res!.reason!, /^\[steering:dup@first\]/);
+    assert.match(
+      res!.reason!,
+      new RegExp(
+        `^${escapeRegExp(BLOCK_REASON_PREAMBLE)}\n\n\\[steering:dup@first\\]`,
+      ),
+    );
   });
 });
 
@@ -5857,8 +5907,10 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
       // the LLM sees it's an engine-level failure, not a rule match.
       assert.ok(result && result.block === true);
       assert.ok(
-        /^\[steering:engine@internal\]/.test(result.reason ?? ""),
-        `expected engine@internal tag; got: ${result.reason}`,
+        result.reason?.startsWith(
+          `${ENGINE_ERROR_PREAMBLE}\n\n[steering:engine@internal]`,
+        ),
+        `expected engine-error preamble + engine@internal tag; got: ${result.reason}`,
       );
       assert.ok(
         /safety measure/.test(result.reason ?? ""),

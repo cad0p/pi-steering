@@ -23,6 +23,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { makeCtx, makeTrackedHost } from "../../../__test-helpers__.ts";
 import { buildEvaluator } from "../../../evaluator.ts";
+import { BLOCK_REASON_PREAMBLE } from "../../../helpers/block-reason-preamble.ts";
 import { resolvePlugins } from "../../../plugin-merger.ts";
 import {
   GIT_COMMIT_PATTERN,
@@ -151,7 +152,9 @@ describe("rules: no-main-commit-github", () => {
     // checks above don't catch newline drift.
     assert.match(
       res.reason!,
-      /^\[steering:no-main-commit-github@[^\]]+\]\n\nYou're on a github clone's protected branch/,
+      new RegExp(
+        `^${BLOCK_REASON_PREAMBLE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n\\n\\[steering:no-main-commit-github@[^\\]]+\\]\\n\\nYou're on a github clone's protected branch`,
+      ),
       "tag must render on its own line followed by paragraph break",
     );
     assert.match(

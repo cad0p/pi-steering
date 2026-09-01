@@ -170,6 +170,15 @@ export { definePredicate } from "./define-predicate.ts";
 // inspecting raw session entries via `findEntries` can reference the
 // constant instead of hardcoding the string.
 export { AGENT_LOOP_INDEX_KEY } from "./evaluator-internals/context.ts";
+// Block-reason preambles — fixed prefixes prepended to every steering
+// block reason (rule path and engine-error path respectively) so the
+// agent-facing message ALWAYS states the tool call was NOT executed
+// (issue #85). Consumers matching on the `[steering:…]` tag should
+// strip the preamble first (see `stripPreamble` in `testing`).
+export {
+  BLOCK_REASON_PREAMBLE,
+  ENGINE_ERROR_PREAMBLE,
+} from "./helpers/block-reason-preamble.ts";
 // Reason-text helper for custom predicates that read runtime
 // `ctx.cwd` (shell-exec or filesystem queries) rather than
 // walker-tracked state.

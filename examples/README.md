@@ -73,8 +73,8 @@ did load JSON; staying on v0 is an option until you convert.
 ## Verifying a rule works
 
 The quickest smoke-check: run the example's blocked command inside a
-pi session and confirm the agent surfaces the `This tool call was NOT
-executed — blocked by a steering rule:` preamble followed by the
+pi session and confirm the agent surfaces the `This tool call was not
+executed; blocked by a steering rule:` preamble followed by the
 `[steering:<rule-name>@<source>] …` block message. Each example directory's
 `steering.test.ts` pins the config's structural contract; the engine's
 own test suite exercises the rules against realistic inputs.

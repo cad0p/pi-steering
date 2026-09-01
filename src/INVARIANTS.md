@@ -36,7 +36,7 @@ catch: if the engine's own scaffolding throws (parse errors, walker
 bugs, corrupted session JSONL), the tool is BLOCKED with an
 engine-tagged reason so the agent sees the throw came from the
 engine, not from a rule. (Both block paths — rule-fired and engine-
-error — carry a fixed NOT-executed preamble before the tag; see
+error — carry a fixed not-executed preamble before the tag; see
 `BLOCK_REASON_PREAMBLE` / `ENGINE_ERROR_PREAMBLE` in
 `src/helpers/block-reason-preamble.ts`.)
 
@@ -115,7 +115,7 @@ Rule / plugin / observer names flow into user-visible strings — the
 containing whitespace, control characters, `]`, or newlines let a
 malicious or careless config author forge block reasons that
 deceive the agent. (The tag is the SECOND line of a block reason —
-the engine prepends its fixed NOT-executed preamble first.)
+the engine prepends its fixed not-executed preamble first.)
 
 Validated at production call sites (`validateUserConfigNames`,
 `resolvePlugins`) and as defense-in-depth at `buildEvaluator` /

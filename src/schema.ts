@@ -2186,7 +2186,7 @@ export type SteeringDiagnosticKind =
    * (or maliciously-crafted) name lets a config author forge
    * block reasons that deceive the agent. (The tag is the SECOND
    * line of a block reason — the engine prepends its fixed
-   * NOT-executed preamble first, issue #85.) Allowed: letters,
+   * not-executed preamble first, issue #85.) Allowed: letters,
    * digits, underscores, dashes; must start with a letter or
    * digit. Rename the offending object in source.
    */

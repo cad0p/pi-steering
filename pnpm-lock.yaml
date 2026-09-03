@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@cad0p/unbash-walker':
-        specifier: 0.1.0-20260827.0
-        version: 0.1.0-20260827.0
+        specifier: 0.1.0-20260903.3
+        version: 0.1.0-20260903.3
       '@earendil-works/pi-coding-agent':
         specifier: '>=0.79.1'
         version: 0.84.1(ws@8.21.3)(zod@4.4.3)
@@ -243,8 +243,8 @@ packages:
     resolution: {integrity: sha512-DVtmALxhJDd2PegCgQ8tPzd8kpb8WuILRhi5a1bTwJyrqb9GQTs6V3t3/SVogcNeoNY+AVdR4RPM+qv0bwTmbg==}
     engines: {node: '>=22'}
 
-  '@cad0p/unbash-walker@0.1.0-20260827.0':
-    resolution: {integrity: sha512-vszhX3PI8gP/LKER4uetFmaqhHY8Q6BwhR5XGc10YME98jIUC9VcdJGL5Z+WHmOx0mmKOdgTw+gJ2NZPo60MuQ==}
+  '@cad0p/unbash-walker@0.1.0-20260903.3':
+    resolution: {integrity: sha512-3dpq0ivvpAINYrLLU8nVFd3Bl7E1BH1d2WZVn8IQ0Aw7kD07bxOrcKwghoI0k6T0LrWmcJvMBiiVl3kc5MHKsg==}
     engines: {node: '>=22'}
 
   '@earendil-works/pi-agent-core@0.84.1':
@@ -690,6 +690,10 @@ packages:
     resolution: {integrity: sha512-FeFPZ/WFT0mbRCuydiZzpPFlrYN8ZUpphQKoq4EeElVIYjYyGzPMxQR/simUwCOJIyVhpFk4RbtyO7RuMpMnHA==}
     engines: {node: '>=14'}
 
+  unbash@4.0.11:
+    resolution: {integrity: sha512-FoSOKV7NEofQSkAefMVHam4ZPKYMxjAydxiV72UFEDNV/YofxjGfiZ2A9pZjdL/lRJzTjcu4PABo1JYJX8N5iQ==}
+    engines: {node: '>=14'}
+
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
@@ -994,9 +998,9 @@ snapshots:
     dependencies:
       unbash: 3.0.0
 
-  '@cad0p/unbash-walker@0.1.0-20260827.0':
+  '@cad0p/unbash-walker@0.1.0-20260903.3':
     dependencies:
-      unbash: 3.0.0
+      unbash: 4.0.11
 
   '@earendil-works/pi-agent-core@0.84.1(ws@8.21.3)(zod@4.4.3)':
     dependencies:
@@ -1456,6 +1460,8 @@ snapshots:
   typescript@5.9.3: {}
 
   unbash@3.0.0: {}
+
+  unbash@4.0.11: {}
 
   undici-types@6.21.0: {}
 

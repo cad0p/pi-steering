@@ -148,6 +148,7 @@ export type {
 export {
   cwdTracker,
   envTracker,
+  expandTildeIfLeading,
   expandWrapperCommands,
   extractAllCommandsFromAST,
   formatCommand,

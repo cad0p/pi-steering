@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - *(git-plugin)* Make no-main-commit pair non-overridable (closes #79)
 - *(defaults)* Distribute DEFAULT_RULES into git/rm/async plugins; remove engine-defaults machinery (closes #72) ([#83](https://github.com/cad0p/pi-steering/pull/83))
 - Block reasons always state the tool call was not executed (closes #85)
+- Re-export expandTildeIfLeading in the curated walker surface (closes #87)
 
 ### 🐛 Bug Fixes
 

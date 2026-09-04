@@ -1,6 +1,6 @@
 {
 	"name": "@cad0p/pi-steering",
-	"version": "0.3.0",
+	"version": "0.2.0",
 	"private": false,
 	"description": "AST-backed steering hooks for pi — deterministic tool-call guardrails with command-level effective-cwd scoping.",
 	"keywords": [

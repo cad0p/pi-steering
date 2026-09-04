@@ -206,6 +206,15 @@ export {
 // `if (ctx.walkerState?.cwd === "unknown") return "unknown";`,
 // then the engine projects via `onUnknown:` policy).
 export { walkerUnknownCwdReason } from "./helpers/walker-unknown-cwd-reason.ts";
+// Flag primitives promoted to core root in the P3 promotion
+// (issue #99). Ported verbatim from `@cad0p/pi-steering-flags`'s
+// `helpers.ts` — same precedence, gluedShorts opt-in, last-wins,
+// and fail-open/closed edges. Rule authors import these from here
+// for `when.condition` escape-hatch logic backing core's `when.flag`
+// leaves (issue #90); the flags package deletes them in its 0.2.0
+// (no compat re-export per #76/#99).
+export { getFlagValue, hasEnvAssignment, hasFlag, INFO_FLAGS, isInfoOnly } from "./helpers/flags.ts";
+export type { FlagLookupOptions } from "./helpers/flags.ts";
 // Loader — two-layer config discovery + merge.
 export { buildConfig, loadConfigs, loadSteeringConfig } from "./loader.ts";
 // Schema types — the public authoring surface.

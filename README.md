@@ -689,6 +689,7 @@ Publishing conventions:
 
 - **Package name**: `pi-steering-<domain>` (unscoped). Mirrors `@cad0p/pi-steering` core and `pi-steering-flags`. Scoped names (`@org/pi-steering-<x>`) are fine for internal packages.
 - **Peer range**: pin to a major once `@cad0p/pi-steering` is v1+ (`"pi-steering": "^1"`). During the v0.x window, match the release train closely (`"pi-steering": "^0.1.0"`).
+- **Pre-1.0 breaking policy (expires at v1.0)**: during the v0.x window, breaking changes ship without deprecation shims — no compat re-exports, no dual surfaces, no semver base releases (CalVer prereleases only). Every shim is a stability promise that narrows future design, and pre-1.0 pins are owner-controlled or train-pinned. Precedents: #72 (zero default rails, no alias), #76 P3 (no compat re-export), #101 (bare helpers deleted a week after shipping). Treat every minor as potentially breaking. At v1.0 this flips to semver-stable with deprecation periods.
 - **License**: MIT by default, matching the core. Amazon-internal / proprietary plugins use their own license; the core has no opinion on this.
 
 ### Dependency rule

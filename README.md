@@ -858,6 +858,18 @@ console.log(formatMatrix(result));
 
 The `examples/work-item-plugin` tests use exactly this pattern.
 
+### Contributor test conventions: no redundant pins
+
+Tests for a module live in that module's test file. Before adding
+pins, grep the existing suite for the behavior — helpers, matrix rows,
+and `rawOnly`-style fixtures often already cover it. Extend in place;
+a new test file needs a one-line justification in the PR body stating
+what the existing suite doesn't cover. Frozen characterization suites
+stay byte-frozen: new behavior pins go in the same file unless the
+surface is genuinely separate. Reviewers check overlap the same way
+(the redundancy lens): a new file duplicating pinned behavior gets
+folded or cut, however green it is.
+
 ## CLI
 
 ### `pi-steering list`

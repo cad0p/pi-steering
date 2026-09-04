@@ -42,10 +42,6 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] — pre-publish (v0.1.x)
 
-### Added
-
-- Built-in ARGV leaves `when.subcommand` / `when.flag` (issue #90, P2 of #76): argv-structured matching without regexes — bare string subcommands match exactly (`"push"` ≠ `"pushback"`), `{ pattern, depth, valueConsumingFlags }` spreads cover multi-word runs (`aws s3 ls`), and `{ anyOf, bundleAware, valueConsumingFlags }` scans flag presence (`git push -uf` via `bundleContains`). `null` extraction → `"unknown"` → default `"block"` (fail-closed); exemptions reject `onUnknown` (type + load-time + evaluation). Walker subcommand helpers (`getSubcommandWords`, `bundleContains`, `DEFAULT_POSITION_POLICIES`) re-exported from the package root.
-
 ### Changed
 
 - Monorepo split (2026-08-10): this repo is now `cad0p/pi-steering` (renamed from `pi-steering-hooks`); `unbash-walker`, `pi-steering-commit-format`, and `pi-steering-flags` moved to their own repos. The git plugin is now **opt-in** — `DEFAULT_PLUGINS` is empty; declare `plugins: [gitPlugin]` (import from `pi-steering/plugins/git`) to register it. This restores compile-time typo-checking on `disabledRules` / `disabledPlugins` for configs that declare their plugins (runtime defaults and type-level visibility can no longer diverge).

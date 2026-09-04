@@ -27,6 +27,7 @@ import type {
   Rule,
   SteeringConfig,
   SteeringDiagnostic,
+  TopLevelWhenClause,
   WhenClause,
 } from "./schema.ts";
 
@@ -78,6 +79,24 @@ describe("schema: shape smoke tests", () => {
     assert.ok(w1.cwd !== undefined);
     assert.ok(w2.cwd !== undefined);
     assert.ok(w3.cwd !== undefined);
+  });
+
+  it("TopLevelWhenClause accepts subcommand/flag ARGV leaves (issue #90)", () => {
+    const w: TopLevelWhenClause = {
+      subcommand: "push",
+      flag: { anyOf: ["--force"], bundleAware: true },
+    };
+    const spread: TopLevelWhenClause = {
+      subcommand: {
+        pattern: ["s3", "ls"],
+        depth: 2,
+        valueConsumingFlags: ["--profile"],
+        onUnknown: "block",
+      },
+    };
+    assert.ok(w.subcommand !== undefined);
+    assert.ok(w.flag !== undefined);
+    assert.ok(spread.subcommand !== undefined);
   });
 
   it("WhenClause.condition accepts a PredicateFn", () => {

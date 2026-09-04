@@ -25,7 +25,12 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { expandTildeIfLeading } from "./index.ts";
+import {
+  bundleContains,
+  DEFAULT_POSITION_POLICIES,
+  expandTildeIfLeading,
+  getSubcommandWords,
+} from "./index.ts";
 
 describe("walker re-exports: expandTildeIfLeading (issue #87)", () => {
   it("expands a bare `~` to HOME", () => {
@@ -63,5 +68,32 @@ describe("walker re-exports: expandTildeIfLeading (issue #87)", () => {
       expandTildeIfLeading("$HOME/x", new Map([["HOME", "/h"]])),
       "$HOME/x",
     );
+  });
+});
+
+describe("walker re-exports: subcommand surface (issue #90)", () => {
+  it("DEFAULT_POSITION_POLICIES resolves known binaries", () => {
+    assert.equal(DEFAULT_POSITION_POLICIES.git, "globals-before-only");
+    assert.equal(DEFAULT_POSITION_POLICIES.go, "globals-after-only");
+    assert.equal(DEFAULT_POSITION_POLICIES.gh, "globals-anywhere");
+  });
+
+  it("bundleContains matches letters inside short bundles only", () => {
+    assert.equal(
+      bundleContains({ text: "-uf", value: "-uf" } as never, "f"),
+      true,
+    );
+    assert.equal(
+      bundleContains({ text: "-uf", value: "-uf" } as never, "x"),
+      false,
+    );
+    assert.equal(
+      bundleContains({ text: "--force", value: "--force" } as never, "f"),
+      false,
+    );
+  });
+
+  it("getSubcommandWords is callable from the root", () => {
+    assert.equal(typeof getSubcommandWords, "function");
   });
 });

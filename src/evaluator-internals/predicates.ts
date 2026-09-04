@@ -26,11 +26,11 @@
  * unknown sentinels; handling those is the plugin handler's job.
  */
 
+import type { PositionPolicy, Word } from "@cad0p/unbash-walker";
 import {
   bundleContains,
   DEFAULT_POSITION_POLICIES,
 } from "@cad0p/unbash-walker";
-import type { PositionPolicy, Word } from "@cad0p/unbash-walker";
 import { isPattern } from "../internal/pattern-utils.ts";
 import type {
   FlagSpreadBase,
@@ -593,14 +593,15 @@ const VALID_POSITION_POLICIES: ReadonlySet<string> = new Set([
  *     sequence). `depth` defaults to 1; non-integer / negative
  *     depths are invalid.
  */
-function normalizeSubcommandLeaf(
-  value: unknown,
-): {
-  patterns: SubcommandPattern[];
-  depth: number;
-  valueConsumingFlags: readonly string[];
-  sequence: boolean;
-} | "unknown" | null {
+function normalizeSubcommandLeaf(value: unknown):
+  | {
+      patterns: SubcommandPattern[];
+      depth: number;
+      valueConsumingFlags: readonly string[];
+      sequence: boolean;
+    }
+  | "unknown"
+  | null {
   // Bare single pattern.
   if (isSubcommandPattern(value)) {
     return {
@@ -629,11 +630,7 @@ function normalizeSubcommandLeaf(
     };
     if (!("pattern" in obj)) return null;
     const depth = obj.depth ?? 1;
-    if (
-      typeof depth !== "number" ||
-      !Number.isInteger(depth) ||
-      depth < 0
-    ) {
+    if (typeof depth !== "number" || !Number.isInteger(depth) || depth < 0) {
       return null;
     }
     if (depth === 0) return "unknown";
@@ -652,10 +649,7 @@ function normalizeSubcommandLeaf(
       };
     }
     if (Array.isArray(obj.pattern)) {
-      if (
-        obj.pattern.length === 0 ||
-        !obj.pattern.every(isSubcommandPattern)
-      ) {
+      if (obj.pattern.length === 0 || !obj.pattern.every(isSubcommandPattern)) {
         return null;
       }
       // Spread arrays are positional sequences: length MUST equal
@@ -733,8 +727,10 @@ function scanSubcommandWords(
   const run: Word[] = [];
   let i = 0;
   while (i < words.length && run.length < depth) {
+    const word = words[i];
+    if (word === undefined) break; // bounds-guard; unreachable while i < length
     // Quote-aware resolution ALWAYS — .text alone misreads quoted tokens.
-    const form = scanWordText(words[i]!);
+    const form = scanWordText(word);
     if (form.startsWith("-")) {
       if (opts.positionPolicy === "globals-after-only" && run.length === 0) {
         // Leading-global-flag shape on an after-only binary: invalid by
@@ -744,7 +740,7 @@ function scanSubcommandWords(
       }
       i += consuming.has(form) ? 2 : 1;
     } else {
-      run.push(words[i]!);
+      run.push(word);
       i += 1;
     }
   }
@@ -786,11 +782,11 @@ function evaluateSubcommand(
   // Bare words carry no binary identity: resolve the position policy
   // MANUALLY from the table, falling back to `"globals-anywhere"`.
   const resolved: unknown =
-    basename !== undefined
-      ? DEFAULT_POSITION_POLICIES[basename]
-      : undefined;
+    basename !== undefined ? DEFAULT_POSITION_POLICIES[basename] : undefined;
   const positionPolicy: PositionPolicy =
-    typeof resolved === "string" ? (resolved as PositionPolicy) : "globals-anywhere";
+    typeof resolved === "string"
+      ? (resolved as PositionPolicy)
+      : "globals-anywhere";
   if (!VALID_POSITION_POLICIES.has(positionPolicy)) {
     console.warn(
       `[pi-steering] Rule "${ruleName}"@${source}: when.subcommand ` +
@@ -822,7 +818,10 @@ function evaluateSubcommand(
     // Positional sequence: the walker caps at `depth`, so require a
     // full run (`aws s3` does NOT match `["s3", "ls"]` depth 2).
     if (words.length !== depth) return false;
-    return patterns.every((p, i) => matchesSubcommandPattern(p, words[i]!));
+    return patterns.every((p, i) => {
+      const word = words[i];
+      return word !== undefined && matchesSubcommandPattern(p, word);
+    });
   }
   // OR-of-matches (or single) at depth 1: match the first word.
   const first = words[0];
@@ -847,9 +846,7 @@ function isValidFlagSpelling(spelling: string): boolean {
  * shorthand. Strict `=== true` on `bundleAware` mirrors the
  * engine's typo-defense (any other value collapses to `false`).
  */
-function normalizeFlagLeaf(
-  value: unknown,
-): {
+function normalizeFlagLeaf(value: unknown): {
   anyOf: string[];
   bundleAware: boolean;
   valueConsumingFlags: readonly string[];
@@ -902,7 +899,9 @@ function flagPresent(
   const shorts = anyOf.filter((s) => !s.startsWith("--"));
   const consuming = new Set(valueConsumingFlags);
   for (let i = 0; i < args.length; i++) {
-    const token = scanWordText(args[i]!);
+    const arg = args[i];
+    if (arg === undefined) continue; // bounds-guard; unreachable while i < length
+    const token = scanWordText(arg);
     // Exact token match (covers separate-form consuming flags too —
     // the flag itself IS present; only its value is skipped).
     if (spellings.has(token)) return true;
@@ -918,13 +917,9 @@ function flagPresent(
       continue;
     }
     // Short bundles (`-uf`) via the walker — longs never match here.
-    if (
-      bundleAware &&
-      token.startsWith("-") &&
-      !token.startsWith("--")
-    ) {
+    if (bundleAware && token.startsWith("-") && !token.startsWith("--")) {
       for (const short of shorts) {
-        if (bundleContains(args[i]!, short.slice(1))) return true;
+        if (bundleContains(arg, short.slice(1))) return true;
       }
     }
   }

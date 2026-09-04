@@ -129,13 +129,24 @@ export default function register(
 // Walker types re-exported for plugin authors. Forward-compatible with
 // future unbash-walker extraction — imports from this package won't
 // break.
+// Walker option types for the subcommand surface (issue #90):
+// `getSubcommandWords` is the CommandRef-based extraction entry point;
+// plugin authors declaring per-binary `valueConsumingFlags` reuse the
+// same options shape. (The bare-words `locateSubcommandRun` (+
+// `SubcommandRun`) the plan slated for this list is NOT exported from
+// any published walker root — deliberate upstream — so it cannot be
+// re-exported here without a walker release; see the DEVIATION note on
+// `scanSubcommandWords` in `evaluator-internals/predicates.ts`.
+// TODO(walker-export-gap, #91).)
 export type {
   Command,
   CommandRef,
   EnvState,
   Modifier,
   Node,
+  PositionPolicy,
   Script,
+  SubcommandOptions,
   SubshellSemantics,
   Tracker,
   WalkResult,
@@ -162,19 +173,6 @@ export {
   parse,
   resolveWord,
   walk,
-} from "@cad0p/unbash-walker";
-// Walker option types for the subcommand surface (issue #90):
-// `getSubcommandWords` is the CommandRef-based extraction entry point;
-// plugin authors declaring per-binary `valueConsumingFlags` reuse the
-// same options shape. (The bare-words `locateSubcommandRun` (+
-// `SubcommandRun`) the plan slated for this list is NOT exported from
-// any published walker root — deliberate upstream — so it cannot be
-// re-exported here without a walker release; see the DEVIATION note on
-// `scanSubcommandWords` in `evaluator-internals/predicates.ts`.
-// TODO(walker-export-gap, #91).)
-export type {
-  PositionPolicy,
-  SubcommandOptions,
 } from "@cad0p/unbash-walker";
 // JSON compat — convert v1 JSON configs to v2 TS configs.
 export { FromJSONError, fromJSON } from "./compat.ts";

@@ -512,6 +512,66 @@ describe("BuiltInWhenLeaves: shape pin", () => {
     assert.ok(true);
   });
 
+  it("Rule.when rejects leaf-level onUnknown on subcommand/flag inside not:", () => {
+    // Same silent fail-OPEN ban as `cwd:` above, extended to the ARGV
+    // leaves (issue #90): inner spreads carry no `onUnknown?:` — the
+    // block-level modifier owns the walker-unknown projection.
+    const _banSub: Rule = {
+      name: "x",
+      tool: "bash",
+      field: "command",
+      pattern: "^x",
+      reason: "x",
+      when: {
+        not: {
+          subcommand: {
+            pattern: "push",
+            // @ts-expect-error: leaf-level onUnknown forbidden inside not:
+            onUnknown: "allow",
+          },
+        },
+      },
+    };
+    void _banSub;
+    const _banFlag: Rule = {
+      name: "x",
+      tool: "bash",
+      field: "command",
+      pattern: "^x",
+      reason: "x",
+      when: {
+        not: {
+          flag: {
+            anyOf: ["--force"],
+            // @ts-expect-error: leaf-level onUnknown forbidden inside not:
+            onUnknown: "allow",
+          },
+        },
+      },
+    };
+    void _banFlag;
+
+    // Sibling positives: bare + spread ARGV leaves inside not:, and
+    // block-level onUnknown alongside them, all typecheck cleanly.
+    const _ok: Rule = {
+      name: "x",
+      tool: "bash",
+      field: "command",
+      pattern: "^x",
+      reason: "x",
+      when: {
+        not: {
+          subcommand: { pattern: ["s3", "ls"], depth: 2 },
+          flag: { anyOf: ["-f"], bundleAware: true },
+          onUnknown: "block",
+        },
+      },
+    };
+    void _ok;
+
+    assert.ok(true);
+  });
+
   it("Rule.when rejects spread shape on outer condition: (bare PredicateFn only)", () => {
     // Negative type-pin: `condition?:` is bare-`PredicateFn`-typed at
     // every placement (outer + inner). Future widening to a

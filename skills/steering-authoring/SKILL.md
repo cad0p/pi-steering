@@ -31,7 +31,7 @@ The loader walks up from `cwd` to the nearest `.pi/` dir, falling back to `~/.pi
 | "change the reason on a built-in rule" | Import the original rule from its plugin, spread it with `{ ...original, name: "new-name", reason: "..." }`, and use `disabledRules: ["original-name"]` + add the replacement. Preserves pattern / when / observer. |
 | "test this rule" | Create `steering.test.ts` using `expectBlocks` / `expectAllows` / `loadHarness`. |
 | "convert my JSON config to TypeScript" | Run `pi-steering import-json .pi/steering.json -o .pi/steering.ts`. Plugins, observers, and function predicates don't round-trip — author those directly in TS. |
-| "publish a pi-steering plugin" | Package as `pi-steering-<domain>` (unscoped) with `keywords: ["pi-package", "pi-steering-package"]` in package.json. peerDep on `@cad0p/pi-steering`. |
+| "publish a pi-steering plugin" | Package as `pi-steering-<domain>` (unscoped) with `keywords: ["pi-package", "pi-steering-package"]` in package.json. peerDep on `@cad0p/pi-steering`. No direct dep on `@cad0p/unbash-walker` — reuse the package-root walker re-exports (see README "Writing plugins › Dependency rule"). |
 
 ## Minimal config
 

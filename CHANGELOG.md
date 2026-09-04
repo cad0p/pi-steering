@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - Block reasons always state the tool call was not executed (closes #85)
 - Re-export expandTildeIfLeading in the curated walker surface (closes #87)
 - *(core)* Built-in ARGV leaves (closes #90)
+- *(core)* Promote flag primitives to core root (P3, closes #99)
 
 ### 🐛 Bug Fixes
 

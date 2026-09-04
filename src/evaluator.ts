@@ -83,6 +83,7 @@ import {
   BLOCK_REASON_PREAMBLE,
   ENGINE_ERROR_PREAMBLE,
 } from "./helpers/block-reason-preamble.ts";
+import { commandFromInput } from "./helpers/command.ts";
 import { mergeObserversUserFirst } from "./internal/merge-observers.ts";
 import {
   refToTextResolved,
@@ -728,6 +729,7 @@ async function runPredicateChain(
       cwd: cand.cwd,
       tool: cand.tool,
       input: cand.input,
+      command: commandFromInput(cand.input),
       agentLoopIndex: shared.agentLoopIndex,
       exec: shared.exec,
       appendEntry: shared.appendEntry,

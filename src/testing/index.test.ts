@@ -36,6 +36,7 @@ import {
   type EvaluatorHost,
 } from "../evaluator.ts";
 import { BLOCK_REASON_PREAMBLE } from "../helpers/block-reason-preamble.ts";
+import { commandFromInput } from "../helpers/command.ts";
 import { buildWalkRegistry } from "../internal/walk-registry.ts";
 import { resolvePlugins } from "../plugin-merger.ts";
 import gitPlugin from "../plugins/git/index.ts";
@@ -1125,6 +1126,7 @@ describe("getAppendedEntries", () => {
       cwd: "/",
       tool: "bash",
       input: { tool: "bash", command: "" },
+      command: commandFromInput({ tool: "bash", command: "" }),
       agentLoopIndex: 0,
       exec: () => Promise.resolve({ stdout: "", stderr: "", exitCode: 0 }),
       appendEntry: () => {},

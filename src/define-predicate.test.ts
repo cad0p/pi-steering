@@ -14,6 +14,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { definePredicate } from "./define-predicate.ts";
+import { commandFromInput } from "./helpers/command.ts";
 import type { Plugin, PredicateContext, PredicateHandler } from "./schema.ts";
 
 describe("definePredicate", () => {
@@ -58,6 +59,7 @@ describe("definePredicate", () => {
       cwd: "/",
       tool: "bash",
       input: { tool: "bash", command: "" },
+      command: commandFromInput({ tool: "bash", command: "" }),
       agentLoopIndex: 0,
       exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
       appendEntry: () => {},

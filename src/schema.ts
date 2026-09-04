@@ -26,6 +26,7 @@
  */
 
 import type { EnvState, Tracker, Word } from "@cad0p/unbash-walker";
+import type { SteeringCommand } from "./helpers/command.ts";
 
 // ---------------------------------------------------------------------------
 // Primitive predicate types
@@ -1650,6 +1651,11 @@ export interface PredicateToolInput {
    *   - `parts` - the RAW AST word-part structure, never resolved
    *     (plugins doing their own shell-grammar work parse this).
    *
+   * Prefer reading flag values through the context-provided view
+   * {@link PredicateContext.command} (`ctx.command.getFlagValue` /
+   * `getAllFlagValues` / `hasFlag`) over scanning this array by hand —
+   * the engine binds the facade to these words per ref, quote-aware.
+   *
    * Fail-closed: any word the walker cannot resolve (absent `$VAR`,
    * command substitution, parameter-expansion modifiers, multi-command
    * process substitutions, …) stays raw — `text` falls back to the
@@ -1817,6 +1823,17 @@ export interface PredicateContext {
 
   /** Tool input - evaluator populates whichever fields apply to `tool`. */
   input: PredicateToolInput;
+
+  /**
+   * Context-provided command view (issue #101), bound per ref to the
+   * already-parsed `input.args` + `input.envAssignments` by the engine
+   * (and by `mockContext` in tests) — rule code reads flags through
+   * this instead of threading bare `Word[]` arrays by hand:
+   * `hasFlag` / `getFlagValue` (last-wins) / `getAllFlagValues` (argv
+   * order) / `hasEnvAssignment` / `isInfoOnly`. Never lex strings to
+   * feed it — the walker already parsed the command.
+   */
+  command: SteeringCommand;
 
   /**
    * Engine-maintained agent-loop counter (bumped on each pi

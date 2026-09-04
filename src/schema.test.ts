@@ -18,6 +18,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { commandFromInput } from "./helpers/command.ts";
 import type {
   Observer,
   Plugin,
@@ -272,6 +273,7 @@ describe("schema: shape smoke tests", () => {
       cwd: "/",
       tool: "bash",
       input: { tool: "bash", command: "echo" },
+      command: commandFromInput({ tool: "bash", command: "echo" }),
       agentLoopIndex: 0,
       exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
       appendEntry: () => {},

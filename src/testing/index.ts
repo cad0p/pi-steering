@@ -65,6 +65,7 @@ import {
   BLOCK_REASON_PREAMBLE,
   ENGINE_ERROR_PREAMBLE,
 } from "../helpers/block-reason-preamble.ts";
+import { commandFromInput } from "../helpers/command.ts";
 import { finalizePluginState } from "../internal/finalize-plugin-state.ts";
 import { runMergerPipeline } from "../internal/session-runtime.ts";
 import { WATCH_DEFAULT_WALK } from "../internal/walk-registry.ts";
@@ -562,7 +563,9 @@ export interface MockContextOptions {
  * Build a {@link PredicateContext} for unit-testing predicates in
  * isolation. See {@link MockContextOptions} for defaults. The returned
  * context's `appendEntry` captures into a buffer accessible via
- * {@link getAppendedEntries}.
+ * {@link getAppendedEntries}. The `command` view derives from the
+ * resolved `input` — `mockContext({ input: { tool: "bash", args: […] } })`
+ * drives `ctx.command` the same way the engine does.
  */
 export function mockContext(
   options: MockContextOptions = {},
@@ -609,6 +612,7 @@ export function mockContext(
     cwd,
     tool,
     input,
+    command: commandFromInput(input),
     agentLoopIndex,
     exec: buildExec(options.exec, "mockContext"),
     appendEntry: createAppendEntry(bufferingHost, agentLoopIndex),

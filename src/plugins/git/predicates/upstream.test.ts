@@ -19,6 +19,7 @@ import type {
   WhenWalkerState,
 } from "../../../index.ts";
 import { upstream } from "./upstream.ts";
+import { commandFromInput } from "../../../helpers/command.ts";
 
 // ---------------------------------------------------------------------------
 // Context builder
@@ -54,6 +55,7 @@ function makeCtx(
     cwd: opts?.cwd ?? "/repo",
     tool: "bash",
     input: { tool: "bash", command: "" },
+    command: commandFromInput({ tool: "bash", command: "" }),
     agentLoopIndex: 0,
     exec: async (cmd, args, execOpts) => {
       execCalls.push({ cmd, args: [...args], cwd: execOpts?.cwd });

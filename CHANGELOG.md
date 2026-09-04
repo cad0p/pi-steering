@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-09-04
+
+### Added
+
+- **Promote flag primitives to core root** (P3, issue [#99](https://github.com/cad0p/pi-steering/issues/99)): `hasFlag` / `getFlagValue` / `hasEnvAssignment` / `isInfoOnly` / `INFO_FLAGS` / `FlagLookupOptions` are now importable from `@cad0p/pi-steering` (`import { hasFlag } from "@cad0p/pi-steering"`). Ported verbatim from `@cad0p/pi-steering-flags`'s `helpers.ts` — same precedence, `gluedShorts` opt-in, last-wins, and fail-open/closed edges.
+- **Breaking-for-flags-consumers note:** the flags package deletes the moved symbols in its 0.2.0 (migration: pin bump + import fix, same diff). No compat re-export per #76/#99 — the point is letting mechanism-only consumers drop the flags dep.
+
 ## [0.2.0] - 2026-08-11
 
 <!-- USER-EDITABLE SECTION START -->

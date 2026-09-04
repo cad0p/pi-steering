@@ -79,7 +79,7 @@
 		"smoke": "node scripts/smoke.mjs"
 	},
 	"dependencies": {
-		"@cad0p/unbash-walker": "0.1.0-20260903.3",
+		"@cad0p/unbash-walker": "0.1.0-20260904.0",
 		"jiti": "^2.7.0",
 		"unbash": "^3.0.0"
 	},

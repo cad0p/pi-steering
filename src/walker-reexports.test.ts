@@ -30,6 +30,7 @@ import {
   DEFAULT_POSITION_POLICIES,
   expandTildeIfLeading,
   getSubcommandWords,
+  locateSubcommandRun,
 } from "./index.ts";
 
 describe("walker re-exports: expandTildeIfLeading (issue #87)", () => {
@@ -95,5 +96,29 @@ describe("walker re-exports: subcommand surface (issue #90)", () => {
 
   it("getSubcommandWords is callable from the root", () => {
     assert.equal(typeof getSubcommandWords, "function");
+  });
+
+  it("locateSubcommandRun is callable from the root (issue #91)", () => {
+    assert.equal(typeof locateSubcommandRun, "function");
+    // Bare-words core: caller-resolved policy, projected `.value` words.
+    const run = locateSubcommandRun(
+      [
+        { text: "-C", value: "-C" },
+        { text: "/path", value: "/path" },
+        { text: "push", value: "push" },
+      ] as never,
+      {
+        positionPolicy: "globals-before-only",
+        depth: 1,
+        valueConsumingFlags: ["-C"],
+      },
+    );
+    assert.ok(run !== null);
+    assert.equal(run.start, 2);
+    assert.deepEqual([...run.indices], [2]);
+    assert.deepEqual(
+      run.words.map((w) => (w as { value: string }).value),
+      ["push"],
+    );
   });
 });

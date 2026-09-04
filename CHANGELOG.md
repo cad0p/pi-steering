@@ -41,6 +41,7 @@ All notable changes to this project will be documented in this file.
 ### 📚 Documentation
 
 - *(schema)* State all-leaves-AND semantics in when: TSDoc (closes #78) ([#80](https://github.com/cad0p/pi-steering/pull/80))
+- Walker-dependency house rule — no direct unbash-walker dep (closes #93)
 
 ### ⚡ Performance
 

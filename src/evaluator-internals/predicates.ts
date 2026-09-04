@@ -26,10 +26,11 @@
  * unknown sentinels; handling those is the plugin handler's job.
  */
 
-import type { PositionPolicy, Word } from "@cad0p/unbash-walker";
+import type { PositionPolicy, SubcommandRun, Word } from "@cad0p/unbash-walker";
 import {
   bundleContains,
   DEFAULT_POSITION_POLICIES,
+  locateSubcommandRun,
 } from "@cad0p/unbash-walker";
 import { isPattern } from "../internal/pattern-utils.ts";
 import type {
@@ -687,73 +688,42 @@ function matchesSubcommandPattern(
 }
 
 /**
- * Local mirror of the walker's `scanSubcommandIndices` loop (plus run
- * projection) — the extraction engine behind `when.subcommand`.
+ * Project engine `PredicateWord[]` args onto the walker's bare-words
+ * surface — the adapter between `when.subcommand` and the walker's
+ * {@link locateSubcommandRun} (issue #91; mirror removed).
  *
- * DEVIATION from the issue-#90 plan (recorded per workflow): the plan
- * calls for `locateSubcommandRun` imported from `@cad0p/unbash-walker`,
- * but NO published walker version exports it from the package root —
- * the walker's own docs mark it "NOT re-exported from the index
- * root" (deliberate), and the walker's `exports` map blocks deep
- * imports, so #91 cannot re-export it either without a walker
- * release. This mirror duplicates the documented algorithm
- * line-for-line (classify via resolved form, consuming-flag skip BY
- * INDEX, after-only leading-global rejection, depth cap, null
- * conflation); the position-policy TABLE still comes from the walker
- * root (`DEFAULT_POSITION_POLICIES` — single truth for policy data).
- * Parity with every documented walker example is pinned in
- * `argv-leaves.test.ts`.
+ * The walker classifies each word via `.value ?? ""` ONLY (never
+ * `.text`), so words are copied with the engine's full resolution
+ * chain (`value ?? text ?? rawText` — see {@link scanWordText})
+ * pre-resolved into `.value`. Non-string resolved forms are
+ * stringified defensively (the walker's `startsWith` would throw
+ * `TypeError` otherwise); all-absent resolves to `""` (positional,
+ * matching the old mirror's `?? ""` fallback).
  *
- * Two deliberate deltas from the walker loop, both pinned by test:
- *   - word form resolves via {@link scanWordText} (`value ?? text ??
- *     rawText`) instead of the walker's `value ?? text ?? ""` — the
- *     rawText fallback only bites when both resolved forms are
- *     `undefined` (hand-built contexts; production words always
- *     carry resolved forms).
- *   - invalid resolved policies skip + warn here (S1) instead of
- *     throwing the walker's `TypeError` (validated before the call).
- *
- * TODO(walker-export-gap, #91): switch to `locateSubcommandRun` once
- * the walker root exports it, and re-export it (+ `SubcommandRun`)
- * from the core root.
+ * Pure: fresh array of fresh word copies per call — the caller's
+ * `args` are never mutated, and the run's snapshot refs point at
+ * the copies (same resolved text, so downstream `scanWordText`
+ * reads are unchanged).
  */
-function scanSubcommandWords(
-  words: readonly Word[],
-  opts: {
-    positionPolicy: PositionPolicy;
-    depth: number;
-    valueConsumingFlags: readonly string[];
-  },
-): readonly Word[] | null {
-  const consuming = new Set(opts.valueConsumingFlags);
-  const depth = Math.max(0, opts.depth);
-  const run: Word[] = [];
-  let i = 0;
-  while (i < words.length && run.length < depth) {
-    const word = words[i];
-    if (word === undefined) break; // bounds-guard; unreachable while i < length
-    // Quote-aware resolution ALWAYS — .text alone misreads quoted tokens.
-    const form = scanWordText(word);
-    if (form.startsWith("-")) {
-      if (opts.positionPolicy === "globals-after-only" && run.length === 0) {
-        // Leading-global-flag shape on an after-only binary: invalid by
-        // definition (`go -v build`). Null conflates with zero-positionals —
-        // both mean "no extraction possible".
-        return null;
-      }
-      i += consuming.has(form) ? 2 : 1;
-    } else {
-      run.push(word);
-      i += 1;
-    }
-  }
-  return run.length > 0 ? run : null;
+function projectSubcommandWords(args: readonly PredicateWord[]): Word[] {
+  return args.map((word) => {
+    const w = word as {
+      value?: unknown;
+      text?: unknown;
+      rawText?: unknown;
+    };
+    const form = w.value ?? w.text ?? w.rawText ?? "";
+    return {
+      ...word,
+      value: typeof form === "string" ? form : String(form),
+    };
+  });
 }
 
 /**
  * Built-in `when.subcommand` predicate. Extracts the subcommand run
- * via {@link scanSubcommandWords} (local mirror of the walker's scan;
- * see its DEVIATION note) over `ctx.input.args` and matches it
+ * via the walker's `locateSubcommandRun` (args projected through
+ * {@link projectSubcommandWords}) over `ctx.input.args` and matches it
  * against the declared pattern(s). Returns a trinary
  * {@link PredicateVerdict}: `true` / `false` for definite
  * match/mismatch, `"unknown"` when extraction yields `null`
@@ -799,9 +769,13 @@ function evaluateSubcommand(
     );
     return false;
   }
-  let run: readonly Word[] | null;
+  // Project FIRST (normalization, outside the guard below): `try/catch`
+  // wraps ONLY the `locateSubcommandRun` call, so a walker `TypeError`
+  // must never escape — extraction failure skips + warns (S1).
+  const projected = projectSubcommandWords(args);
+  let run: SubcommandRun | null;
   try {
-    run = scanSubcommandWords(args, {
+    run = locateSubcommandRun(projected, {
       positionPolicy,
       depth,
       valueConsumingFlags,
@@ -816,7 +790,7 @@ function evaluateSubcommand(
     return false;
   }
   if (run === null) return "unknown";
-  const words = run.map(scanWordText);
+  const words = run.words.map(scanWordText);
   if (sequence) {
     // Positional sequence: the walker caps at `depth`, so require a
     // full run (`aws s3` does NOT match `["s3", "ls"]` depth 2).

@@ -129,15 +129,15 @@ export default function register(
 // Walker types re-exported for plugin authors. Forward-compatible with
 // future unbash-walker extraction — imports from this package won't
 // break.
-// Walker option types for the subcommand surface (issue #90):
+// Walker option types for the subcommand surface (issues #90/#91):
 // `getSubcommandWords` is the CommandRef-based extraction entry point;
 // plugin authors declaring per-binary `valueConsumingFlags` reuse the
-// same options shape. (The bare-words `locateSubcommandRun` (+
-// `SubcommandRun`) the plan slated for this list is NOT exported from
-// any published walker root — deliberate upstream — so it cannot be
-// re-exported here without a walker release; see the DEVIATION note on
-// `scanSubcommandWords` in `evaluator-internals/predicates.ts`.
-// TODO(walker-export-gap, #91).)
+// same options shape. The bare-words `locateSubcommandRun` (+
+// `SubcommandRun`) is re-exported here so custom predicates can run
+// the engine's own extraction over projected `PredicateWord[]`
+// (see `projectSubcommandWords` in `evaluator-internals/predicates.ts`
+// for the required `.value` projection — the walker reads `.value`
+// ONLY, never `.text`).
 export type {
   Command,
   CommandRef,
@@ -147,6 +147,7 @@ export type {
   PositionPolicy,
   Script,
   SubcommandOptions,
+  SubcommandRun,
   SubshellSemantics,
   Tracker,
   WalkResult,
@@ -170,6 +171,7 @@ export {
   getCommandName,
   getSubcommandWords,
   isStaticallyResolvable,
+  locateSubcommandRun,
   parse,
   resolveWord,
   walk,

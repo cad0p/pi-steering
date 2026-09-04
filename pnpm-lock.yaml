@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@cad0p/unbash-walker':
-        specifier: 0.1.0-20260903.3
-        version: 0.1.0-20260903.3
+        specifier: 0.1.0-20260904.0
+        version: 0.1.0-20260904.0
       '@earendil-works/pi-coding-agent':
         specifier: '>=0.79.1'
         version: 0.84.1(ws@8.21.3)(zod@4.4.3)
@@ -243,8 +243,8 @@ packages:
     resolution: {integrity: sha512-DVtmALxhJDd2PegCgQ8tPzd8kpb8WuILRhi5a1bTwJyrqb9GQTs6V3t3/SVogcNeoNY+AVdR4RPM+qv0bwTmbg==}
     engines: {node: '>=22'}
 
-  '@cad0p/unbash-walker@0.1.0-20260903.3':
-    resolution: {integrity: sha512-3dpq0ivvpAINYrLLU8nVFd3Bl7E1BH1d2WZVn8IQ0Aw7kD07bxOrcKwghoI0k6T0LrWmcJvMBiiVl3kc5MHKsg==}
+  '@cad0p/unbash-walker@0.1.0-20260904.0':
+    resolution: {integrity: sha512-FWstcWAriXgYnLJZcyj1E2ExRvYDku3CARRorQX1ROVFRjbjfN4QaiQ1LumpXbPa4MtoZAAqnX+yc1m2LM8ZUw==}
     engines: {node: '>=22'}
 
   '@earendil-works/pi-agent-core@0.84.1':
@@ -998,7 +998,7 @@ snapshots:
     dependencies:
       unbash: 3.0.0
 
-  '@cad0p/unbash-walker@0.1.0-20260903.3':
+  '@cad0p/unbash-walker@0.1.0-20260904.0':
     dependencies:
       unbash: 4.0.11
 

@@ -671,9 +671,8 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
 
   /**
    * Constrain the rule to commands invoking a given subcommand.
-   * The engine extracts the subcommand run structurally via its
-   * `scanSubcommandWords` scan (local mirror of the walker's
-   * `locateSubcommandRun` algorithm — TODO walker-export-gap, #91 —
+   * The engine extracts the subcommand run structurally via the walker's
+   * `locateSubcommandRun` (projected from `PredicateWord[]` —
    * so no regex, no index math in rules) and matches it against the declared pattern(s).
    *
    * Bare `string` = EXACT equality (`"push"` does NOT match

@@ -197,20 +197,17 @@ export {
   ENGINE_ERROR_PREAMBLE,
 } from "./helpers/block-reason-preamble.ts";
 export type { FlagLookupOptions } from "./helpers/flags.ts";
-// Flag primitives promoted to core root in the P3 promotion
-// (issue #99). Ported verbatim from `@cad0p/pi-steering-flags`'s
-// `helpers.ts` — same precedence, gluedShorts opt-in, last-wins,
-// and fail-open/closed edges. Rule authors import these from here
-// for `when.condition` escape-hatch logic backing core's `when.flag`
-// leaves (issue #90); the flags package deletes them in its 0.2.0
-// (no compat re-export per #76/#99).
-export {
-  getFlagValue,
-  hasEnvAssignment,
-  hasFlag,
-  INFO_FLAGS,
-  isInfoOnly,
-} from "./helpers/flags.ts";
+// Command facade: context-provided flag-value view (issue #101).
+// Supersedes the P3 (#99) bare-helper root surface — the four bare
+// helpers (`hasFlag` / `getFlagValue` / `hasEnvAssignment` / `isInfoOnly`)
+// are deleted from the root one CalVer after introduction (all pins
+// owner-controlled; pre-1.0 breaking policy, no shim). Rule code reads
+// flags through `ctx.command` (engine-built per ref); out-of-handler /
+// test use goes through the `commandFromInput` factory. `INFO_FLAGS`
+// (data constant) + `FlagLookupOptions` (facade parameter type) stay.
+export { INFO_FLAGS } from "./helpers/flags.ts";
+export { commandFromInput } from "./helpers/command.ts";
+export type { SteeringCommand } from "./helpers/command.ts";
 // Reason-text helper for custom predicates that read runtime
 // `ctx.cwd` (shell-exec or filesystem queries) rather than
 // walker-tracked state.

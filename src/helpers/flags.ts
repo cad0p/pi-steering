@@ -36,7 +36,7 @@ function* iterWords(
   for (const w of words) yield w;
 }
 
-/** Options for {@link hasFlag} / {@link getFlagValue}. */
+/** Options for {@link hasFlag} / {@link getFlagValue} / {@link getAllFlagValues}. */
 export interface FlagLookupOptions {
   /**
    * Letters X whose GLUED short form `-X<value>` (one argv word) resolves.
@@ -231,6 +231,80 @@ export function getFlagValue(
     return match.value;
   }
   return null;
+}
+
+/**
+ * All values associated with any listed flag alias in `args`, in argv
+ * order, or `[]` if the flag is absent or present-but-valueless.
+ *
+ * Forward-scan (LEFT→RIGHT) accumulation twin of {@link getFlagValue}:
+ * at each position the same `matchFlagAt` precedence applies
+ * (exact → attached → glued with the same `glueLettersFor` gating),
+ * and each match resolves its value exactly as `getFlagValue` would at
+ * that position — except the scan collects every occurrence instead of
+ * keeping only the last:
+ *
+ *   - exact separated (`--flag value`): the NEXT token's `wordValue`.
+ *     A valueless occurrence (no next token) contributes NOTHING, and
+ *     an empty-string next token (`--flag ""`) is SKIPPED (does not
+ *     push `""`) — mirroring the scalar, which returns `null` on both
+ *     shapes. Only the attached-empty spelling carries an explicit
+ *     empty value.
+ *   - attached (`--flag=value`): pushes `value` verbatim INCLUDING `""`
+ *     (`--flag=` is an explicit empty value — the scalar returns `""`).
+ *   - glued (`-X<rest>`, opt-in via {@link FlagLookupOptions.gluedShorts}):
+ *     pushes `<rest>` (non-empty by construction).
+ *
+ * Alias sets OR'd per position, same as the scalar; mixed spellings
+ * interleave in argv order (`-m a --message b` → `["a", "b"]`).
+ * Quote-aware via `.value`-first (`wordValue`), same as scalar.
+ * No match → `[]` (never `null`).
+ *
+ * Trailing-broken asymmetry (deliberate): a trailing broken occurrence
+ * contributes nothing to the array but poisons the scalar to `null`.
+ * The scalar models "effective value of a broken command line" →
+ * `null`; the array models "values a real accumulator collected before
+ * the broken tail" (a real CLI would reject the command anyway;
+ * consumers joining for display want the collected prefix). Covers BOTH
+ * trailing shapes:
+ *
+ *   - `[-m a, -m]` (trailing valueless) → scalar `null`, array `["a"]`.
+ *   - `[-m a, -m ""]` (trailing empty-next-token) → scalar `null`,
+ *     array `["a"]`.
+ *   - `[--m=, --m]` (trailing valueless after attached-empty) → scalar
+ *     `null`, array `[""]`.
+ *
+ * Invariant (well-formed non-trailing-broken inputs ONLY):
+ * `getFlagValue(args, f, o) === (all.length ? all[all.length-1] : null)`.
+ * Trailing-broken inputs (no-next-token OR empty-next-token in trailing
+ * position) are the documented exception.
+ *
+ * Join policy lives in consumers, never here — e.g. git concatenates
+ * repeated `-m` with `"\n\n"` at the rule level.
+ */
+export function getAllFlagValues(
+  args: readonly Word[] | undefined,
+  flags: string | readonly string[],
+  opts?: FlagLookupOptions,
+): string[] {
+  const flagSet = typeof flags === "string" ? [flags] : flags;
+  const glueLetters = glueLettersFor(flagSet, opts);
+  const argsArr = args ?? [];
+  const collected: string[] = [];
+  for (let i = 0; i < argsArr.length; i++) {
+    const match = matchFlagAt(wordValue(argsArr[i]), flagSet, glueLetters);
+    if (!match) continue;
+    if (match.kind === "exact") {
+      const next = argsArr[i + 1];
+      if (next === undefined) continue;
+      const nextVal = wordValue(next);
+      if (nextVal === "") continue;
+      collected.push(nextVal);
+    } else {
+      collected.push(match.value);
+    }
+  }
+  return collected;
 }
 
 /**

@@ -539,6 +539,36 @@ describe("argv leaves: flag presence semantics", () => {
     );
   });
 
+  it("bundleAware + rawText-only word does not throw (S1: resolved form decides)", async () => {
+    // Regression: `flagPresent` passed the original Word to
+    // `bundleContains` (which reads `value ?? text` with no `rawText`
+    // fallback → TypeError on `undefined.startsWith`), escaping out of
+    // `evaluateFlag` into a fail-OPEN skip. The projected probe
+    // classifies on the same resolved form as the rest of the scan →
+    // match → fires.
+    assert.equal(
+      await fires({ flag: { anyOf: ["-f"], bundleAware: true } }, [
+        rawOnly("-uf"),
+      ]),
+      true,
+    );
+    // Non-matching bundle letter skips cleanly (no throw).
+    assert.equal(
+      await fires({ flag: { anyOf: ["-x"], bundleAware: true } }, [
+        rawOnly("-uf"),
+      ]),
+      false,
+    );
+    // All-absent word (no text/value/rawText) → `""` → positional,
+    // never throws, never flag-shaped.
+    const absent = {} as unknown as PredicateWord;
+    assert.equal(
+      await fires({ flag: { anyOf: ["-f"], bundleAware: true } }, [absent]),
+      false,
+    );
+    assert.equal(await fires({ subcommand: "push" }, [absent]), false);
+  });
+
   it("-- is flag-shaped; post--- positionals scan as ordinary tokens (documented limit)", async () => {
     assert.equal(
       await fires({ flag: { anyOf: ["--force"] } }, [w("--"), w("--force")]),

@@ -533,7 +533,10 @@ function scanWordText(word: Word): string {
     text?: unknown;
     rawText?: unknown;
   };
-  const form = w.value ?? w.text ?? w.rawText;
+  // All-absent → `""` (matches the walker's `?? ""` fallback;
+  // flag-shaped check below stays total). Defined non-strings are
+  // stringified defensively (the walker would throw on those).
+  const form = w.value ?? w.text ?? w.rawText ?? "";
   return typeof form === "string" ? form : String(form);
 }
 
@@ -824,6 +827,9 @@ function evaluateSubcommand(
     });
   }
   // OR-of-matches (or single) at depth 1: match the first word.
+  // Defensive: the scan only returns non-empty runs, so `first` is
+  // always defined when `run` is non-null — the `undefined` branch is
+  // unreachable but kept total under `noUncheckedIndexedAccess`.
   const first = words[0];
   if (first === undefined) return "unknown";
   return patterns.some((p) => matchesSubcommandPattern(p, first));
@@ -917,9 +923,16 @@ function flagPresent(
       continue;
     }
     // Short bundles (`-uf`) via the walker — longs never match here.
+    // Project the already-resolved token into a well-formed Word:
+    // `bundleContains` reads `value ?? text` itself (no `rawText`
+    // fallback) and would throw on an all-absent word, escaping the
+    // TypeError out of `evaluateFlag` (no try/catch here) into a
+    // fail-OPEN skip. The probe keeps classification on the same
+    // resolved form the rest of the scan uses (S1).
     if (bundleAware && token.startsWith("-") && !token.startsWith("--")) {
+      const probe = { text: token, value: token } as Word;
       for (const short of shorts) {
-        if (bundleContains(arg, short.slice(1))) return true;
+        if (bundleContains(probe, short.slice(1))) return true;
       }
     }
   }

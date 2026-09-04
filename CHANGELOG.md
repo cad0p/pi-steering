@@ -38,11 +38,13 @@ All notable changes to this project will be documented in this file.
 
 - Git plugin → per-item layout (work-item-plugin structure, zero behavior change) (closes #62)
 - Drop per-folder bundles in plugins/git — top-level assembly shape (closes #64)
+- *(core)* Walker locateSubcommandRun replaces scanSubcommandWords mirror (closes #91)
 
 ### 📚 Documentation
 
 - *(schema)* State all-leaves-AND semantics in when: TSDoc (closes #78) ([#80](https://github.com/cad0p/pi-steering/pull/80))
 - Walker-dependency house rule — no direct unbash-walker dep (closes #93)
+- Contributor test conventions — no redundant pins (closes #97)
 
 ### ⚡ Performance
 

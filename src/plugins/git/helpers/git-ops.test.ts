@@ -17,6 +17,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { commandFromInput } from "../../../helpers/command.ts";
 import type { ExecResult, PredicateContext } from "../../../index.ts";
 import {
   getBranch,
@@ -26,7 +27,6 @@ import {
   getUpstream,
   getWorkingTreeClean,
 } from "./git-ops.ts";
-import { commandFromInput } from "../../../helpers/command.ts";
 
 // ---------------------------------------------------------------------------
 // Context builder

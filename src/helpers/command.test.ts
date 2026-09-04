@@ -47,20 +47,27 @@ describe("SteeringCommand.getAllFlagValues", () => {
     assert.deepEqual(cmd.getAllFlagValues(["-m", "--message"]), ["a", "b"]);
   });
 
-  it("reads the attached form, including attached-empty as explicit \"\"", () => {
+  it('reads the attached form, including attached-empty as explicit ""', () => {
     const cmd = bashCmd(S("--subject=docs", "--subject="));
     assert.deepEqual(cmd.getAllFlagValues("--subject"), ["docs", ""]);
   });
 
   it("skips separated-empty (no push), unlike attached-empty", () => {
     // Scalar returns null on `--flag ""`; the array twin SKIPS.
-    const cmd = bashCmd([PW("--subject"), PW("", '""'), PW("--subject"), PW("x")]);
+    const cmd = bashCmd([
+      PW("--subject"),
+      PW("", '""'),
+      PW("--subject"),
+      PW("x"),
+    ]);
     assert.deepEqual(cmd.getAllFlagValues("--subject"), ["x"]);
   });
 
   it("resolves glued shorts only when opted in", () => {
     const glued = bashCmd(S("-Rc/d"));
-    assert.deepEqual(glued.getAllFlagValues("-R", { gluedShorts: ["R"] }), ["c/d"]);
+    assert.deepEqual(glued.getAllFlagValues("-R", { gluedShorts: ["R"] }), [
+      "c/d",
+    ]);
     const blind = bashCmd(S("-Rc/d"));
     assert.deepEqual(blind.getAllFlagValues("-R"), []);
   });
@@ -89,7 +96,10 @@ describe("SteeringCommand.getAllFlagValues", () => {
   });
 
   it("is quote-aware via .value-first reads", () => {
-    const cmd = bashCmd([PW("-m"), PW("conventional: subject", "'conventional: subject'")]);
+    const cmd = bashCmd([
+      PW("-m"),
+      PW("conventional: subject", "'conventional: subject'"),
+    ]);
     assert.deepEqual(cmd.getAllFlagValues("-m"), ["conventional: subject"]);
   });
 
@@ -112,7 +122,10 @@ describe("SteeringCommand.getAllFlagValues", () => {
     for (const { args, flags } of cases) {
       const cmd = bashCmd(args);
       const all = cmd.getAllFlagValues(flags);
-      assert.equal(cmd.getFlagValue(flags), all.length > 0 ? all[all.length - 1] : null);
+      assert.equal(
+        cmd.getFlagValue(flags),
+        all.length > 0 ? all[all.length - 1] : null,
+      );
     }
     // Glued form under matching opt-in options.
     const glued = bashCmd(S("-Rc/d", "-Re/f"));

@@ -13,13 +13,13 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { commandFromInput } from "../../../helpers/command.ts";
 import type {
   ExecResult,
   PredicateContext,
   WhenWalkerState,
 } from "../../../index.ts";
 import { remote } from "./remote.ts";
-import { commandFromInput } from "../../../helpers/command.ts";
 
 // ---------------------------------------------------------------------------
 // Context builder

@@ -51,10 +51,7 @@ export interface SteeringCommand {
    * attached `flag=value` token, or opt-in glued `-X<value>` form).
    * Delegates to `hasFlag` with the bound argv words.
    */
-  hasFlag(
-    flag: string | readonly string[],
-    opts?: FlagLookupOptions,
-  ): boolean;
+  hasFlag(flag: string | readonly string[], opts?: FlagLookupOptions): boolean;
 
   /**
    * Value of the LAST occurrence of any listed flag alias, or `null`
@@ -105,9 +102,7 @@ export interface SteeringCommand {
  * arrays, so post-construction mutation of the caller's arrays cannot
  * leak into the facade.
  */
-export function commandFromInput(
-  input: PredicateToolInput,
-): SteeringCommand {
+export function commandFromInput(input: PredicateToolInput): SteeringCommand {
   const args: readonly Word[] = [...(input?.args ?? [])];
   const envAssignments: readonly Word[] = [...(input?.envAssignments ?? [])];
   return {

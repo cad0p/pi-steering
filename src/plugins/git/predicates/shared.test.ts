@@ -22,6 +22,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { commandFromInput } from "../../../helpers/command.ts";
 import type {
   ExecResult,
   PredicateContext,
@@ -33,7 +34,6 @@ import { hasStagedChanges } from "./has-staged-changes.ts";
 import { isClean } from "./is-clean.ts";
 import { remote } from "./remote.ts";
 import { upstream } from "./upstream.ts";
-import { commandFromInput } from "../../../helpers/command.ts";
 
 // ---------------------------------------------------------------------------
 // Context builder

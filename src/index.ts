@@ -196,6 +196,8 @@ export {
   BLOCK_REASON_PREAMBLE,
   ENGINE_ERROR_PREAMBLE,
 } from "./helpers/block-reason-preamble.ts";
+export type { SteeringCommand } from "./helpers/command.ts";
+export { commandFromInput } from "./helpers/command.ts";
 export type { FlagLookupOptions } from "./helpers/flags.ts";
 // Command facade: context-provided flag-value view (issue #101).
 // Supersedes the P3 (#99) bare-helper root surface — the four bare
@@ -206,8 +208,6 @@ export type { FlagLookupOptions } from "./helpers/flags.ts";
 // test use goes through the `commandFromInput` factory. `INFO_FLAGS`
 // (data constant) + `FlagLookupOptions` (facade parameter type) stay.
 export { INFO_FLAGS } from "./helpers/flags.ts";
-export { commandFromInput } from "./helpers/command.ts";
-export type { SteeringCommand } from "./helpers/command.ts";
 // Reason-text helper for custom predicates that read runtime
 // `ctx.cwd` (shell-exec or filesystem queries) rather than
 // walker-tracked state.

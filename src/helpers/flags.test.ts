@@ -4,8 +4,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Word } from "@cad0p/unbash-walker";
-import type { SteeringCommand as RootSteeringCommand } from "../index.ts";
-import type { FlagLookupOptions as RootFlagLookupOptions } from "../index.ts";
+import type {
+  FlagLookupOptions as RootFlagLookupOptions,
+  SteeringCommand as RootSteeringCommand,
+} from "../index.ts";
 import type { PredicateWord } from "../schema.ts";
 import type { FlagLookupOptions } from "./flags.ts";
 import {
@@ -697,7 +699,9 @@ describe("command facade: package-root surface pin (#101)", () => {
   it("root commandFromInput isInfoOnly honors the default set", async () => {
     const root = await import("../index.ts");
     assert.equal(
-      root.commandFromInput({ tool: "bash", args: [PW("--help")] }).isInfoOnly(),
+      root
+        .commandFromInput({ tool: "bash", args: [PW("--help")] })
+        .isInfoOnly(),
       true,
     );
     assert.equal(

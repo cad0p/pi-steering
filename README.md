@@ -686,6 +686,10 @@ Publishing conventions:
 - **Peer range**: pin to a major once `@cad0p/pi-steering` is v1+ (`"pi-steering": "^1"`). During the v0.x window, match the release train closely (`"pi-steering": "^0.1.0"`).
 - **License**: MIT by default, matching the core. Amazon-internal / proprietary plugins use their own license; the core has no opinion on this.
 
+### Dependency rule
+
+Do NOT take a direct dependency on `@cad0p/unbash-walker` from a plugin — import the walker helpers you need from the `@cad0p/pi-steering` package root instead. One version, one policy table, one scan loop: a skewed local copy is a guardrail-correctness bug, not a hygiene nit. If the helper you need isn't re-exported yet, file a re-export issue (see #87 / #91 for the template) rather than vendoring it. The re-export surface stays deliberately minimal — every re-export is a stability promise.
+
 ### Overriding a built-in rule
 
 Plugin-shipped rules are individually exported from their plugins (see `pi-steering/plugins/git`'s named exports). To tighten a rule's reason message — e.g. pointing your agents at an internal skill or team runbook — disable the original and re-register under a new name:

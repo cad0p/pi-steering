@@ -155,7 +155,7 @@ export type {
 } from "@cad0p/unbash-walker";
 // Walker functions re-exported for plugin authors writing custom
 // predicates and trackers. Forward-compatible with future
-// unbash-walker extraction.
+// unbash-walker extraction. Dependency rule (see README "Writing plugins › Dependency rule"): import these from here, never from @cad0p/unbash-walker directly.
 export {
   bundleContains,
   cwdTracker,

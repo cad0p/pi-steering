@@ -385,6 +385,112 @@ export type InnerValue<K extends PluginPredicateKey> =
   | PiSteeringPredicates[K]["spreadBase"];
 
 /**
+ * A single subcommand pattern for {@link SubcommandLeaf} /
+ * {@link SubcommandLeafInner}.
+ *
+ * NOTE the deliberate deviation from {@link Pattern}: a bare `string`
+ * here is EXACT equality (`"push"` ≠ `"pushback"`), NOT a regex
+ * source. `RegExp` members test against the extracted word. Typed
+ * separately so authors don't carry `cwd:`'s regex-source intuition
+ * across.
+ */
+export type SubcommandPattern = string | RegExp;
+
+/**
+ * Spread form shared by {@link SubcommandLeaf} (outer) and
+ * {@link SubcommandLeafInner} (inner): `{ pattern, depth?,
+ * valueConsumingFlags? }`. In spread form an array `pattern` MUST
+ * have `length === depth` (positional sequence); bare arrays (no
+ * spread) are OR-of-matches at the default depth 1 instead.
+ */
+export interface SubcommandSpreadBase {
+  /** Single pattern or positional sequence (`length === depth`). */
+  pattern: SubcommandPattern | SubcommandPattern[];
+  /**
+   * How many positional tokens make up the subcommand. Default 1.
+   * `aws s3 ls` / `kubectl get pods` want 2. `0` extracts nothing →
+   * `"unknown"` → default `"block"` (fail-closed).
+   */
+  depth?: number;
+  /**
+   * Flags that consume the following token (`-C`, `-c`, `-R`,
+   * `--repo`, `--profile`, …) so values never read as subcommands.
+   * Per-binary, plugin-declared; the walker stays arity-ignorant.
+   * Default: none.
+   */
+  valueConsumingFlags?: readonly string[];
+}
+
+/**
+ * Rule-level (`when:`) `subcommand:` leaf: bare pattern(s) or the
+ * spread form with leaf-level `onUnknown?:` (default `"block"` =
+ * fail-CLOSED).
+ *
+ * @see SubcommandPattern for the bare-string exactness contract.
+ */
+export type SubcommandLeaf =
+  | SubcommandPattern
+  | SubcommandPattern[]
+  | (SubcommandSpreadBase & { onUnknown?: "allow" | "block" });
+
+/**
+ * `not:`-block `subcommand:` leaf: same as {@link SubcommandLeaf}
+ * but the spread form drops `onUnknown?:` — modifiers live at the
+ * not-block level via `& PredicateModifiers`.
+ */
+export type SubcommandLeafInner =
+  | SubcommandPattern
+  | SubcommandPattern[]
+  | SubcommandSpreadBase;
+
+/**
+ * Spread form shared by {@link FlagLeaf} (outer) and
+ * {@link FlagLeafInner} (inner): `{ anyOf, bundleAware?,
+ * valueConsumingFlags? }`. `flag:` has no bare form.
+ */
+export interface FlagSpreadBase {
+  /**
+   * Flag spellings to scan for. Longs (`--force`) match the exact
+   * token or the attached `--force=x` form; single-char shorts
+   * (`-f`) match the exact token, or inside bundles when
+   * `bundleAware` is set. Every member must be a long (`--` +
+   * name) or a single-char short (`-` + letter); anything else
+   * (multi-char shorts like `-ff`, bare `-` / `--`, non-dash
+   * spellings) is invalid → leaf `false` (rule skips, NOT unknown).
+   * Empty `anyOf` is likewise invalid → `false`.
+   */
+  anyOf: string[];
+  /**
+   * Route short bundles through the walker's `bundleContains`
+   * (`-uf` matches `-u` / `-f`). Longs never bundle-match.
+   * Default `false`.
+   */
+  bundleAware?: boolean;
+  /**
+   * Flags that consume the following token, skipped BY POSITION
+   * during the presence scan (never by content). Default: none.
+   */
+  valueConsumingFlags?: readonly string[];
+}
+
+/**
+ * Rule-level (`when:`) `flag:` leaf: the spread form with leaf-level
+ * `onUnknown?:` (default `"block"` = fail-CLOSED; only reachable
+ * on non-bash tools with no `args` — otherwise presence is
+ * definite).
+ */
+export type FlagLeaf = FlagSpreadBase & {
+  onUnknown?: "allow" | "block";
+};
+
+/**
+ * `not:`-block `flag:` leaf: same as {@link FlagLeaf} but drops
+ * `onUnknown?:` — modifiers live at the not-block level via
+ * `& PredicateModifiers`.
+ */
+export type FlagLeafInner = FlagSpreadBase;
+
+/**
  * Built-in non-registry leaves attached to a {@link Rule.when}
  * clause — outer flavor. All leaves present in this block are
  * ANDed — the clause fires only when every leaf fires.
@@ -398,10 +504,10 @@ export type InnerValue<K extends PluginPredicateKey> =
  * compile-time-checked against the union of declared `writes`
  * arrays across plugins + observers.
  *
- * Currently three non-registry leaves: `missing?:`, `condition?:`,
- * `cwd?:`. The shape is pinned in tests (a future widening — e.g.,
- * adding a new built-in `tool?:` leaf — fails the type-pin and
- * forces a deliberate decision).
+ * Currently five non-registry leaves: `missing?:`, `condition?:`,
+ * `cwd?:`, `subcommand?:`, `flag?:`. The shape is pinned in tests (a
+ * future widening — e.g., adding a new built-in `tool?:` leaf — fails
+ * the type-pin and forces a deliberate decision).
  *
  * ## Outer / Inner split
  *
@@ -424,6 +530,17 @@ export type InnerValue<K extends PluginPredicateKey> =
  * `Pattern | Pattern[] | { pattern, onUnknown? }` (leaf-level
  * `onUnknown:` honored at the outer when-level via `evaluateCwd` /
  * `projectVerdict`).
+ *
+ *
+ * ## ARGV leaves (`subcommand:` / `flag:`)
+ *
+ * The spread forms differ the same way (`subcommand:`'s
+ * `{ pattern, depth, valueConsumingFlags, onUnknown? }` and `flag:`'s
+ * `{ anyOf, bundleAware?, valueConsumingFlags?, onUnknown? }` drop
+ * `onUnknown?:` inside `not:`). Named leaf types below keep the
+ * Outer/Inner declarations in lockstep: {@link SubcommandLeaf} /
+ * {@link SubcommandLeafInner} and {@link FlagLeaf} /
+ * {@link FlagLeafInner}.
  *
  * @see BuiltInWhenLeavesInner for the parallel inner-flavor type
  *      used inside `not:`.
@@ -551,6 +668,79 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
     | Pattern
     | Pattern[]
     | { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };
+
+  /**
+   * Constrain the rule to commands invoking a given subcommand.
+   * The engine extracts the subcommand run structurally via its
+   * `scanSubcommandWords` scan (local mirror of the walker's
+   * `locateSubcommandRun` algorithm — TODO walker-export-gap, #91 —
+   * so no regex, no index math in rules) and matches it against the declared pattern(s).
+   *
+   * Bare `string` = EXACT equality (`"push"` does NOT match
+   * `"pushback"`) — deliberately NOT the regex-source semantics of
+   * {@link Pattern}-typed leaves like `cwd:`. `RegExp` = test
+   * against the extracted word. Bare array = OR-of-matches at the
+   * default depth 1 (any member matching the first subcommand word
+   * fires). Spread form `{ pattern, depth?, valueConsumingFlags?,
+   * onUnknown? }` covers multi-word runs (`aws s3 ls`, `kubectl get
+   * pods`): the array length MUST equal `depth` (positional
+   * sequence — `["s3", "ls"]` at `depth: 2`); a non-array pattern
+   * with `depth > 1`, a length≠depth array, an empty array, or
+   * non-`string | RegExp` members are invalid and the leaf evaluates
+   * to `false` (rule skips, `cwd`-style fail-skip). `depth: 0`
+   * extracts nothing → `"unknown"` → default `"block"` (fail-closed).
+   *
+   * `valueConsumingFlags` declares flags that consume the following
+   * token (`git -C DIR`, `-c <key>=<value>`) so values never read as
+   * subcommands: `git -c KEY=VAL push` extracts `push` (without the
+   * declaration it would read `KEY=VAL` and the rule would silently
+   * SKIP — fail-open for guard rules). The walker stays
+   * arity-ignorant; per-binary lists are plugin-declared. Attached
+   * `--flag=value` forms consume without declaration (single token
+   * by construction). Default: none.
+   *
+   * Position policy resolves from the walker's
+   * `DEFAULT_POSITION_POLICIES` table keyed on the ref basename
+   * (`git` → globals-before-only), falling back to
+   * `"globals-anywhere"`. A `null` extraction (all-flags
+   * invocation, trailing consuming flag, after-only invalid shape
+   * like `go -v build`, assignment-only/nameless, non-bash tools
+   * with no `args`) surfaces `"unknown"` → `onUnknown:` policy
+   * (default `"block"` = fail-CLOSED, rule fires).
+   *
+   * Word forms are ENV-RESOLVED runtime forms (issue #51): `"$X"`
+   * with `X=--force` classifies flag-shaped (it IS what executes).
+   *
+   * @see BuiltInWhenLeavesInner.subcommand for the `not:`-block
+   *      flavor (spread drops `onUnknown?:`).
+   */
+  subcommand?: SubcommandLeaf;
+
+  /**
+   * Constrain the rule to commands carrying any of the listed flag
+   * spellings. Presence scan over the ref's resolved words:
+   * longs match the exact token or the attached `--flag=value`
+   * form; single-char shorts (`-f`) match the exact token, or —
+   * with `bundleAware: true` — inside bundles via the walker's
+   * `bundleContains` (`git push -uf` matches `-u` / `-f`; longs
+   * NEVER bundle-match). Multi-char short spellings (e.g. `-ff`),
+   * empty `anyOf`, or non-string members are invalid and the leaf
+   * evaluates to `false` (rule skips, NOT unknown).
+   *
+   * Values of declared `valueConsumingFlags` are skipped BY POSITION
+   * (`i += 2`), never by content: `gh -R --force pr` with `-R`
+   * declared does NOT report `--force` present. `--` itself is a
+   * flag-shaped token; post-`--` positionals are unmodelled (walker
+   * limitation) — a `--force` after `--` still scans as present.
+   *
+   * Non-bash tools (no `args`) surface `"unknown"` → `onUnknown:`
+   * policy (default `"block"` = fail-CLOSED). Otherwise presence is
+   * definite (absent → `false`, never unknown).
+   *
+   * @see BuiltInWhenLeavesInner.flag for the `not:`-block flavor
+   *      (spread drops `onUnknown?:`).
+   */
+  flag?: FlagLeaf;
 }
 
 /**
@@ -558,14 +748,16 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
  * {@link TopLevelWhenClauseNoRecurse} (the body of `not:`). Leaves
  * inside a `not:` block are ANDed too — every inner leaf must match
  * for the combined verdict to be `true`, and `not:` inverts that
- * combined verdict. `cwd?:`
- * accepts `Pattern | Pattern[] | { pattern }` — NO leaf-level
- * `onUnknown?:`. Modifiers live at the not-block level via
+ * combined verdict. `cwd?:` accepts `Pattern | Pattern[] |
+ * { pattern }`, `subcommand?:` its {@link SubcommandLeafInner} shape,
+ * and `flag?:` its {@link FlagLeafInner} shape — NO leaf-level
+ * `onUnknown?:` on any of them. Modifiers live at the not-block level via
  * `& PredicateModifiers`, matching the constraint registry-driven
  * inner predicates already enforce via `InnerValue<K>`.
  *
  * `missing?:` and `condition?:` are identical to
- * {@link BuiltInWhenLeavesOuter}; only `cwd:` differs. The engine
+ * {@link BuiltInWhenLeavesOuter}; only the `cwd:` / `subcommand:` /
+ * `flag:` spreads differ (each drops `onUnknown?:`). The engine
  * reads block-level `onUnknown:` inside `not:` regardless of leaf
  * shape, so this type formalizes that constraint at the authoring
  * surface (preventing the silent fail-OPEN class where leaf-level
@@ -589,6 +781,21 @@ export interface BuiltInWhenLeavesInner<Writes extends string = string> {
    * (default `"block"` = fail-CLOSED, rule fires).
    */
   cwd?: Pattern | Pattern[] | { pattern: Pattern | Pattern[] };
+
+  /**
+   * Same `subcommand:` semantics as
+   * {@link BuiltInWhenLeavesOuter.subcommand} but the spread form's
+   * `onUnknown?:` is dropped — modifiers live at the not-block level
+   * via `& PredicateModifiers`.
+   */
+  subcommand?: SubcommandLeafInner;
+
+  /**
+   * Same `flag:` semantics as {@link BuiltInWhenLeavesOuter.flag}
+   * but the spread form's `onUnknown?:` is dropped — modifiers live
+   * at the not-block level via `& PredicateModifiers`.
+   */
+  flag?: FlagLeafInner;
 }
 
 /**

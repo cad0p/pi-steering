@@ -394,7 +394,7 @@ describe("validateWhenClauseShape: nested-not: rejection", () => {
 // ---------------------------------------------------------------------------
 
 describe("BuiltInWhenLeaves: shape pin", () => {
-  it("BuiltInWhenLeaves contains exactly { missing, condition, cwd }", () => {
+  it("BuiltInWhenLeaves contains exactly { missing, condition, cwd, subcommand, flag }", () => {
     // Compile-only assertion. If a future change adds a new built-in
     // non-registry leaf (e.g., `tool?:`) without updating the pin, this
     // fails to typecheck — forces a deliberate decision rather than
@@ -403,6 +403,8 @@ describe("BuiltInWhenLeaves: shape pin", () => {
       | "missing"
       | "condition"
       | "cwd"
+      | "subcommand"
+      | "flag"
       ? true
       : false;
     const _b: _BuiltInShape = true;
@@ -413,18 +415,23 @@ describe("BuiltInWhenLeaves: shape pin", () => {
   it("BuiltInWhenLeavesOuter and BuiltInWhenLeavesInner share the same key set", () => {
     // Outer/Inner split formalizes the leaf-level `onUnknown:` ban
     // inside `not:` (parity with registry-driven inner predicates).
-    // Both flavors carry `missing?:`, `condition?:`, `cwd?:`; only
-    // `cwd:`'s spread shape differs.
+    // Both flavors carry `missing?:`, `condition?:`, `cwd?:`,
+    // `subcommand?:`, `flag?:`; only the spread shapes differ
+    // (`onUnknown?:` dropped inside `not:`).
     type _OuterKeys = keyof BuiltInWhenLeavesOuter extends
       | "missing"
       | "condition"
       | "cwd"
+      | "subcommand"
+      | "flag"
       ? true
       : false;
     type _InnerKeys = keyof BuiltInWhenLeavesInner extends
       | "missing"
       | "condition"
       | "cwd"
+      | "subcommand"
+      | "flag"
       ? true
       : false;
     const _outer: _OuterKeys = true;
@@ -501,6 +508,66 @@ describe("BuiltInWhenLeaves: shape pin", () => {
       when: { not: { cwd: /work/, onUnknown: "block" } },
     };
     void _blockLevel;
+
+    assert.ok(true);
+  });
+
+  it("Rule.when rejects leaf-level onUnknown on subcommand/flag inside not:", () => {
+    // Same silent fail-OPEN ban as `cwd:` above, extended to the ARGV
+    // leaves (issue #90): inner spreads carry no `onUnknown?:` — the
+    // block-level modifier owns the walker-unknown projection.
+    const _banSub: Rule = {
+      name: "x",
+      tool: "bash",
+      field: "command",
+      pattern: "^x",
+      reason: "x",
+      when: {
+        not: {
+          subcommand: {
+            pattern: "push",
+            // @ts-expect-error: leaf-level onUnknown forbidden inside not:
+            onUnknown: "allow",
+          },
+        },
+      },
+    };
+    void _banSub;
+    const _banFlag: Rule = {
+      name: "x",
+      tool: "bash",
+      field: "command",
+      pattern: "^x",
+      reason: "x",
+      when: {
+        not: {
+          flag: {
+            anyOf: ["--force"],
+            // @ts-expect-error: leaf-level onUnknown forbidden inside not:
+            onUnknown: "allow",
+          },
+        },
+      },
+    };
+    void _banFlag;
+
+    // Sibling positives: bare + spread ARGV leaves inside not:, and
+    // block-level onUnknown alongside them, all typecheck cleanly.
+    const _ok: Rule = {
+      name: "x",
+      tool: "bash",
+      field: "command",
+      pattern: "^x",
+      reason: "x",
+      when: {
+        not: {
+          subcommand: { pattern: ["s3", "ls"], depth: 2 },
+          flag: { anyOf: ["-f"], bundleAware: true },
+          onUnknown: "block",
+        },
+      },
+    };
+    void _ok;
 
     assert.ok(true);
   });

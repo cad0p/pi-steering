@@ -129,13 +129,24 @@ export default function register(
 // Walker types re-exported for plugin authors. Forward-compatible with
 // future unbash-walker extraction — imports from this package won't
 // break.
+// Walker option types for the subcommand surface (issue #90):
+// `getSubcommandWords` is the CommandRef-based extraction entry point;
+// plugin authors declaring per-binary `valueConsumingFlags` reuse the
+// same options shape. (The bare-words `locateSubcommandRun` (+
+// `SubcommandRun`) the plan slated for this list is NOT exported from
+// any published walker root — deliberate upstream — so it cannot be
+// re-exported here without a walker release; see the DEVIATION note on
+// `scanSubcommandWords` in `evaluator-internals/predicates.ts`.
+// TODO(walker-export-gap, #91).)
 export type {
   Command,
   CommandRef,
   EnvState,
   Modifier,
   Node,
+  PositionPolicy,
   Script,
+  SubcommandOptions,
   SubshellSemantics,
   Tracker,
   WalkResult,
@@ -146,7 +157,9 @@ export type {
 // predicates and trackers. Forward-compatible with future
 // unbash-walker extraction. Dependency rule (see README "Writing plugins › Dependency rule"): import these from here, never from @cad0p/unbash-walker directly.
 export {
+  bundleContains,
   cwdTracker,
+  DEFAULT_POSITION_POLICIES,
   envTracker,
   expandTildeIfLeading,
   expandWrapperCommands,
@@ -155,6 +168,7 @@ export {
   getBasename,
   getCommandArgs,
   getCommandName,
+  getSubcommandWords,
   isStaticallyResolvable,
   parse,
   resolveWord,
@@ -206,6 +220,9 @@ export type {
   ExecResult,
   Exemption,
   ExemptionWhenClause,
+  FlagLeaf,
+  FlagLeafInner,
+  FlagSpreadBase,
   InnerValue,
   Observer,
   ObserverContext,
@@ -230,6 +247,10 @@ export type {
   SteeringConfig,
   SteeringDiagnostic,
   SteeringDiagnosticKind,
+  SubcommandLeaf,
+  SubcommandLeafInner,
+  SubcommandPattern,
+  SubcommandSpreadBase,
   ToolResultEvent,
   TopLevelWhenClause,
   TopLevelWhenClauseNoRecurse,

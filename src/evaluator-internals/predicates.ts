@@ -10,8 +10,9 @@
  *                                    `unless` values against a target
  *                                    string.
  *   - {@link evaluateWhen}        — walks a {@link TopLevelWhenClause} tree,
- *                                    dispatching built-in (`cwd`, `not`,
- *                                    `condition`) + plugin-registered
+ *                                    dispatching built-in (`cwd`,
+ *                                    `subcommand`, `flag`, `missing`,
+ *                                    `not`, `condition`) + plugin-registered
  *                                    predicates.
  *   - {@link UnknownPredicateError} — thrown when a {@link TopLevelWhenClause} names a
  *                                    predicate nobody registered. Kept as
@@ -25,15 +26,24 @@
  * unknown sentinels; handling those is the plugin handler's job.
  */
 
+import type { PositionPolicy, Word } from "@cad0p/unbash-walker";
+import {
+  bundleContains,
+  DEFAULT_POSITION_POLICIES,
+} from "@cad0p/unbash-walker";
 import { isPattern } from "../internal/pattern-utils.ts";
 import type {
+  FlagSpreadBase,
   Pattern,
   PredicateContext,
   PredicateFn,
   PredicateHandler,
   PredicateModifiers,
   PredicateVerdict,
+  PredicateWord,
   ReservedPredicateKey,
+  SubcommandPattern,
+  SubcommandSpreadBase,
   TopLevelWhenClause,
   TopLevelWhenClauseNoRecurse,
 } from "../schema.ts";
@@ -114,7 +124,8 @@ export function isReservedPredicateKey(
  * The `not:` operator field itself counts as a leaf at the outer
  * `when:` level (it produces a verdict via Kleene composition of the
  * inner not-block); only modifier keys are stripped. Built-in
- * non-registry keys (`condition`, `missing`, `cwd`) count as leaves;
+ * non-registry keys (`condition`, `missing`, `cwd`, `subcommand`,
+ * `flag`) count as leaves;
  * plugin-registered predicates count as leaves regardless of whether
  * the plugin is currently loaded — the unknown-predicate check fires
  * later via {@link UnknownPredicateError}.
@@ -158,8 +169,12 @@ export function validateWhenClauseShape(
     }
     // Leaf object forms can smuggle `onUnknown` as a sibling of
     // `pattern` / `value` (e.g. `cwd: { pattern, onUnknown }`, or a
-    // plugin predicate's `{ value, onUnknown }` spread). Reject those
-    // in strict mode too.
+    // plugin predicate's `{ value, onUnknown }` spread) — or as a
+    // sibling of the ARGV-spread keys (`subcommand: { depth,
+    // onUnknown }`, `flag: { anyOf / bundleAware /
+    // valueConsumingFlags, onUnknown }`). Bare-keyed spreads evade a
+    // `pattern | value`-only trigger, so every spread payload key
+    // arms the check. Reject those in strict mode too.
     if (options.rejectOnUnknown && leafObjectCarriesOnUnknown(v)) {
       throw new Error(
         `[pi-steering] ${path}.${key} carries a forbidden 'onUnknown:' modifier ` +
@@ -174,7 +189,7 @@ export function validateWhenClauseShape(
   if (leafKeys === 0) {
     throw new Error(
       `[pi-steering] ${path} contains no predicate leaves; ` +
-        `a clause must contain at least one predicate (cwd:, branch:, ` +
+        `a clause must contain at least one predicate (cwd:, subcommand:, flag:, branch:, ` +
         `commitsAhead:, condition:, missing:, not:, etc.). Modifier keys ` +
         `(${MODIFIER_KEYS.join(", ")}) alone are not enough — add a leaf ` +
         `or remove the empty clause.`,
@@ -226,9 +241,11 @@ export function validateWhenClauseShape(
  *   - the clause top level (`when: { cwd: /x/, onUnknown: ... }`),
  *   - the not-block top level (`when: { not: { cwd: /x/, onUnknown:
  *     ... } }` — the recursion below), and
- *   - leaf object forms carrying `pattern` / `value` keys
+ *   - leaf object forms carrying `pattern` / `value` / `anyOf` /
+ *     `bundleAware` / `valueConsumingFlags` / `depth` keys
  *     (`cwd: { pattern: /x/, onUnknown: ... }`, plugin spread forms
- *     `{ value: ..., onUnknown: ... }`).
+ *     `{ value: ..., onUnknown: ... }`, ARGV spreads
+ *     `{ anyOf: [...], onUnknown: ... }` / `{ depth, onUnknown }`).
  *
  * `condition` (function) and `missing` (`{ event, in, since?,
  * notIn? }`) values are skipped — they cannot carry `onUnknown`.
@@ -250,7 +267,8 @@ export function validateExemptionWhenClauseShape(
 }
 
 /**
- * Does this leaf value carry a `{ pattern | value, onUnknown }`
+ * Does this leaf value carry a `{ pattern | value | anyOf |
+ * bundleAware | valueConsumingFlags | depth, onUnknown }`
  * object form — i.e. a spread-form leaf that smuggles an `onUnknown`
  * modifier as a sibling of its payload key? Used by
  * {@link validateWhenClauseShape} in strict (`rejectOnUnknown`)
@@ -258,7 +276,7 @@ export function validateExemptionWhenClauseShape(
  * exemption clauses.
  *
  * Functions (`condition`) and `missing` shapes (`{ event, in, ... }`
- * — no `pattern` / `value` key) are not object-form leaves and are
+ * — none of the trigger keys) are not object-form leaves and are
  * skipped.
  */
 function leafObjectCarriesOnUnknown(value: unknown): boolean {
@@ -271,7 +289,15 @@ function leafObjectCarriesOnUnknown(value: unknown): boolean {
     return false;
   }
   const record = value as Record<string, unknown>;
-  return ("pattern" in record || "value" in record) && "onUnknown" in record;
+  return (
+    ("pattern" in record ||
+      "value" in record ||
+      "anyOf" in record ||
+      "bundleAware" in record ||
+      "valueConsumingFlags" in record ||
+      "depth" in record) &&
+    "onUnknown" in record
+  );
 }
 
 /**
@@ -484,6 +510,458 @@ function evaluateCwd(value: unknown, walkerCwd: string): PredicateVerdict {
   // attempt a regex coercion which almost certainly produces `false`).
   if (walkerCwd === "unknown") return "unknown";
   return matchesPattern(value as Pattern, walkerCwd);
+}
+
+// ---------------------------------------------------------------------------
+// Built-in ARGV leaves: `when.subcommand` / `when.flag` (issue #90)
+// ---------------------------------------------------------------------------
+
+/**
+ * Word form the ARGV leaves match against: the ENV-RESOLVED runtime
+ * form (`value ?? text`, issue #51 — `"$X"` with `X=--force`
+ * classifies flag-shaped because that IS what executes), falling back
+ * to `rawText` only when both resolved forms are `undefined`
+ * (intractable word). Mirrors the walker's own `value ?? text`
+ * classification, plus the source-text escape hatch.
+ *
+ * `ctx.input.args` (a `PredicateWord[]`) is passed straight through —
+ * `PredicateWord extends Word`, so no projection helper is needed.
+ */
+function scanWordText(word: Word): string {
+  const w = word as {
+    value?: unknown;
+    text?: unknown;
+    rawText?: unknown;
+  };
+  // All-absent → `""` (matches the walker's `?? ""` fallback;
+  // flag-shaped check below stays total). Defined non-strings are
+  // stringified defensively (the walker would throw on those).
+  const form = w.value ?? w.text ?? w.rawText ?? "";
+  return typeof form === "string" ? form : String(form);
+}
+
+/**
+ * Type predicate for {@link SubcommandPattern} (`string | RegExp`) —
+ * the per-member check for subcommand patterns. NOTE the semantic
+ * split from {@link isPattern}: the NARROWING is identical (both are
+ * `string | RegExp`), but a bare string subcommand pattern means
+ * EXACT equality while a {@link Pattern} string is a regex source.
+ * Never route a subcommand string through {@link matchesPattern}.
+ */
+const isSubcommandPattern = (v: unknown): v is SubcommandPattern =>
+  typeof v === "string" || v instanceof RegExp;
+
+/**
+ * Validate the `valueConsumingFlags` surface shared by both ARGV
+ * spreads: absent → `[]`; otherwise must be an array of strings.
+ * Returns the validated list, or `null` when malformed (caller
+ * fail-skips the leaf → `false`, `cwd`-style).
+ */
+function readValueConsumingFlags(value: unknown): readonly string[] | null {
+  if (value === undefined) return [];
+  if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
+    return value as string[];
+  }
+  return null;
+}
+
+/**
+ * Valid `positionPolicy` values for `locateSubcommandRun`. The policy
+ * resolves from the walker's `DEFAULT_POSITION_POLICIES` table keyed
+ * on the ref basename, falling back to `"globals-anywhere"` — either
+ * surface can, in principle, hand back a polluted value (plain-JS
+ * callers, patched tables), so the engine validates before calling
+ * and skips + warns (S1) instead of letting the walker's `TypeError`
+ * escape.
+ */
+const VALID_POSITION_POLICIES: ReadonlySet<string> = new Set([
+  "globals-anywhere",
+  "globals-before-only",
+  "globals-after-only",
+]);
+
+/**
+ * Normalize a `when.subcommand` leaf into `{ patterns, depth,
+ * valueConsumingFlags }`, or return `"unknown"` for the depth-0
+ * shape (extracts nothing → walker-null → unknown → default block),
+ * or `null` when malformed (caller fail-skips → `false`).
+ *
+ * Shapes:
+ *   - bare `string | RegExp` → single pattern, depth 1.
+ *   - bare array → OR-of-matches at depth 1 (any length ≥ 1, all
+ *     members `string | RegExp`).
+ *   - spread `{ pattern, depth?, valueConsumingFlags? }` → single
+ *     pattern requires depth 1 (single + depth > 1 is invalid);
+ *     array pattern requires `length === depth` (positional
+ *     sequence). `depth` defaults to 1; non-integer / negative
+ *     depths are invalid.
+ */
+function normalizeSubcommandLeaf(value: unknown):
+  | {
+      patterns: SubcommandPattern[];
+      depth: number;
+      valueConsumingFlags: readonly string[];
+      sequence: boolean;
+    }
+  | "unknown"
+  | null {
+  // Bare single pattern.
+  if (isSubcommandPattern(value)) {
+    return {
+      patterns: [value],
+      depth: 1,
+      valueConsumingFlags: [],
+      sequence: false,
+    };
+  }
+  // Bare array: OR-of-matches at depth 1.
+  if (Array.isArray(value)) {
+    if (value.length === 0 || !value.every(isSubcommandPattern)) return null;
+    return {
+      patterns: value as SubcommandPattern[],
+      depth: 1,
+      valueConsumingFlags: [],
+      sequence: false,
+    };
+  }
+  // Spread form.
+  if (value !== null && typeof value === "object") {
+    const obj = value as Partial<SubcommandSpreadBase> & {
+      pattern?: unknown;
+      depth?: unknown;
+      valueConsumingFlags?: unknown;
+    };
+    if (!("pattern" in obj)) return null;
+    const depth = obj.depth ?? 1;
+    if (typeof depth !== "number" || !Number.isInteger(depth) || depth < 0) {
+      return null;
+    }
+    if (depth === 0) return "unknown";
+    const valueConsumingFlags = readValueConsumingFlags(
+      obj.valueConsumingFlags,
+    );
+    if (valueConsumingFlags === null) return null;
+    if (isSubcommandPattern(obj.pattern)) {
+      // Single (non-array) pattern with depth > 1 is invalid.
+      if (depth !== 1) return null;
+      return {
+        patterns: [obj.pattern],
+        depth,
+        valueConsumingFlags,
+        sequence: false,
+      };
+    }
+    if (Array.isArray(obj.pattern)) {
+      if (obj.pattern.length === 0 || !obj.pattern.every(isSubcommandPattern)) {
+        return null;
+      }
+      // Spread arrays are positional sequences: length MUST equal
+      // depth (`["s3", "ls"]` at depth 2). Anything else is
+      // invalid (bare arrays cover the OR shorthand).
+      if (obj.pattern.length !== depth) return null;
+      return {
+        patterns: obj.pattern as SubcommandPattern[],
+        depth,
+        valueConsumingFlags,
+        sequence: depth > 1,
+      };
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Test one extracted subcommand word against one
+ * {@link SubcommandPattern}: bare strings are EXACT equality
+ * (`"push"` ≠ `"pushback"`); RegExps test. Never regex-coerce the
+ * string (that would reintroduce {@link Pattern} semantics through
+ * the back door).
+ */
+function matchesSubcommandPattern(
+  pattern: SubcommandPattern,
+  word: string,
+): boolean {
+  if (typeof pattern === "string") return word === pattern;
+  return pattern.test(word);
+}
+
+/**
+ * Local mirror of the walker's `scanSubcommandIndices` loop (plus run
+ * projection) — the extraction engine behind `when.subcommand`.
+ *
+ * DEVIATION from the issue-#90 plan (recorded per workflow): the plan
+ * calls for `locateSubcommandRun` imported from `@cad0p/unbash-walker`,
+ * but NO published walker version exports it from the package root —
+ * the walker's own docs mark it "NOT re-exported from the index
+ * root" (deliberate), and the walker's `exports` map blocks deep
+ * imports, so #91 cannot re-export it either without a walker
+ * release. This mirror duplicates the documented algorithm
+ * line-for-line (classify via resolved form, consuming-flag skip BY
+ * INDEX, after-only leading-global rejection, depth cap, null
+ * conflation); the position-policy TABLE still comes from the walker
+ * root (`DEFAULT_POSITION_POLICIES` — single truth for policy data).
+ * Parity with every documented walker example is pinned in
+ * `argv-leaves.test.ts`.
+ *
+ * Two deliberate deltas from the walker loop, both pinned by test:
+ *   - word form resolves via {@link scanWordText} (`value ?? text ??
+ *     rawText`) instead of the walker's `value ?? text ?? ""` — the
+ *     rawText fallback only bites when both resolved forms are
+ *     `undefined` (hand-built contexts; production words always
+ *     carry resolved forms).
+ *   - invalid resolved policies skip + warn here (S1) instead of
+ *     throwing the walker's `TypeError` (validated before the call).
+ *
+ * TODO(walker-export-gap, #91): switch to `locateSubcommandRun` once
+ * the walker root exports it, and re-export it (+ `SubcommandRun`)
+ * from the core root.
+ */
+function scanSubcommandWords(
+  words: readonly Word[],
+  opts: {
+    positionPolicy: PositionPolicy;
+    depth: number;
+    valueConsumingFlags: readonly string[];
+  },
+): readonly Word[] | null {
+  const consuming = new Set(opts.valueConsumingFlags);
+  const depth = Math.max(0, opts.depth);
+  const run: Word[] = [];
+  let i = 0;
+  while (i < words.length && run.length < depth) {
+    const word = words[i];
+    if (word === undefined) break; // bounds-guard; unreachable while i < length
+    // Quote-aware resolution ALWAYS — .text alone misreads quoted tokens.
+    const form = scanWordText(word);
+    if (form.startsWith("-")) {
+      if (opts.positionPolicy === "globals-after-only" && run.length === 0) {
+        // Leading-global-flag shape on an after-only binary: invalid by
+        // definition (`go -v build`). Null conflates with zero-positionals —
+        // both mean "no extraction possible".
+        return null;
+      }
+      i += consuming.has(form) ? 2 : 1;
+    } else {
+      run.push(word);
+      i += 1;
+    }
+  }
+  return run.length > 0 ? run : null;
+}
+
+/**
+ * Built-in `when.subcommand` predicate. Extracts the subcommand run
+ * via {@link scanSubcommandWords} (local mirror of the walker's scan;
+ * see its DEVIATION note) over `ctx.input.args` and matches it
+ * against the declared pattern(s). Returns a trinary
+ * {@link PredicateVerdict}: `true` / `false` for definite
+ * match/mismatch, `"unknown"` when extraction yields `null`
+ * (all-flags invocation, trailing consuming flag, after-only invalid
+ * shape like `go -v build`, assignment-only/nameless, non-bash tools
+ * with no `args`) — the caller projects via `onUnknown:` (default
+ * `"block"` = fail-CLOSED) exactly like {@link evaluateCwd}.
+ *
+ * Malformed leaves (empty array, length≠depth, non-`string|RegExp`
+ * members, single pattern with depth > 1, bad depth, bad
+ * `valueConsumingFlags`) fail-SKIP to `false` (`cwd`-style), NOT
+ * unknown. Walker `TypeError`s (invalid resolved policy) never
+ * escape: skip + warn (S1).
+ */
+function evaluateSubcommand(
+  value: unknown,
+  args: readonly PredicateWord[] | undefined,
+  basename: string | undefined,
+  ruleName: string,
+  source: string,
+): PredicateVerdict {
+  // Non-bash tools carry no `args` → unknown → default block
+  // (fail-closed, S1).
+  if (!Array.isArray(args)) return "unknown";
+  const normalized = normalizeSubcommandLeaf(value);
+  if (normalized === "unknown") return "unknown";
+  if (normalized === null) return false;
+  const { patterns, depth, valueConsumingFlags, sequence } = normalized;
+  // Bare words carry no binary identity: resolve the position policy
+  // MANUALLY from the table, falling back to `"globals-anywhere"`.
+  const resolved: unknown =
+    basename !== undefined ? DEFAULT_POSITION_POLICIES[basename] : undefined;
+  const positionPolicy: PositionPolicy =
+    typeof resolved === "string"
+      ? (resolved as PositionPolicy)
+      : "globals-anywhere";
+  if (!VALID_POSITION_POLICIES.has(positionPolicy)) {
+    console.warn(
+      `[pi-steering] Rule "${ruleName}"@${source}: when.subcommand ` +
+        `resolved an invalid position policy ${JSON.stringify(resolved)} ` +
+        `for basename ${JSON.stringify(basename)}; skipping the leaf ` +
+        `(expected one of "globals-anywhere" | "globals-before-only" | "globals-after-only").`,
+    );
+    return false;
+  }
+  let run: readonly Word[] | null;
+  try {
+    run = scanSubcommandWords(args, {
+      positionPolicy,
+      depth,
+      valueConsumingFlags,
+    });
+  } catch (err) {
+    const msg =
+      err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
+    console.warn(
+      `[pi-steering] Rule "${ruleName}"@${source}: when.subcommand ` +
+        `extraction threw: ${msg}`,
+    );
+    return false;
+  }
+  if (run === null) return "unknown";
+  const words = run.map(scanWordText);
+  if (sequence) {
+    // Positional sequence: the walker caps at `depth`, so require a
+    // full run (`aws s3` does NOT match `["s3", "ls"]` depth 2).
+    if (words.length !== depth) return false;
+    return patterns.every((p, i) => {
+      const word = words[i];
+      return word !== undefined && matchesSubcommandPattern(p, word);
+    });
+  }
+  // OR-of-matches (or single) at depth 1: match the first word.
+  // Defensive: the scan only returns non-empty runs, so `first` is
+  // always defined when `run` is non-null — the `undefined` branch is
+  // unreachable but kept total under `noUncheckedIndexedAccess`.
+  const first = words[0];
+  if (first === undefined) return "unknown";
+  return patterns.some((p) => matchesSubcommandPattern(p, first));
+}
+
+/**
+ * Validate an `anyOf` spelling: longs (`--` + name) or single-char
+ * shorts (`-` + letter). Multi-char shorts (`-ff`), bare `-` / `--`,
+ * and non-dash spellings are invalid.
+ */
+function isValidFlagSpelling(spelling: string): boolean {
+  if (spelling.startsWith("--")) return spelling.length > 2;
+  if (spelling.startsWith("-")) return spelling.length === 2;
+  return false;
+}
+
+/**
+ * Normalize a `when.flag` leaf, or `null` when malformed (caller
+ * fail-skips → `false`). `flag:` has object form only — no bare
+ * shorthand. Strict `=== true` on `bundleAware` mirrors the
+ * engine's typo-defense (any other value collapses to `false`).
+ */
+function normalizeFlagLeaf(value: unknown): {
+  anyOf: string[];
+  bundleAware: boolean;
+  valueConsumingFlags: readonly string[];
+} | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const obj = value as Partial<FlagSpreadBase> & {
+    anyOf?: unknown;
+    bundleAware?: unknown;
+    valueConsumingFlags?: unknown;
+  };
+  if (
+    !Array.isArray(obj.anyOf) ||
+    obj.anyOf.length === 0 ||
+    !obj.anyOf.every((v) => typeof v === "string")
+  ) {
+    return null;
+  }
+  const anyOf = obj.anyOf as string[];
+  if (!anyOf.every(isValidFlagSpelling)) return null;
+  const valueConsumingFlags = readValueConsumingFlags(obj.valueConsumingFlags);
+  if (valueConsumingFlags === null) return null;
+  return {
+    anyOf,
+    bundleAware: obj.bundleAware === true,
+    valueConsumingFlags,
+  };
+}
+
+/**
+ * Presence scan over the ref's resolved words, shared by the
+ * `subcommand`-adjacent flag matching contract (issue #90): exact
+ * token matches, attached `--flag=value` forms (no declaration
+ * needed — single token by construction), declared consuming-flag
+ * values skipped BY POSITION (`i += 2`, never by content), and —
+ * with `bundleAware` — short bundles via `bundleContains` (longs
+ * NEVER bundle-match). `--` itself is a flag-shaped token;
+ * post-`--` positionals are unmodelled (walker limitation) and scan
+ * as ordinary tokens.
+ */
+function flagPresent(
+  args: readonly Word[],
+  anyOf: readonly string[],
+  bundleAware: boolean,
+  valueConsumingFlags: readonly string[],
+): boolean {
+  const spellings = new Set(anyOf);
+  const longs = new Set(anyOf.filter((s) => s.startsWith("--")));
+  const shorts = anyOf.filter((s) => !s.startsWith("--"));
+  const consuming = new Set(valueConsumingFlags);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === undefined) continue; // bounds-guard; unreachable while i < length
+    const token = scanWordText(arg);
+    // Exact token match (covers separate-form consuming flags too —
+    // the flag itself IS present; only its value is skipped).
+    if (spellings.has(token)) return true;
+    // Attached `--flag=value`: match the name half against the long
+    // spellings; single token, consumes nothing further.
+    if (token.startsWith("--") && token.includes("=")) {
+      if (longs.has(token.slice(0, token.indexOf("=")))) return true;
+      continue;
+    }
+    // Declared consuming flag: skip its value BY POSITION.
+    if (consuming.has(token)) {
+      i += 1;
+      continue;
+    }
+    // Short bundles (`-uf`) via the walker — longs never match here.
+    // Project the already-resolved token into a well-formed Word:
+    // `bundleContains` reads `value ?? text` itself (no `rawText`
+    // fallback) and would throw on an all-absent word, escaping the
+    // TypeError out of `evaluateFlag` (no try/catch here) into a
+    // fail-OPEN skip. The probe keeps classification on the same
+    // resolved form the rest of the scan uses (S1).
+    if (bundleAware && token.startsWith("-") && !token.startsWith("--")) {
+      const probe = { text: token, value: token } as Word;
+      for (const short of shorts) {
+        if (bundleContains(probe, short.slice(1))) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Built-in `when.flag` predicate. Presence scan over `ctx.input.args`
+ * (no walker extraction call — positionals and flags scan uniformly).
+ * Returns a trinary {@link PredicateVerdict}: `"unknown"` ONLY when
+ * `args` is unavailable (non-bash tools) — otherwise presence is
+ * definite (absent → `false`, never unknown). Malformed leaves fail-
+ * SKIP to `false` (`cwd`-style), NOT unknown.
+ */
+function evaluateFlag(
+  value: unknown,
+  args: readonly PredicateWord[] | undefined,
+): PredicateVerdict {
+  // Non-bash tools carry no `args` → unknown → default block
+  // (fail-closed, S1).
+  if (!Array.isArray(args)) return "unknown";
+  const normalized = normalizeFlagLeaf(value);
+  if (normalized === null) return false;
+  return flagPresent(
+    args,
+    normalized.anyOf,
+    normalized.bundleAware,
+    normalized.valueConsumingFlags,
+  );
 }
 
 /**
@@ -974,6 +1452,28 @@ async function evaluateNotBlock(
       continue;
     }
 
+    // Built-in: subcommand — trinary on walker-null extraction.
+    // Inner spread carries no leaf-level `onUnknown:` (type + load-time
+    // ban); the block-level policy projects below via Kleene + flip.
+    if (key === "subcommand") {
+      verdicts.push(
+        evaluateSubcommand(
+          value,
+          ctx.input.args,
+          ctx.input.basename,
+          ruleName,
+          source,
+        ),
+      );
+      continue;
+    }
+
+    // Built-in: flag — trinary only on missing `args` (non-bash).
+    if (key === "flag") {
+      verdicts.push(evaluateFlag(value, ctx.input.args));
+      continue;
+    }
+
     // Built-in: missing — boolean leaf, no walker-unknown semantics
     // (it consults session entries / speculative entries).
     if (key === "missing") {
@@ -1036,8 +1536,17 @@ async function evaluateNotBlock(
  *                    the spread form projects to a definite boolean via
  *                    {@link projectVerdict} (default `"block"` =
  *                    fail-CLOSED).
- *   - `missing`   — built-in (session-entry-scoped), consumes
+ *   - `missing`    — built-in (session-entry-scoped), consumes
  *                    `ctx.findEntries` + `ctx.agentLoopIndex`. Boolean.
+ *   - `subcommand` — built-in (argv-structured), consumes
+ *                    `ctx.input.args` + `ctx.input.basename` via the
+ *                    walker's `locateSubcommandRun`. Trinary; outer
+ *                    leaf-level `onUnknown:` projects via
+ *                    {@link projectVerdict} (default `"block"` =
+ *                    fail-CLOSED).
+ *   - `flag`       — built-in (argv-structured presence scan over
+ *                    `ctx.input.args`). Trinary only on missing `args`
+ *                    (non-bash); same `onUnknown:` projection.
  *   - `not`        — nested `not:` block; dispatched to
  *                    {@link evaluateNotBlock} which composes leaves with
  *                    Kleene 3-valued AND and applies the block-level
@@ -1120,6 +1629,40 @@ export async function evaluateWhen(
     // Built-in: cwd. Trinary leaf with leaf-level `onUnknown:` policy.
     if (key === "cwd") {
       const verdict = evaluateCwd(value, state.cwd);
+      const onUnknown = readLeafOnUnknown(
+        value,
+        onUnknownDefault,
+        ignoreExplicitModifiers,
+      );
+      if (!projectVerdict(verdict, onUnknown)) return false;
+      continue;
+    }
+
+    // Built-in: subcommand. Trinary leaf with leaf-level `onUnknown:`
+    // policy (read via the shared adapter — inner/exemption spreads
+    // carry no modifier, so the default / hard-exemption projection
+    // applies there; S1 strict).
+    if (key === "subcommand") {
+      const verdict = evaluateSubcommand(
+        value,
+        ctx.input.args,
+        ctx.input.basename,
+        ruleName,
+        source,
+      );
+      const onUnknown = readLeafOnUnknown(
+        value,
+        onUnknownDefault,
+        ignoreExplicitModifiers,
+      );
+      if (!projectVerdict(verdict, onUnknown)) return false;
+      continue;
+    }
+
+    // Built-in: flag. Same trinary adapter as `subcommand` (unknown
+    // only on non-bash tools with no `args`).
+    if (key === "flag") {
+      const verdict = evaluateFlag(value, ctx.input.args);
       const onUnknown = readLeafOnUnknown(
         value,
         onUnknownDefault,

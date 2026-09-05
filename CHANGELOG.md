@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - Re-export expandTildeIfLeading in the curated walker surface (closes #87)
 - *(core)* Built-in ARGV leaves (closes #90)
 - *(core)* Promote flag primitives to core root (P3, closes #99)
+- *(core)* Context-provided SteeringCommand facade for flag value access (closes #101)
 
 ### 🐛 Bug Fixes
 
@@ -46,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - *(schema)* State all-leaves-AND semantics in when: TSDoc (closes #78) ([#80](https://github.com/cad0p/pi-steering/pull/80))
 - Walker-dependency house rule — no direct unbash-walker dep (closes #93)
 - Contributor test conventions — no redundant pins (closes #97)
+- Codify pre-1.0 breaking policy (closes #102)
 
 ### ⚡ Performance
 

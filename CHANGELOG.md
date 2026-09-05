@@ -2,6 +2,62 @@
 
 All notable changes to this project will be documented in this file.
 
+## [calver-released]
+
+<!-- USER-EDITABLE SECTION START -->
+<!-- Add your curated release notes here. -->
+<!-- USER-EDITABLE SECTION END -->
+
+### 🚀 Features
+
+- Exemption registry — composable carve-outs for guard rules ([#26](https://github.com/cad0p/pi-steering/pull/26)) ([#27](https://github.com/cad0p/pi-steering/pull/27))
+- Clean reload via jiti evalModule — transitive config reload, drop Node 22 floor ([#23](https://github.com/cad0p/pi-steering/pull/23)) ([#31](https://github.com/cad0p/pi-steering/pull/31))
+- Lazy session_start runtime build — register-only sync factory ([#9](https://github.com/cad0p/pi-steering/pull/9)) ([#30](https://github.com/cad0p/pi-steering/pull/30)) ([#37](https://github.com/cad0p/pi-steering/pull/37))
+- Gate project-layer steering configs behind pi's project trust ([#22](https://github.com/cad0p/pi-steering/pull/22)) ([#40](https://github.com/cad0p/pi-steering/pull/40))
+- Weekly upstream drift check for the trust gate — mirror-fidelity test + drift workflow ([#42](https://github.com/cad0p/pi-steering/pull/42)) ([#43](https://github.com/cad0p/pi-steering/pull/43))
+- Compile-time detection of orphan plugin exemptions ([#29](https://github.com/cad0p/pi-steering/pull/29)) ([#46](https://github.com/cad0p/pi-steering/pull/46))
+- Escalate plugin-shipped exemption orphans to error-class at merge (closes #48)
+- Resolved-by-default Word.text — predicates validate what executes (closes #51)
+- *(defaults)* Seal no-force-push — block --force-with-lease, +refspec force, --mirror (closes #65)
+- *(git-plugin)* Make no-main-commit pair non-overridable (closes #79)
+- *(defaults)* Distribute DEFAULT_RULES into git/rm/async plugins; remove engine-defaults machinery (closes #72) ([#83](https://github.com/cad0p/pi-steering/pull/83))
+- Block reasons always state the tool call was not executed (closes #85)
+- Re-export expandTildeIfLeading in the curated walker surface (closes #87)
+- *(core)* Built-in ARGV leaves (closes #90)
+- *(core)* Promote flag primitives to core root (P3, closes #99)
+- *(core)* Context-provided SteeringCommand facade for flag value access (closes #101)
+
+### 🐛 Bug Fixes
+
+- Await async factory + re-align smoke harness to v2 loader contract ([#34](https://github.com/cad0p/pi-steering/pull/34)) ([#35](https://github.com/cad0p/pi-steering/pull/35))
+- Set GH_TOKEN in drift-check Report step (e2e-caught) ([#44](https://github.com/cad0p/pi-steering/pull/44))
+- Bash-faithful Word resolution — drop the same-ref prefix overlay (closes #53) ([#56](https://github.com/cad0p/pi-steering/pull/56))
+- Rename when.happened to when.missing (closes #55) ([#57](https://github.com/cad0p/pi-steering/pull/57))
+- Observer watch matching resolves plugin-composed env trackers (closes #54)
+- Work-item-format fixture rawText shape + CI examples typecheck (closes #60)
+
+### 🚜 Refactor
+
+- Git plugin → per-item layout (work-item-plugin structure, zero behavior change) (closes #62)
+- Drop per-folder bundles in plugins/git — top-level assembly shape (closes #64)
+- *(core)* Walker locateSubcommandRun replaces scanSubcommandWords mirror (closes #91)
+
+### 📚 Documentation
+
+- *(schema)* State all-leaves-AND semantics in when: TSDoc (closes #78) ([#80](https://github.com/cad0p/pi-steering/pull/80))
+- Walker-dependency house rule — no direct unbash-walker dep (closes #93)
+- Contributor test conventions — no redundant pins (closes #97)
+- Codify pre-1.0 breaking policy (closes #102)
+
+### ⚡ Performance
+
+- Pin jiti fsCache to package-local node_modules/.cache/jiti ([#38](https://github.com/cad0p/pi-steering/pull/38)) ([#39](https://github.com/cad0p/pi-steering/pull/39))
+
+### ⚙️ Miscellaneous Tasks
+
+- Modern-API budget harvest — @types/node ^22 + ES2024 lib, import.meta.main, fs.globSync, strip-types cleanup ([#32](https://github.com/cad0p/pi-steering/pull/32)) ([#33](https://github.com/cad0p/pi-steering/pull/33))
+
+
 ## [0.2.0] - 2026-08-11
 
 <!-- USER-EDITABLE SECTION START -->

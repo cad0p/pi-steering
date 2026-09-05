@@ -17,6 +17,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { commandFromInput } from "../../../helpers/command.ts";
 import type { ExecResult, PredicateContext } from "../../../index.ts";
 import {
   getBranch,
@@ -50,6 +51,7 @@ function makeCtx(
     cwd: opts?.cwd ?? "/repo",
     tool: "bash",
     input: { tool: "bash", command: "" },
+    command: commandFromInput({ tool: "bash", command: "" }),
     agentLoopIndex: 0,
     exec: async (cmd, args, execOpts) => {
       execCalls.push({ cmd, args: [...args], cwd: execOpts?.cwd });

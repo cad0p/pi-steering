@@ -36,6 +36,7 @@ import {
   type EvaluatorHost,
 } from "../evaluator.ts";
 import { BLOCK_REASON_PREAMBLE } from "../helpers/block-reason-preamble.ts";
+import { commandFromInput } from "../helpers/command.ts";
 import { buildWalkRegistry } from "../internal/walk-registry.ts";
 import { resolvePlugins } from "../plugin-merger.ts";
 import gitPlugin from "../plugins/git/index.ts";
@@ -45,6 +46,7 @@ import type {
   Plugin,
   PredicateContext,
   PredicateHandler,
+  PredicateWord,
   Rule,
 } from "../schema.ts";
 import {
@@ -783,6 +785,35 @@ describe("mockContext", () => {
     assert.deepEqual(e.input, { tool: "edit", path: "", edits: [] });
   });
 
+  it("exposes a working command view bound to the input args (#101)", () => {
+    const arg = (value: string): PredicateWord =>
+      ({
+        value,
+        text: value,
+        rawText: value,
+        pos: 0,
+        end: value.length,
+      }) as PredicateWord;
+    const ctx = mockContext({
+      input: {
+        tool: "bash",
+        command: "git commit -m a -m b",
+        args: [arg("-m"), arg("a"), arg("-m"), arg("b")],
+      },
+    });
+    assert.deepEqual(ctx.command.getAllFlagValues("-m"), ["a", "b"]);
+    assert.equal(ctx.command.getFlagValue("-m"), "b");
+    assert.equal(ctx.command.hasFlag("-m"), true);
+  });
+
+  it("default input drives an empty command view (no throw)", () => {
+    const ctx = mockContext();
+    assert.equal(ctx.command.hasFlag("--help"), false);
+    assert.equal(ctx.command.getFlagValue("--help"), null);
+    assert.deepEqual(ctx.command.getAllFlagValues("--help"), []);
+    assert.equal(ctx.command.isInfoOnly(), false);
+  });
+
   it("stubs exec: passes through cmd/args/opts", async () => {
     const seen: Array<{
       cmd: string;
@@ -1035,6 +1066,81 @@ describe("mockContext", () => {
 });
 
 // ---------------------------------------------------------------------------
+// ctx.command harness integration (#101)
+// ---------------------------------------------------------------------------
+
+describe("ctx.command harness integration", () => {
+  it("condition on getAllFlagValues fires on repeated -m (git-faithful read)", async () => {
+    const rule: Rule = {
+      name: "two-messages",
+      tool: "bash",
+      field: "command",
+      pattern: "^git\\b",
+      reason: "two -m values",
+      when: {
+        condition: (ctx) => ctx.command.getAllFlagValues(["-m"]).length === 2,
+      },
+    };
+    const h = loadHarness({ config: { rules: [rule] } });
+    const hit = await h.evaluate(
+      {
+        type: "tool_call",
+        toolCallId: "t",
+        toolName: "bash",
+        input: { command: "git commit -m a -m b" },
+      },
+      makeExtCtx(),
+      0,
+    );
+    assert.ok(hit && hit.block === true);
+    const miss = await h.evaluate(
+      {
+        type: "tool_call",
+        toolCallId: "t",
+        toolName: "bash",
+        input: { command: "git commit -m a" },
+      },
+      makeExtCtx(),
+      0,
+    );
+    assert.equal(miss, undefined);
+  });
+
+  it("write-tool rule sees the empty facade (no throw)", async () => {
+    let sawEmpty = false;
+    const rule: Rule = {
+      name: "write-sees-empty-command",
+      tool: "write",
+      field: "path",
+      pattern: ".*",
+      reason: "probe",
+      when: {
+        condition: (ctx) => {
+          sawEmpty =
+            ctx.command.getAllFlagValues(["-m"]).length === 0 &&
+            ctx.command.getFlagValue("-m") === null &&
+            ctx.command.hasFlag("-m") === false;
+          return true;
+        },
+      },
+    };
+    const h = loadHarness({ config: { rules: [rule] } });
+    const res = await h.evaluate(
+      {
+        type: "tool_call",
+        toolCallId: "t",
+        toolName: "write",
+        input: { path: "/x.ts", content: "hi" },
+      },
+      makeExtCtx(),
+      0,
+    );
+    assert.ok(res && res.block === true);
+    assert.equal(sawEmpty, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // mockObserverContext
 // ---------------------------------------------------------------------------
 
@@ -1125,6 +1231,7 @@ describe("getAppendedEntries", () => {
       cwd: "/",
       tool: "bash",
       input: { tool: "bash", command: "" },
+      command: commandFromInput({ tool: "bash", command: "" }),
       agentLoopIndex: 0,
       exec: () => Promise.resolve({ stdout: "", stderr: "", exitCode: 0 }),
       appendEntry: () => {},

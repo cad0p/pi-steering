@@ -4,6 +4,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Word } from "@cad0p/unbash-walker";
+import type {
+  FlagLookupOptions as RootFlagLookupOptions,
+  SteeringCommand as RootSteeringCommand,
+} from "../index.ts";
+import type { PredicateWord } from "../schema.ts";
 import type { FlagLookupOptions } from "./flags.ts";
 import {
   getFlagValue,
@@ -16,6 +21,11 @@ import {
 /** Minimal Word for tests — tests don't exercise the walker, just the helpers. */
 function W(value: string): Word {
   return { value, text: value, pos: 0, end: value.length } as Word;
+}
+
+/** PredicateWord for facade inputs — the minimal word plus its raw source token. */
+function PW(value: string): PredicateWord {
+  return { ...W(value), rawText: value };
 }
 
 describe("hasFlag", () => {
@@ -625,45 +635,79 @@ describe("glued short flags (issue #11)", () => {
   });
 });
 
-describe("flag primitives: package-root re-export pin (P3, #99)", () => {
-  it("six symbols are importable from the package root", async () => {
+describe("command facade: package-root surface pin (#101)", () => {
+  it("commandFromInput is on the root; the 4 bare helpers are not", async () => {
     const root = await import("../index.ts");
-    assert.equal(typeof root.hasFlag, "function");
-    assert.equal(typeof root.getFlagValue, "function");
-    assert.equal(typeof root.hasEnvAssignment, "function");
-    assert.equal(typeof root.isInfoOnly, "function");
+    assert.equal(typeof root.commandFromInput, "function");
     assert.ok(Array.isArray(root.INFO_FLAGS));
+    for (const name of [
+      "hasFlag",
+      "getFlagValue",
+      "hasEnvAssignment",
+      "isInfoOnly",
+    ] as const) {
+      assert.equal(name in root, false, `${name} must not be on the root`);
+    }
   });
 
-  it("root hasFlag matches the attached form", async () => {
+  it("root type surface still carries SteeringCommand + FlagLookupOptions", () => {
+    // Compile-time pin: both types stay importable from the root for
+    // `ctx.command` call sites and out-of-handler factory use.
+    const opts: RootFlagLookupOptions = { gluedShorts: ["R"] };
+    const cmd: RootSteeringCommand | null = null;
+    assert.deepEqual(opts, { gluedShorts: ["R"] });
+    assert.equal(cmd, null);
+  });
+
+  it("root commandFromInput binds hasFlag (attached form)", async () => {
     const root = await import("../index.ts");
-    assert.equal(root.hasFlag([W("--profile=dev")], "--profile"), true);
+    const cmd = root.commandFromInput({
+      tool: "bash",
+      args: [PW("--profile=dev")],
+    });
+    assert.equal(cmd.hasFlag("--profile"), true);
   });
 
-  it("root getFlagValue is last-wins", async () => {
+  it("root commandFromInput getFlagValue is last-wins", async () => {
+    const root = await import("../index.ts");
+    const cmd = root.commandFromInput({
+      tool: "bash",
+      args: [PW("--profile"), PW("a"), PW("--profile"), PW("b")],
+    });
+    assert.equal(cmd.getFlagValue("--profile"), "b");
+  });
+
+  it("root commandFromInput getAllFlagValues keeps argv order", async () => {
+    const root = await import("../index.ts");
+    const cmd = root.commandFromInput({
+      tool: "bash",
+      args: [PW("-m"), PW("a"), PW("--message"), PW("b")],
+    });
+    assert.deepEqual(cmd.getAllFlagValues(["-m", "--message"]), ["a", "b"]);
+  });
+
+  it("root commandFromInput hasEnvAssignment matches on the literal name", async () => {
+    const root = await import("../index.ts");
+    const cmd = root.commandFromInput({
+      tool: "bash",
+      envAssignments: [W("AWS_PROFILE=dev")],
+    });
+    assert.equal(cmd.hasEnvAssignment("AWS_PROFILE"), true);
+    assert.equal(cmd.hasEnvAssignment("AWS"), false);
+  });
+
+  it("root commandFromInput isInfoOnly honors the default set", async () => {
     const root = await import("../index.ts");
     assert.equal(
-      root.getFlagValue(
-        [W("--profile"), W("a"), W("--profile"), W("b")],
-        "--profile",
-      ),
-      "b",
-    );
-  });
-
-  it("root hasEnvAssignment matches on the literal name", async () => {
-    const root = await import("../index.ts");
-    assert.equal(
-      root.hasEnvAssignment([W("AWS_PROFILE=dev")], "AWS_PROFILE"),
+      root
+        .commandFromInput({ tool: "bash", args: [PW("--help")] })
+        .isInfoOnly(),
       true,
     );
-    assert.equal(root.hasEnvAssignment([W("AWS_PROFILE=dev")], "AWS"), false);
-  });
-
-  it("root isInfoOnly honors the default set", async () => {
-    const root = await import("../index.ts");
-    assert.equal(root.isInfoOnly([W("--help")]), true);
-    assert.equal(root.isInfoOnly([W("-h")]), false);
+    assert.equal(
+      root.commandFromInput({ tool: "bash", args: [PW("-h")] }).isInfoOnly(),
+      false,
+    );
   });
 
   it("root INFO_FLAGS is the minimal safe default set", async () => {

@@ -660,10 +660,18 @@ export const branch = definePredicate<BranchArgs>(async (args, ctx) => {
 Production plugins in this repo:
 
 - [`src/plugins/git`](./src/plugins/git) — the canonical plugin reference for trackers + tracker extensions. Ships `branch` / `upstream` / `commitsAhead` predicates, a `branchTracker`, a `--git-dir` / `--work-tree` cwd extension, and the `no-force-push` / `no-hard-reset` / `no-main-commit` + `no-main-commit-github` rules.
-- [`pi-steering-flags`](https://github.com/cad0p/pi-steering-flags) — first official external plugin, establishing the precedent for community plugins. Own repo + package since the monorepo split (2026-08-10). Ships `requiresFlag` / `allowlistedFlagsOnly` policy predicates; the flag MECHANISM primitives (`hasFlag` / `getFlagValue` / `hasEnvAssignment` / `isInfoOnly` / `INFO_FLAGS`) now live in core (P3 promotion, #99) — import them from the package root:
+- [`pi-steering-flags`](https://github.com/cad0p/pi-steering-flags) — first official external plugin, establishing the precedent for community plugins. Own repo + package since the monorepo split (2026-08-10). Ships `requiresFlag` / `allowlistedFlagsOnly` policy predicates; the flag MECHANISM lives in core as the context-provided `ctx.command` view (`hasFlag` / `getFlagValue` / `getAllFlagValues` / `hasEnvAssignment` / `isInfoOnly`, #101) — no import needed inside predicates, conditions, or reason functions:
 
 ```ts
-import { hasFlag } from "@cad0p/pi-steering";
+// In a predicate / condition / reason fn with ctx:
+ctx.command.hasFlag("--profile");
+ctx.command.getAllFlagValues(["-m", "--message"]); // ["a", "b"], argv order
+```
+
+Out-of-handler / test use goes through the factory (imported from the package root):
+
+```ts
+import { commandFromInput } from "@cad0p/pi-steering";
 ```
 
 - [`pi-steering-commit-format`](https://github.com/cad0p/pi-steering-commit-format) — commit-message format predicates. Own repo + package since the monorepo split (2026-08-10). Ships the `commitFormat` predicate plus a `commitFormatFactory` for composing custom format checkers; bundled formats include Conventional Commits 1.0.0 (Angular preset type allowlist) and bracketed JIRA-style references.
@@ -696,13 +704,14 @@ Publishing conventions:
 
 Do NOT take a direct dependency on `@cad0p/unbash-walker` from a plugin — import the walker helpers you need from the `@cad0p/pi-steering` package root instead. One version, one policy table, one scan loop: a skewed local copy is a guardrail-correctness bug, not a hygiene nit. If the helper you need isn't re-exported yet, file a re-export issue (see #87 / #91 for the template) rather than vendoring it. The re-export surface stays deliberately minimal — every re-export is a stability promise.
 
-The same rule applies to flag primitives — import the mechanism from the core root, not from the flags plugin:
+The same rule applies to flag reads — use the context-provided command view, not the flags plugin:
 
 ```ts
-import { hasFlag } from "@cad0p/pi-steering";
+// In a predicate / condition with ctx:
+ctx.command.hasFlag("--profile"); // bound to the already-parsed args
 ```
 
-(`hasFlag` / `getFlagValue` / `hasEnvAssignment` / `isInfoOnly` / `INFO_FLAGS` live in core since the P3 promotion, #99. The flags plugin keeps only the POLICY predicates `requiresFlag` / `allowlistedFlagsOnly`.)
+(`hasFlag` / `getFlagValue` / `getAllFlagValues` / `hasEnvAssignment` / `isInfoOnly` live on `ctx.command` since #101, which replaced the P3 (#99) bare-helper root exports; `INFO_FLAGS` + the `FlagLookupOptions` type stay on the root. Out-of-handler use goes through the root-exported `commandFromInput` factory + `SteeringCommand` type. The flags plugin keeps only the POLICY predicates `requiresFlag` / `allowlistedFlagsOnly`.)
 
 ### Overriding a built-in rule
 

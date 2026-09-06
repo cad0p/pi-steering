@@ -176,15 +176,10 @@ export {
   resolveWord,
   walk,
 } from "@cad0p/unbash-walker";
-// Core CLI descriptors (issue #106): per-binary argv knowledge.
-// GH root re-export deferred until its home is decided — only the
-// core-owned consts ship from here; the git plugin index re-exports
-// the git const for discoverability.
-export {
-  CORE_CLI_DESCRIPTORS,
-  GH_CLI_DESCRIPTOR,
-  GIT_CLI_DESCRIPTOR,
-} from "./cli-descriptors.ts";
+// Core CLI-descriptor fallback map (issue #106): currently empty —
+// core seeds nothing. Per-binary facts live in their owning plugins
+// (the git const re-exports from `pi-steering/plugins/git`).
+export { CORE_CLI_DESCRIPTORS } from "./cli-descriptors.ts";
 // JSON compat — convert v1 JSON configs to v2 TS configs.
 export { FromJSONError, fromJSON } from "./compat.ts";
 export type { DefineConfigInput } from "./define-config.ts";

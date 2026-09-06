@@ -97,6 +97,7 @@ import type {
   PredicateShape,
   Rule,
 } from "../../schema.ts";
+import { GIT_CLI_DESCRIPTOR } from "./descriptors.ts";
 import { branch } from "./predicates/branch.ts";
 import { commitsAhead } from "./predicates/commits-ahead.ts";
 import { hasStagedChanges } from "./predicates/has-staged-changes.ts";
@@ -257,6 +258,7 @@ export const rules = [
  */
 const gitPlugin = {
   name: "git",
+  cliDescriptors: { git: GIT_CLI_DESCRIPTOR },
   predicates,
   rules,
   trackers: {
@@ -285,10 +287,7 @@ export const GIT_PLUGIN_NAME: "git" = gitPlugin.name;
 
 export default gitPlugin;
 
-// Core-owned git argv knowledge (issue #106): re-exported here for
-// discoverability. The merger imports from `cli-descriptors.ts`
-// directly (never this barrel) so there is no core→plugin edge.
-export { GIT_CLI_DESCRIPTOR } from "../../cli-descriptors.ts";
+export { GIT_CLI_DESCRIPTOR } from "./descriptors.ts";
 export {
   getBranch,
   getCommitsAhead,

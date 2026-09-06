@@ -19,6 +19,7 @@ import {
   validateName,
   validateUserConfigNames,
 } from "./plugin-merger.ts";
+import gitPlugin from "./plugins/git/index.ts";
 import type { Observer, Plugin, Rule, SteeringConfig } from "./schema.ts";
 
 /** Build a minimal observer with a recognizable onResult. */
@@ -63,17 +64,9 @@ describe("resolvePlugins: empty input", () => {
     assert.deepEqual(state.trackers, {});
     assert.deepEqual(state.trackerModifiers, {});
     assert.deepEqual(state.composedTrackers, {});
-    // Core defaults fill absent basenames even with no plugins.
-    assert.deepEqual(state.cliDescriptors, {
-      git: {
-        positionPolicy: "globals-before-only",
-        valueConsumingFlags: ["-C", "-c"],
-      },
-      gh: {
-        positionPolicy: "globals-anywhere",
-        valueConsumingFlags: ["-R", "--repo", "--hostname"],
-      },
-    });
+    // Core seeds nothing (§13 amendment): absent basenames stay
+    // absent even with no plugins.
+    assert.deepEqual(state.cliDescriptors, {});
     assert.deepEqual(state.rules, []);
     // Optional field: absent (undefined) when no plugin ships
     // exemptions — the evaluator treats it as an empty bucket.
@@ -95,13 +88,19 @@ describe("resolvePlugins: single plugin surface", () => {
       observers: [obs],
       trackers: { t: tracker as Tracker<unknown> },
       rules: [rule],
+      cliDescriptors: {
+        git: {
+          positionPolicy: "globals-before-only",
+          valueConsumingFlags: ["-C", "-c"],
+        },
+      },
     };
 
     const state = resolvePlugins([plugin], {});
     assert.equal(state.predicates["foo"], predicate);
     assert.deepEqual(state.observers, [obs]);
     assert.equal(state.trackers["t"], tracker);
-    // No plugin descriptors → core defaults fill silently (no WARN).
+    // Plugin-declared git fill (core seeds nothing — §13 amendment).
     assert.deepEqual(state.cliDescriptors["git"], {
       positionPolicy: "globals-before-only",
       valueConsumingFlags: ["-C", "-c"],
@@ -1110,37 +1109,29 @@ describe("resolvePlugins: CLI descriptors (issue #106)", () => {
     assert.match(hit!.message, /second/);
   });
 
-  it("plugin-shadows-core WARNs but plugin wins", () => {
-    const custom = {
-      positionPolicy: "globals-anywhere" as const,
-      valueConsumingFlags: ["--custom"],
-    };
-    const p: Plugin = { name: "custom", cliDescriptors: { git: custom } };
-    const state = resolvePlugins([p], {});
-    assert.deepEqual(state.cliDescriptors["git"], custom);
-    const hit = state.diagnostics.find(
-      (d) => d.kind === "descriptor-collision",
+  it("absent keys stay absent (core seeds nothing — §13 amendment)", () => {
+    const state = resolvePlugins([], {});
+    assert.deepEqual(state.cliDescriptors, {});
+    assert.equal(
+      state.diagnostics.some((d) => d.kind === "descriptor-collision"),
+      false,
     );
-    assert.ok(hit, "expected shadow WARN");
-    assert.equal(hit?.type, "warning");
-    assert.match(hit!.message, /git/);
-    assert.match(hit!.message, /shadows the core default/);
-    // gh core still fills silently.
-    assert.deepEqual(state.cliDescriptors["gh"], {
-      positionPolicy: "globals-anywhere",
-      valueConsumingFlags: ["-R", "--repo", "--hostname"],
-    });
   });
 
-  it("core fills absent keys silently", () => {
-    const state = resolvePlugins([], {});
+  it("plugin-declared git passes through with no shadow WARN (core map empty)", () => {
+    const p: Plugin = {
+      name: "custom",
+      cliDescriptors: {
+        git: {
+          positionPolicy: "globals-anywhere",
+          valueConsumingFlags: ["--custom"],
+        },
+      },
+    };
+    const state = resolvePlugins([p], {});
     assert.deepEqual(state.cliDescriptors["git"], {
-      positionPolicy: "globals-before-only",
-      valueConsumingFlags: ["-C", "-c"],
-    });
-    assert.deepEqual(state.cliDescriptors["gh"], {
       positionPolicy: "globals-anywhere",
-      valueConsumingFlags: ["-R", "--repo", "--hostname"],
+      valueConsumingFlags: ["--custom"],
     });
     assert.equal(
       state.diagnostics.some((d) => d.kind === "descriptor-collision"),
@@ -1160,9 +1151,13 @@ describe("resolvePlugins: CLI descriptors (issue #106)", () => {
     };
     const state = resolvePlugins([p], { disabledPlugins: ["custom"] });
     assert.equal("mycli" in state.cliDescriptors, false);
-    // Core still fills.
-    assert.ok("git" in state.cliDescriptors);
-    assert.ok("gh" in state.cliDescriptors);
+    // Core seeds nothing — a disabled plugin leaves the map empty.
+    assert.deepEqual(state.cliDescriptors, {});
+  });
+
+  it("disabled git plugin drops git facts → strict default", () => {
+    const state = resolvePlugins([gitPlugin], { disabledPlugins: ["git"] });
+    assert.equal("git" in state.cliDescriptors, false);
   });
 
   it("malformed descriptor skipped + WARN (kind: invalid-descriptor)", () => {
@@ -1185,7 +1180,7 @@ describe("resolvePlugins: CLI descriptors (issue #106)", () => {
     );
     assert.equal(hits.length, 2);
     for (const hit of hits) assert.equal(hit.type, "warning");
-    // Core still fills.
-    assert.ok("git" in state.cliDescriptors);
+    // Core seeds nothing — skipped entries leave the map empty.
+    assert.deepEqual(state.cliDescriptors, {});
   });
 });

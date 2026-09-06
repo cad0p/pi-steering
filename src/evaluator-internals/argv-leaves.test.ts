@@ -18,7 +18,9 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import gitPlugin from "../plugins/git/index.ts";
 import type {
+  CLIDescriptor,
   Exemption,
   FlagLeaf,
   PredicateWord,
@@ -66,6 +68,9 @@ async function fires(
     basename?: string;
     onUnknownDefault?: "allow" | "block";
     ignoreExplicitModifiers?: boolean;
+    // Unit-level `evaluateWhen` calls never forward descriptors
+    // implicitly — callers pass the merged map explicitly (§13).
+    descriptors?: Record<string, CLIDescriptor>;
   },
 ): Promise<boolean> {
   const ctx = mockContext({
@@ -85,6 +90,7 @@ async function fires(
     "test",
     opts?.onUnknownDefault,
     opts?.ignoreExplicitModifiers,
+    opts?.descriptors,
   );
 }
 
@@ -107,6 +113,27 @@ function gitRule(when: TopLevelWhenClause): Rule {
     when,
   };
 }
+
+/**
+ * Descriptor map plumbed from the git plugin's own slot (§13:
+ * plugin-owned facts). Unit-level `fires` calls pass this explicitly
+ * wherever git resolution is expected — core seeds nothing.
+ */
+const GIT_DESCRIPTORS: Record<string, CLIDescriptor> = {
+  ...(gitPlugin.cliDescriptors as Record<string, CLIDescriptor>),
+};
+
+/**
+ * Synthetic plugin-registered descriptor for bare `gh` pins. Core
+ * seeds no `gh` (owned by pi-steering-github) — tests that need gh
+ * resolution declare it via the slot, like an external plugin would.
+ */
+const GH_DESCRIPTORS: Record<string, CLIDescriptor> = {
+  gh: {
+    positionPolicy: "globals-anywhere",
+    valueConsumingFlags: ["-R", "--repo", "--hostname"],
+  },
+};
 
 // ---------------------------------------------------------------------------
 // subcommand: walker-parity extraction (unit)
@@ -143,13 +170,16 @@ describe("argv leaves: subcommand extraction parity", () => {
     );
   });
 
-  it("WITHOUT the declaration, bare git resolves the core descriptor (issue #106)", async () => {
+  it("WITHOUT the declaration, bare git resolves via the git plugin's declared descriptor (issue #106)", async () => {
     // Pre-#106 the bare form could not know `-c` consumes: `KEY=VAL`
     // was the first positional → mismatch → rule SKIPPED. Post-#106
-    // the core git descriptor (`-C`, `-c`) auto-resolves by basename,
+    // the git plugin's declared descriptor (`-C`, `-c`) resolves by
+    // basename (core seeds nothing — the map is passed explicitly),
     // so bare `subcommand: "push"` matches `git -c KEY=VAL push`.
     assert.equal(
-      await fires({ subcommand: "push" }, [w("-c"), w("KEY=VAL"), w("push")]),
+      await fires({ subcommand: "push" }, [w("-c"), w("KEY=VAL"), w("push")], {
+        descriptors: GIT_DESCRIPTORS,
+      }),
       true,
     );
     // Unknown basename → strict default (no descriptor, no table):
@@ -489,10 +519,14 @@ describe("argv leaves: flag presence semantics", () => {
       ),
       false,
     );
-    // Bare (no inline) still skips via the core gh descriptor (#106):
-    // `-R` is in the registry minimum, so `--force` is its value.
+    // Bare (no inline) still skips via the plugin-registered gh
+    // descriptor (#106): `-R` is in the synthetic registry entry, so
+    // `--force` is its value.
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, args, { basename: "gh" }),
+      await fires({ flag: { anyOf: ["--force"] } }, args, {
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      }),
       false,
     );
     // Unknown basename → strict default: undeclared never consumes.
@@ -1132,9 +1166,12 @@ describe("argv leaves: validator + surface", () => {
 // ---------------------------------------------------------------------------
 
 describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
-  it("git -C /x push resolves the git descriptor with NO inline declaration", async () => {
+  it("git -C /x push resolves the git plugin's declared descriptor with NO inline declaration", async () => {
     const h = loadHarness({
       config: {
+        // Plugin-owned facts (§13): git resolution needs the git
+        // plugin declared — core seeds nothing.
+        plugins: [gitPlugin],
         rules: [
           gitRule({ subcommand: "push" }),
           gitRule({ flag: { anyOf: ["--force"] } }),
@@ -1160,7 +1197,23 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
       when,
     });
     const h = loadHarness({
-      config: { rules: [ghRule({ subcommand: "pr" })] },
+      // Synthetic plugin-registered gh descriptor (core seeds no
+      // `gh` — owned by pi-steering-github). Mirrors GH_DESCRIPTORS
+      // at the unit layer.
+      config: {
+        plugins: [
+          {
+            name: "gh-facts",
+            cliDescriptors: {
+              gh: {
+                positionPolicy: "globals-anywhere",
+                valueConsumingFlags: ["-R", "--repo", "--hostname"],
+              },
+            },
+          },
+        ],
+        rules: [ghRule({ subcommand: "pr" })],
+      },
     });
     await expectBlocks(
       h,
@@ -1373,9 +1426,12 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     await expectBlocks(h, { command: "git --version" }, { rule: "no-git" });
   });
 
-  it("exemption definite-flip: subcommand push matches git -C /x push via descriptor", async () => {
+  it("exemption definite-flip: subcommand push matches git -C /x push via the git plugin's descriptor", async () => {
     const h = loadHarness({
       config: {
+        // The exemption-rule build path threads descriptors too —
+        // gitPlugin here covers both rule and exemption leaves.
+        plugins: [gitPlugin],
         rules: [
           {
             name: "no-push",
@@ -1395,6 +1451,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
   it("exemption not-block+descriptor parity: not:{subcommand:push} on git -C /x push MUST NOT exempt", async () => {
     const h = loadHarness({
       config: {
+        plugins: [gitPlugin],
         rules: [
           {
             name: "no-push",

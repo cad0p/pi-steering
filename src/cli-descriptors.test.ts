@@ -17,10 +17,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   __resetDescriptorWarningsForTests,
-  GH_CLI_DESCRIPTOR,
-  GIT_CLI_DESCRIPTOR,
+  CORE_CLI_DESCRIPTORS,
   resolveDescriptor,
 } from "./cli-descriptors.ts";
+import { GIT_CLI_DESCRIPTOR } from "./plugins/git/descriptors.ts";
+import type { CLIDescriptor } from "./schema.ts";
 
 describe("resolveDescriptor: precedence inline > registry > strict-default", () => {
   it("inline flags REPLACE the registry list (no union)", () => {
@@ -80,15 +81,20 @@ describe("resolveDescriptor: precedence inline > registry > strict-default", () 
     assert.equal(resolved.positionPolicy, "globals-anywhere");
   });
 
-  it("core defaults are pinned (git + gh minimum)", () => {
+  it("git plugin descriptor is pinned (plugin-owned, core seeds nothing)", () => {
+    // Value pin against the plugin-owned const (imported from its
+    // plugin home, not core).
     assert.deepEqual(GIT_CLI_DESCRIPTOR, {
       positionPolicy: "globals-before-only",
       valueConsumingFlags: ["-C", "-c"],
     });
-    assert.deepEqual(GH_CLI_DESCRIPTOR, {
-      positionPolicy: "globals-anywhere",
-      valueConsumingFlags: ["-R", "--repo", "--hostname"],
-    });
+    // Assignability pin (§9): the const satisfies CLIDescriptor
+    // (JSDoc presence itself is not tsc-pinnable — hover rides on
+    // the named-const reference pattern).
+    const _assignable: CLIDescriptor = GIT_CLI_DESCRIPTOR;
+    void _assignable;
+    // Core seeds nothing.
+    assert.deepEqual(CORE_CLI_DESCRIPTORS, {});
   });
 });
 

@@ -352,6 +352,41 @@ with `disabledRules: ["no-main-commit-github"]` so the original is
 dropped and your fresh-named replacement survives the disable
 filter.
 
+### CLI descriptors — keep the plugin declared for git argv knowledge
+
+Bare `subcommand: "push"` matches `git -C /x push` with NO inline
+`valueConsumingFlags` because this plugin declares the `git`
+basename's argv facts (`-C` / `-c` consume the next token; globals
+come before the subcommand) via its `cliDescriptors` slot
+(`./descriptors.ts`, re-exported as `GIT_CLI_DESCRIPTOR`). Core seeds
+nothing — every binary's descriptor is plugin-owned.
+
+Preferred opt-out: to author git rules without the shipped rails,
+import the plugin and drop rails via `disabledRules` — descriptors,
+trackers, and predicates stay wired:
+
+```ts
+import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
+
+export default defineConfig({
+  plugins: [gitPlugin],
+  disabledRules: ["no-main-commit", "no-force-push"],
+  rules: [
+    // Your git rules here: bare `subcommand: "push"` still resolves
+    // `git -C /x push` via the plugin's declared descriptor.
+  ],
+});
+```
+
+Rolling your own `{ git: … }` descriptor is supported but
+discouraged (drift risk if the plugin's facts evolve — and a
+basename overlap with this plugin's entry warns via
+`descriptor-collision`). Omitting the plugin entirely is a silent
+strict default: bare `subcommand: "push"` on `git -C /x …` misses
+(fail-open skip, no WARN), because there are no `git` facts to
+resolve.
+
 ### Cwd-based exemption (advanced)
 
 A common request: "don't block commits to main inside my vault

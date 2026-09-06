@@ -2121,8 +2121,11 @@ export interface Plugin {
    * Per-binary argv knowledge keyed by command basename (`"git"`,
    * `"gh"`). Mirrors trackers/predicates: same first-wins collision
    * / merge machinery, no new concepts. First-wins on collision;
-   * core defaults are lowest priority (fill absent basenames after
-   * the plugin loop).
+   * the core fallback map is currently empty (core seeds nothing —
+   * each plugin owns its binary's facts via this slot), so absent
+   * basenames stay absent. An absent descriptor resolves to the
+   * strict default and a resulting miss is definite (a data-knowledge
+   * axis), NOT an unknown-escape — no `onUnknown:` projection applies.
    */
   cliDescriptors?: Record<string, CLIDescriptor>;
 }

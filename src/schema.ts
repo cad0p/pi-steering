@@ -25,7 +25,12 @@
  * only defines shapes. Evaluation is Phase 3's concern.
  */
 
-import type { EnvState, Tracker, Word } from "@cad0p/unbash-walker";
+import type {
+  EnvState,
+  PositionPolicy,
+  Tracker,
+  Word,
+} from "@cad0p/unbash-walker";
 import type { SteeringCommand } from "./helpers/command.ts";
 
 // ---------------------------------------------------------------------------
@@ -490,6 +495,29 @@ export type FlagLeaf = FlagSpreadBase & {
  * `& PredicateModifiers`.
  */
 export type FlagLeafInner = FlagSpreadBase;
+
+/**
+ * Per-binary argv knowledge for one command basename (issue #106).
+ *
+ * A `CLIDescriptor` supplies `positionPolicy` + `valueConsumingFlags`
+ * to both ARGV leaves (`when.subcommand` / `when.flag`) with no
+ * inline declaration. Precedence: inline declaration > registry entry
+ * > strict default (flags: empty set — nothing consumes; policy:
+ * `"globals-anywhere"`). Per-field composition: inline
+ * `valueConsumingFlags`, when present, REPLACES the registry list (no
+ * union); registry `positionPolicy` always overrides the
+ * `DEFAULT_POSITION_POLICIES` fallback.
+ *
+ * Keyed by command basename (`"git"`, `"gh"`) in
+ * {@link Plugin.cliDescriptors} and the merged
+ * `ResolvedPluginState.cliDescriptors`.
+ */
+export interface CLIDescriptor {
+  /** Walker half (cf. `DEFAULT_POSITION_POLICIES`). */
+  positionPolicy?: PositionPolicy;
+  /** Pre-subcommand consumers (`-C`, `-c`, `-R`, …). */
+  valueConsumingFlags?: readonly string[];
+}
 
 /**
  * Built-in non-registry leaves attached to a {@link Rule.when}
@@ -2085,6 +2113,15 @@ export interface Plugin {
       | readonly import("@cad0p/unbash-walker").Modifier<unknown>[]
     >
   >;
+
+  /**
+   * Per-binary argv knowledge keyed by command basename (`"git"`,
+   * `"gh"`). Mirrors trackers/predicates: same first-wins collision
+   * / merge machinery, no new concepts. First-wins on collision;
+   * core defaults are lowest priority (fill absent basenames after
+   * the plugin loop).
+   */
+  cliDescriptors?: Record<string, CLIDescriptor>;
 }
 
 // ---------------------------------------------------------------------------

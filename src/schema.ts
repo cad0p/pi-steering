@@ -421,8 +421,9 @@ export interface SubcommandSpreadBase {
   /**
    * Flags that consume the following token (`-C`, `-c`, `-R`,
    * `--repo`, `--profile`, …) so values never read as subcommands.
-   * Per-binary, plugin-declared; the walker stays arity-ignorant.
-   * Default: none.
+   * Inline (when present) REPLACES the CLI-descriptor registry list;
+   * absent → registry by basename → strict empty set. The walker
+   * stays arity-ignorant.
    */
   valueConsumingFlags?: readonly string[];
 }
@@ -474,7 +475,9 @@ export interface FlagSpreadBase {
   bundleAware?: boolean;
   /**
    * Flags that consume the following token, skipped BY POSITION
-   * during the presence scan (never by content). Default: none.
+   * during the presence scan (never by content). Inline (when
+   * present) REPLACES the registry list; absent → registry by
+   * basename → strict empty set.
    */
   valueConsumingFlags?: readonly string[];
 }

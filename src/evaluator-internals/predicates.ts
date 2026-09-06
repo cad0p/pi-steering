@@ -32,8 +32,10 @@ import {
   DEFAULT_POSITION_POLICIES,
   locateSubcommandRun,
 } from "@cad0p/unbash-walker";
+import { resolveDescriptor } from "../cli-descriptors.ts";
 import { isPattern } from "../internal/pattern-utils.ts";
 import type {
+  CLIDescriptor,
   FlagSpreadBase,
   Pattern,
   PredicateContext,
@@ -744,6 +746,7 @@ function evaluateSubcommand(
   basename: string | undefined,
   ruleName: string,
   source: string,
+  descriptors?: Record<string, CLIDescriptor>,
 ): PredicateVerdict {
   // Non-bash tools carry no `args` → unknown → default block
   // (fail-closed, S1).
@@ -751,15 +754,41 @@ function evaluateSubcommand(
   const normalized = normalizeSubcommandLeaf(value);
   if (normalized === "unknown") return "unknown";
   if (normalized === null) return false;
-  const { patterns, depth, valueConsumingFlags, sequence } = normalized;
-  // Bare words carry no binary identity: resolve the position policy
-  // MANUALLY from the table, falling back to `"globals-anywhere"`.
-  const resolved: unknown =
-    basename !== undefined ? DEFAULT_POSITION_POLICIES[basename] : undefined;
-  const positionPolicy: PositionPolicy =
-    typeof resolved === "string"
-      ? (resolved as PositionPolicy)
-      : "globals-anywhere";
+  const {
+    patterns,
+    depth,
+    valueConsumingFlags: inlineFlags,
+    sequence,
+  } = normalized;
+  // Resolve per-binary argv knowledge (issue #106): inline flags
+  // REPLACE the registry list; registry policy overrides the table
+  // fallback; absent → strict globals-anywhere/empty set.
+  // Re-validates at resolution time (post-merge mutation by plain-JS
+  // callers) with one-shot [invalid-descriptor] WARNs.
+  const inlineForResolve =
+    inlineFlags.length > 0 ? { valueConsumingFlags: inlineFlags } : undefined;
+  const resolved = resolveDescriptor(
+    basename ?? "",
+    inlineForResolve,
+    descriptors,
+  );
+  // Invalid registry policy → skip the leaf (fail-SKIP, not unknown).
+  // resolveDescriptor already one-shot WARNed with [invalid-descriptor];
+  // returning false here keeps the invalid→absent→skip contract without
+  // a second per-call WARN from the guard below.
+  const rawRegistryPolicy = descriptors?.[basename ?? ""]?.positionPolicy;
+  if (
+    rawRegistryPolicy !== undefined &&
+    (typeof rawRegistryPolicy !== "string" ||
+      !VALID_POSITION_POLICIES.has(rawRegistryPolicy))
+  ) {
+    return false;
+  }
+  const positionPolicy = resolved.positionPolicy;
+  const valueConsumingFlags = resolved.valueConsumingFlags;
+  // The resolved policy feeds the existing VALID guard below (S1):
+  // descriptor re-validation already one-shot WARNed, so this stays
+  // as defense-in-depth for table pollution.
   if (!VALID_POSITION_POLICIES.has(positionPolicy)) {
     console.warn(
       `[pi-steering] Rule "${ruleName}"@${source}: when.subcommand ` +
@@ -924,17 +953,32 @@ function flagPresent(
 function evaluateFlag(
   value: unknown,
   args: readonly PredicateWord[] | undefined,
+  basename?: string,
+  descriptors?: Record<string, CLIDescriptor>,
 ): PredicateVerdict {
   // Non-bash tools carry no `args` → unknown → default block
   // (fail-closed, S1).
   if (!Array.isArray(args)) return "unknown";
   const normalized = normalizeFlagLeaf(value);
   if (normalized === null) return false;
+  // Resolve descriptor flags (issue #106): inline REPLACES registry;
+  // re-validated at resolution time (no try/catch around flagPresent's
+  // `new Set(...)` — a non-iterable registry value would escape as
+  // rule-skip fail-open).
+  const inlineForResolve =
+    normalized.valueConsumingFlags.length > 0
+      ? { valueConsumingFlags: normalized.valueConsumingFlags }
+      : undefined;
+  const resolved = resolveDescriptor(
+    basename ?? "",
+    inlineForResolve,
+    descriptors,
+  );
   return flagPresent(
     args,
     normalized.anyOf,
     normalized.bundleAware,
-    normalized.valueConsumingFlags,
+    resolved.valueConsumingFlags,
   );
 }
 
@@ -1397,6 +1441,7 @@ async function evaluateNotBlock(
   source: string,
   onUnknownDefault: "allow" | "block" = "block",
   ignoreExplicitModifiers = false,
+  descriptors?: Record<string, CLIDescriptor>,
 ): Promise<boolean> {
   // Read block-level `onUnknown:` modifier. Default fail-CLOSED
   // (or the exemption-evaluation override via `onUnknownDefault`).
@@ -1437,6 +1482,7 @@ async function evaluateNotBlock(
           ctx.input.basename,
           ruleName,
           source,
+          descriptors,
         ),
       );
       continue;
@@ -1444,7 +1490,9 @@ async function evaluateNotBlock(
 
     // Built-in: flag — trinary only on missing `args` (non-bash).
     if (key === "flag") {
-      verdicts.push(evaluateFlag(value, ctx.input.args));
+      verdicts.push(
+        evaluateFlag(value, ctx.input.args, ctx.input.basename, descriptors),
+      );
       continue;
     }
 
@@ -1587,6 +1635,7 @@ export async function evaluateWhen(
   source: string,
   onUnknownDefault: "allow" | "block" = "block",
   ignoreExplicitModifiers = false,
+  descriptors?: Record<string, CLIDescriptor>,
 ): Promise<boolean> {
   if (!when) return true;
 
@@ -1623,6 +1672,7 @@ export async function evaluateWhen(
         ctx.input.basename,
         ruleName,
         source,
+        descriptors,
       );
       const onUnknown = readLeafOnUnknown(
         value,
@@ -1636,7 +1686,12 @@ export async function evaluateWhen(
     // Built-in: flag. Same trinary adapter as `subcommand` (unknown
     // only on non-bash tools with no `args`).
     if (key === "flag") {
-      const verdict = evaluateFlag(value, ctx.input.args);
+      const verdict = evaluateFlag(
+        value,
+        ctx.input.args,
+        ctx.input.basename,
+        descriptors,
+      );
       const onUnknown = readLeafOnUnknown(
         value,
         onUnknownDefault,
@@ -1665,6 +1720,7 @@ export async function evaluateWhen(
         source,
         onUnknownDefault,
         ignoreExplicitModifiers,
+        descriptors,
       );
       if (!notFires) return false;
       continue;

@@ -60,6 +60,7 @@ import type {
   ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import { resolveDescriptor } from "./cli-descriptors.ts";
 import {
   createAppendEntry,
   createExecCache,
@@ -324,6 +325,7 @@ export function buildEvaluator(
         ruleSources,
         allObservers,
         exemptionMap,
+        resolved.cliDescriptors,
       ),
   };
 }
@@ -632,6 +634,12 @@ interface SharedEvalContext {
     string,
     readonly TopLevelWhenClause<string>[]
   >;
+  /**
+   * Merged CLI descriptors keyed by basename (issue #106). Bound
+   * per ref for the facade (`commandFromInput`) and threaded into
+   * `evaluateWhen` for both ARGV leaves.
+   */
+  readonly descriptors: Record<string, import("./schema.ts").CLIDescriptor>;
 }
 
 /**
@@ -725,11 +733,20 @@ async function runPredicateChain(
     // Pattern-miss is the common case; exit before allocating ctx.
     if (!matchesPattern(rule.pattern, cand.target)) return null;
 
+    // Per-ref facade binding (issue #106, atomic with leaves):
+    // resolve the descriptor for this ref's basename once, bind its
+    // flags into the facade view. Behavior-inert until #107 wires
+    // consumption (hasFlag presence-only agrees today).
+    const resolvedFlags =
+      cand.input.basename !== undefined
+        ? resolveDescriptor(cand.input.basename, undefined, shared.descriptors)
+            .valueConsumingFlags
+        : undefined;
     const ctx: PredicateContext = {
       cwd: cand.cwd,
       tool: cand.tool,
       input: cand.input,
-      command: commandFromInput(cand.input),
+      command: commandFromInput(cand.input, resolvedFlags),
       agentLoopIndex: shared.agentLoopIndex,
       exec: shared.exec,
       appendEntry: shared.appendEntry,
@@ -754,6 +771,9 @@ async function runPredicateChain(
       shared.predicates,
       rule.name,
       source,
+      "block",
+      false,
+      shared.descriptors,
     );
     if (!whenOk) return null;
 
@@ -919,6 +939,7 @@ async function evaluateExemptionClause(
       "exemption",
       "allow",
       true, // ignoreExplicitModifiers — strict fail-closed (S1)
+      shared.descriptors,
     );
   } catch (err) {
     console.warn(
@@ -940,6 +961,7 @@ async function evaluateEvent(
   ruleSources: ReadonlyMap<Rule, string>,
   allObservers: readonly Observer[],
   exemptions: ReadonlyMap<string, readonly TopLevelWhenClause<string>[]>,
+  descriptors: Record<string, import("./schema.ts").CLIDescriptor> = {},
 ): Promise<ToolCallEventResult | void> {
   // Top-level fail-closed wrap (S1). If the engine's own scaffolding
   // throws — parse errors, walker bugs, corrupted session JSONL, etc.
@@ -961,6 +983,7 @@ async function evaluateEvent(
       ruleSources,
       allObservers,
       exemptions,
+      descriptors,
     );
   } catch (err) {
     console.error(`[pi-steering] steering engine threw: ${formatError(err)}`);
@@ -986,6 +1009,7 @@ async function evaluateEventInner(
   ruleSources: ReadonlyMap<Rule, string>,
   allObservers: readonly Observer[],
   exemptions: ReadonlyMap<string, readonly TopLevelWhenClause<string>[]>,
+  descriptors: Record<string, import("./schema.ts").CLIDescriptor> = {},
 ): Promise<ToolCallEventResult | void> {
   // Shared per-call closures: exec memoized by (cmd, args, cwd);
   // findEntries reads the current session JSONL on demand; appendEntry
@@ -1013,6 +1037,7 @@ async function evaluateEventInner(
     defaultNoOverride,
     ruleSources,
     exemptions,
+    descriptors,
   };
 
   // Bash state is lazy: non-bash rules don't pay for parse / walk.

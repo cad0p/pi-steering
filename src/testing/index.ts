@@ -49,6 +49,7 @@ import type {
   ToolCallEvent,
   ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
+import { resolveDescriptor } from "../cli-descriptors.ts";
 import {
   buildEvaluator,
   EVALUATOR_BUILTIN_TRACKERS,
@@ -558,6 +559,17 @@ export interface MockContextOptions {
    * production — `{ data, timestamp, speculative: true }` per entry.
    */
   readonly toolCallEvents?: Readonly<Record<string, readonly SyntheticEntry[]>>;
+
+  /**
+   * CLI descriptors for the facade binding symmetry (issue #106).
+   * When provided, `command` binds via
+   * `resolveDescriptor(input.basename).valueConsumingFlags` exactly
+   * as the engine does per ref. Omitted → strict default (no
+   * descriptor). Behavior-inert until #107 wires consumption.
+   */
+  readonly descriptors?: Readonly<
+    Record<string, import("../schema.ts").CLIDescriptor>
+  >;
 }
 
 /**
@@ -609,11 +621,22 @@ export function mockContext(
   // simulation would disagree with the real engine.
   const bufferingHost = bufferingAppendHost(buffer);
 
+  const mockResolvedFlags =
+    input.basename !== undefined && options.descriptors !== undefined
+      ? resolveDescriptor(
+          input.basename,
+          undefined,
+          options.descriptors as Record<
+            string,
+            import("../schema.ts").CLIDescriptor
+          >,
+        ).valueConsumingFlags
+      : undefined;
   const ctx: PredicateContext = {
     cwd,
     tool,
     input,
-    command: commandFromInput(input),
+    command: commandFromInput(input, mockResolvedFlags),
     agentLoopIndex,
     exec: buildExec(options.exec, "mockContext"),
     appendEntry: createAppendEntry(bufferingHost, agentLoopIndex),

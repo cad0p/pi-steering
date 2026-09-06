@@ -102,9 +102,26 @@ export interface SteeringCommand {
  * arrays, so post-construction mutation of the caller's arrays cannot
  * leak into the facade.
  */
-export function commandFromInput(input: PredicateToolInput): SteeringCommand {
+/**
+ * Build a {@link SteeringCommand} bound to one tool input's argv +
+ * env-prefix words, with an optional descriptor-resolved consuming-flag
+ * list (issue #106 step-4 binding, behavior-inert until #107 wires
+ * `FlagLookupOptions.valueConsumingFlags` consumption).
+ *
+ * The engine binds per ref (`resolveDescriptor(basename).valueConsumingFlags`
+ * → here); the facade stays a pure view. `SteeringCommand` is
+ * untouched (backward-compatible).
+ */
+export function commandFromInput(
+  input: PredicateToolInput,
+  resolvedFlags?: readonly string[],
+): SteeringCommand {
   const args: readonly Word[] = [...(input?.args ?? [])];
   const envAssignments: readonly Word[] = [...(input?.envAssignments ?? [])];
+  // Inert until #107: retained for the arity-helper contract (per-call
+  // opts > descriptor > empty). Referenced so the binding is observable
+  // to tests without changing flag-reader behavior.
+  void resolvedFlags;
   return {
     hasFlag: (flag, opts) => hasFlag(args, flag, opts),
     getFlagValue: (flags, opts) => getFlagValue(args, flags, opts),

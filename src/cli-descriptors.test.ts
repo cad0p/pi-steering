@@ -91,3 +91,53 @@ describe("resolveDescriptor: precedence inline > registry > strict-default", () 
     });
   });
 });
+
+describe("isValueConsuming: arity-helper contract (issue #106 step-5, #107 implements)", () => {
+  it("returns true iff flag is in inline ?? descriptor ?? []", async () => {
+    const { isValueConsuming } = await import("./helpers/flags.ts");
+    // Inline present → descriptor ignored (REPLACE, no union).
+    assert.equal(
+      isValueConsuming("--a", { inline: ["--a"], descriptor: ["--b"] }),
+      true,
+    );
+    assert.equal(
+      isValueConsuming("--b", { inline: ["--a"], descriptor: ["--b"] }),
+      false,
+    );
+    // Inline absent → descriptor.
+    assert.equal(isValueConsuming("--b", { descriptor: ["--b"] }), true);
+    assert.equal(isValueConsuming("--x", { descriptor: ["--b"] }), false);
+    // Neither → false (strict: nothing consumes).
+    assert.equal(isValueConsuming("--x", {}), false);
+    // Empty inline REPLACES non-empty descriptor.
+    assert.equal(
+      isValueConsuming("--b", { inline: [], descriptor: ["--b"] }),
+      false,
+    );
+  });
+
+  it("FlagLookupOptions.valueConsumingFlags seam exists (no behavior change)", async () => {
+    const { commandFromInput } = await import("./helpers/command.ts");
+    // Per-ref binding is accepted and inert: presence-only agrees,
+    // value-level behavior unchanged until #107.
+    const cmd = commandFromInput(
+      {
+        tool: "bash",
+        command: "git push --delete origin",
+        basename: "git",
+        args: [
+          { text: "push", value: "push", rawText: "push" },
+          { text: "--delete", value: "--delete", rawText: "--delete" },
+          { text: "origin", value: "origin", rawText: "origin" },
+        ],
+      } as never,
+      ["-C", "-c"],
+    );
+    assert.equal(cmd.hasFlag("--delete"), true);
+    // Per-call opts win over the bound descriptor (contract, inert today).
+    assert.equal(
+      cmd.hasFlag("--delete", { valueConsumingFlags: ["--other"] }),
+      true,
+    );
+  });
+});

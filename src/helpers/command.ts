@@ -118,14 +118,24 @@ export function commandFromInput(
 ): SteeringCommand {
   const args: readonly Word[] = [...(input?.args ?? [])];
   const envAssignments: readonly Word[] = [...(input?.envAssignments ?? [])];
-  // Inert until #107: retained for the arity-helper contract (per-call
-  // opts > descriptor > empty). Referenced so the binding is observable
-  // to tests without changing flag-reader behavior.
-  void resolvedFlags;
+  // Descriptor default for the arity contract (per-call opts >
+  // descriptor > empty). Inert until #107 wires consumption in
+  // `flags.ts` — the helpers ignore `valueConsumingFlags` today, so
+  // this binding changes no verdicts (hasFlag presence-only agrees).
+  const descriptorDefault =
+    resolvedFlags !== undefined ? [...resolvedFlags] : undefined;
+  const withDefault = (
+    opts?: FlagLookupOptions,
+  ): FlagLookupOptions | undefined => {
+    if (descriptorDefault === undefined) return opts;
+    if (opts?.valueConsumingFlags !== undefined) return opts;
+    return { ...opts, valueConsumingFlags: descriptorDefault };
+  };
   return {
-    hasFlag: (flag, opts) => hasFlag(args, flag, opts),
-    getFlagValue: (flags, opts) => getFlagValue(args, flags, opts),
-    getAllFlagValues: (flags, opts) => getAllFlagValues(args, flags, opts),
+    hasFlag: (flag, opts) => hasFlag(args, flag, withDefault(opts)),
+    getFlagValue: (flags, opts) => getFlagValue(args, flags, withDefault(opts)),
+    getAllFlagValues: (flags, opts) =>
+      getAllFlagValues(args, flags, withDefault(opts)),
     hasEnvAssignment: (name) => hasEnvAssignment(envAssignments, name),
     isInfoOnly: (extraFlags) => isInfoOnly(args, extraFlags),
   };

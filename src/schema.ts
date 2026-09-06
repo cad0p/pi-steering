@@ -2303,7 +2303,8 @@ export interface SteeringConfig {
  *     duplicate plugin-shipped trackers when those plugins surface
  *     together via the merge.
  *   - PLUGIN-MERGER (`predicate-collision`, `observer-collision`,
- *     `rule-collision`, `extension-orphan`, `reserved-tracker-name`,
+ *     `rule-collision`, `descriptor-collision`, `invalid-descriptor`,
+ *     `extension-orphan`, `reserved-tracker-name`,
  *     `reserved-predicate-key`, `invalid-name`) — produced while
  *     resolving plugin shapes into the runtime registry. The
  *     collision kinds in this group flag duplicates among
@@ -2450,7 +2451,23 @@ export type SteeringDiagnosticKind =
    * digits, underscores, dashes; must start with a letter or
    * digit. Rename the offending object in source.
    */
-  | "invalid-name";
+  | "invalid-name"
+  /**
+   * Two plugins both register a CLI descriptor under the same
+   * basename. The first-registered entry wins; the later plugin's
+   * entry is dropped. Also emitted when a plugin entry shadows a
+   * core default basename (plugin still wins — loudness without
+   * blocking; descriptors are additive knowledge, not
+   * state-dimension claims).
+   */
+  | "descriptor-collision"
+  /**
+   * A plugin's `cliDescriptors` entry is malformed (non-object
+   * descriptor, non-array `valueConsumingFlags`, invalid
+   * `positionPolicy`). The entry is skipped; resolution falls back
+   * to the strict default. Never throws.
+   */
+  | "invalid-descriptor";
 
 /**
  * Structured issue surfaced while loading a steering config.
@@ -2547,6 +2564,7 @@ export interface SteeringDiagnostic {
    *   - Cross-layer collisions and plugin-shipped diagnostics
    *     (`plugin-name-collision`, `tracker-name-collision`,
    *     `predicate-collision`, `observer-collision`, `rule-collision`,
+   *     `descriptor-collision`, `invalid-descriptor`,
    *     `extension-orphan`, `reserved-tracker-name`,
    *     `reserved-predicate-key`, `invalid-name`): unset by design.
    *     These diagnostics name the participants (layer paths or

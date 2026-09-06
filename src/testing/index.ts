@@ -334,6 +334,7 @@ function buildNoopHarness(
     trackers: {},
     trackerModifiers: {},
     composedTrackers: {},
+    cliDescriptors: {},
     rules: [],
     rulePluginOwners: {},
     // Mirror harness.diagnostics so consumers reading either surface

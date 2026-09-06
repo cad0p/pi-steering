@@ -31,11 +31,13 @@
  */
 
 import type { Modifier, Tracker } from "@cad0p/unbash-walker";
+import { CORE_CLI_DESCRIPTORS } from "./cli-descriptors.ts";
 import {
   isReservedPredicateKey,
   RESERVED_PREDICATE_KEYS,
 } from "./evaluator-internals/predicates.ts";
 import type {
+  CLIDescriptor,
   Exemption,
   Observer,
   OperatorField,
@@ -235,6 +237,15 @@ export interface ResolvedPluginState {
   exemptions?: readonly Exemption[];
 
   /**
+   * Merged CLI descriptors keyed by command basename (`"git"`,
+   * `"gh"`). First-registered plugin entry wins on collision;
+   * core defaults fill absent basenames AFTER the plugin loop
+   * (pure fallback, no WARN). A plugin entry shadowing a core
+   * basename warns but still wins.
+   */
+  cliDescriptors: Record<string, CLIDescriptor>;
+
+  /**
    * Rule-name → plugin-name mapping for every rule surviving in
    * {@link rules}. Consumed by the evaluator to source-tag block
    * reasons as `[steering:<rule>@<plugin>] …`. User-defined rules
@@ -338,6 +349,50 @@ function composeTracker(
  * means "no built-ins" — every extension must target a
  * plugin-registered tracker.
  */
+/**
+ * Valid `positionPolicy` values for CLI descriptors. Mirrors the
+ * leaf-side `VALID_POSITION_POLICIES` in
+ * `evaluator-internals/predicates.ts` — the merger validates early
+ * (skip + WARN) and the evaluator re-validates at resolution time
+ * (post-merge mutation by plain-JS callers).
+ */
+const VALID_DESCRIPTOR_POLICIES: ReadonlySet<string> = new Set([
+  "globals-anywhere",
+  "globals-before-only",
+  "globals-after-only",
+]);
+
+/**
+ * Validate one `cliDescriptors` entry. Returns the entry unchanged
+ * when well-formed, or `null` when malformed (caller skips + WARNs
+ * with `invalid-descriptor`, never throws).
+ *
+ * Malformed: non-object descriptor, non-array `valueConsumingFlags`
+ * (or non-string members), invalid `positionPolicy`.
+ */
+function validateDescriptorValue(value: unknown): CLIDescriptor | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const obj = value as Partial<CLIDescriptor>;
+  if (
+    obj.positionPolicy !== undefined &&
+    (typeof obj.positionPolicy !== "string" ||
+      !VALID_DESCRIPTOR_POLICIES.has(obj.positionPolicy))
+  ) {
+    return null;
+  }
+  if (obj.valueConsumingFlags !== undefined) {
+    if (
+      !Array.isArray(obj.valueConsumingFlags) ||
+      !obj.valueConsumingFlags.every((v) => typeof v === "string")
+    ) {
+      return null;
+    }
+  }
+  return obj as CLIDescriptor;
+}
+
 export function resolvePlugins(
   plugins: readonly Plugin[],
   config: SteeringConfig,
@@ -646,6 +701,65 @@ export function resolvePlugins(
     }
   }
 
+  // --- CLI descriptors ---------------------------------------------------
+  // Per-binary argv knowledge keyed by basename. First-wins across
+  // plugins (post-`disabledPlugins` filter, so disabled plugins
+  // contribute nothing); core defaults fill absent basenames AFTER
+  // the loop (pure fallback, no WARN). A plugin entry shadowing a
+  // core basename warns but still wins (loudness without blocking).
+  // Malformed entries are skipped + WARNed (never throw).
+  const cliDescriptors: Record<string, CLIDescriptor> = {};
+  const descriptorOwner = new Map<string, string>();
+  for (const plugin of activePlugins) {
+    if (!plugin.cliDescriptors) continue;
+    for (const [basename, descriptor] of Object.entries(
+      plugin.cliDescriptors,
+    )) {
+      const valid = validateDescriptorValue(descriptor);
+      if (valid === null) {
+        diagnostics.push({
+          type: "warning",
+          kind: "invalid-descriptor",
+          message:
+            `invalid CLI descriptor "${basename}" — plugin "${plugin.name}" ` +
+            `(ignored); expected { positionPolicy?, valueConsumingFlags? } ` +
+            `with a valid policy and string-array flags`,
+        });
+        continue;
+      }
+      const prior = descriptorOwner.get(basename);
+      if (prior !== undefined) {
+        diagnostics.push({
+          type: "warning",
+          kind: "descriptor-collision",
+          message:
+            `duplicate CLI descriptor "${basename}" — plugins "${prior}" ` +
+            `(kept) and "${plugin.name}" (ignored); first-registered wins`,
+        });
+        continue;
+      }
+      descriptorOwner.set(basename, plugin.name);
+      cliDescriptors[basename] = valid;
+    }
+  }
+  // Core fallback fill (no WARN) + shadow loudness (WARN, plugin wins).
+  for (const [basename, coreDescriptor] of Object.entries(
+    CORE_CLI_DESCRIPTORS,
+  )) {
+    if (basename in cliDescriptors) {
+      const owner = descriptorOwner.get(basename) ?? "unknown";
+      diagnostics.push({
+        type: "warning",
+        kind: "descriptor-collision",
+        message:
+          `CLI descriptor "${basename}" from plugin "${owner}" ` +
+          `shadows the core default; plugin entry wins`,
+      });
+      continue;
+    }
+    cliDescriptors[basename] = coreDescriptor;
+  }
+
   // --- exemptions ---------------------------------------------------------
   // Plugin-shipped carve-outs accumulate with the rest of the plugin;
   // `disabledPlugins` (applied above to build `activePlugins`) drops
@@ -663,6 +777,7 @@ export function resolvePlugins(
     trackers,
     trackerModifiers,
     composedTrackers,
+    cliDescriptors,
     rules,
     rulePluginOwners: Object.fromEntries(ruleOwner),
     ...(exemptions.length > 0 ? { exemptions } : {}),

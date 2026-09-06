@@ -285,6 +285,10 @@ export const GIT_PLUGIN_NAME: "git" = gitPlugin.name;
 
 export default gitPlugin;
 
+// Core-owned git argv knowledge (issue #106): re-exported here for
+// discoverability. The merger imports from `cli-descriptors.ts`
+// directly (never this barrel) so there is no core→plugin edge.
+export { GIT_CLI_DESCRIPTOR } from "../../cli-descriptors.ts";
 export {
   getBranch,
   getCommitsAhead,

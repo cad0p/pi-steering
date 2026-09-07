@@ -19,7 +19,7 @@
 // - Per-command flags (e.g. `-e/--env`, `-o/--org`, `-y/--confirm`) out of scope
 //   for the globals draft; owning repo expands per-command tables.
 
-import type { CLIDescriptor } from "../src/schema.ts";
+import type { CLIDescriptor } from "./src/schema.ts";
 
 /**
  * DRAFT gh globals descriptor (for pi-steering-github#61, not core).

@@ -26,7 +26,7 @@ import workItemPlugin, {
   DESCRIPTION_REVIEWED_EVENT,
   TEST_PASSED_EVENT,
 } from "./index.ts";
-import { featureBranchHost } from "./test-helpers.ts";
+import { featureBranchHost } from "./__test-helpers__.ts";
 
 describe("work-item-plugin (end-to-end)", () => {
   it("registers the expected predicates, rules, observers", () => {

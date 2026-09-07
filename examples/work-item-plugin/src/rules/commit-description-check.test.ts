@@ -17,7 +17,7 @@ import {
   loadHarness,
   mockExtensionContext,
 } from "@cad0p/pi-steering/testing";
-import { featureBranchHost } from "../test-helpers.ts";
+import { featureBranchHost } from "../__test-helpers__.ts";
 import {
   commitDescriptionCheck,
   DESCRIPTION_REVIEWED_EVENT,

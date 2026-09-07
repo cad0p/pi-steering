@@ -13,7 +13,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Observer } from "@cad0p/pi-steering";
+import type { Observer, Plugin } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import {
   createRecordingHost,
   expectAllows,
@@ -26,16 +27,13 @@ import workItemPlugin, {
   TEST_PASSED_EVENT,
 } from "./index.ts";
 
-/**
- * Explicit-strict git facts for these integration tests (issue #107:
- * absent descriptors are loud). The example plugin itself stays clean
- * so adopters copying it feel the loudness and declare real facts
- * (e.g. by importing the git plugin).
- */
-const testStrict = {
-  name: "test-strict",
-  cliDescriptors: { git: {} },
-};
+// Minimal npm facts for the `npm test` dispatch harness below (issue #107:
+// absent descriptors are loud); `{ npm: {} }` is explicit-strict, honest for
+// the plain `npm test` invocation used here.
+const exampleNpmFacts = {
+  name: "example-npm-facts",
+  cliDescriptors: { npm: {} },
+} as const satisfies Plugin;
 
 describe("work-item-plugin (end-to-end)", () => {
   it("registers the expected predicates, rules, observers", () => {
@@ -65,7 +63,11 @@ describe("work-item-plugin (end-to-end)", () => {
 
   it("blocks a commit without a work-item tag", async () => {
     const harness = loadHarness({
-      config: { plugins: [workItemPlugin, testStrict] },
+      config: {
+        plugins: [workItemPlugin, gitPlugin],
+        // no-main-commit* fail closed on the harness's unresolvable branch; this suite pins work-item behavior.
+        disabledRules: ["no-main-commit", "no-main-commit-github"],
+      },
     });
     await expectBlocks(
       harness,
@@ -76,7 +78,7 @@ describe("work-item-plugin (end-to-end)", () => {
 
   it("blocks git push when tests haven't passed this loop", async () => {
     const harness = loadHarness({
-      config: { plugins: [workItemPlugin, testStrict] },
+      config: { plugins: [workItemPlugin, gitPlugin] },
     });
     await expectBlocks(
       harness,
@@ -92,7 +94,11 @@ describe("work-item-plugin (end-to-end)", () => {
     const host = createRecordingHost();
     const ctx = mockExtensionContext("/tmp/test", host.entries);
     const harness = loadHarness({
-      config: { plugins: [workItemPlugin, testStrict] },
+      config: {
+        plugins: [workItemPlugin, gitPlugin],
+        // no-main-commit* fail closed on the harness's unresolvable branch; this suite pins work-item behavior.
+        disabledRules: ["no-main-commit", "no-main-commit-github"],
+      },
       host,
     });
 
@@ -135,7 +141,9 @@ describe("work-item-plugin (end-to-end)", () => {
     const host = createRecordingHost();
     const ctx = mockExtensionContext("/tmp/test", host.entries);
     const harness = loadHarness({
-      config: { plugins: [workItemPlugin, testStrict] },
+      config: {
+        plugins: [workItemPlugin, gitPlugin, exampleNpmFacts],
+      },
       host,
     });
 
@@ -178,7 +186,7 @@ describe("work-item-plugin (end-to-end)", () => {
 
   it("does not fire on unrelated commands", async () => {
     const harness = loadHarness({
-      config: { plugins: [workItemPlugin, testStrict] },
+      config: { plugins: [workItemPlugin] },
     });
     await expectAllows(harness, { command: "ls -la" });
   });
@@ -194,7 +202,7 @@ describe("work-item-plugin (end-to-end)", () => {
 
     const run = async (obs: Observer) => {
       const h = loadHarness({
-        config: { plugins: [workItemPlugin, testStrict], observers: [obs] },
+        config: { plugins: [workItemPlugin], observers: [obs] },
         host,
       });
       await h.dispatch(

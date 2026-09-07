@@ -24,6 +24,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Plugin } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import {
   createRecordingHost,
   expectAllows,
@@ -49,16 +50,21 @@ import { pushRequiresTests } from "./push-requires-tests.ts";
 const testPlugin: Plugin = {
   name: "test",
   observers: [npmTestTracker, retestRequiredTracker],
-  // Explicit strict: these tests pin the observer→rule handoff, not
-  // argv arity (issue #107: absent descriptors are loud).
-  cliDescriptors: { git: {} },
 };
+
+// Minimal npm facts for the `npm test` harnesses below (issue #107: absent
+// descriptors are loud); `{ npm: {} }` is explicit-strict, honest for the
+// plain `npm test` invocations used here.
+const exampleNpmFacts = {
+  name: "example-npm-facts",
+  cliDescriptors: { npm: {} },
+} as const satisfies Plugin;
 
 describe("push-requires-tests", () => {
   it("blocks git push when no TEST_PASSED entry exists", async () => {
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
     });
@@ -72,7 +78,7 @@ describe("push-requires-tests", () => {
   it("does NOT fire on unrelated commands", async () => {
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
     });
@@ -90,7 +96,7 @@ describe("push-requires-tests", () => {
 
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin, exampleNpmFacts],
         rules: [pushRequiresTests],
       },
       host,
@@ -140,7 +146,7 @@ describe("push-requires-tests", () => {
 
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin, exampleNpmFacts],
         rules: [pushRequiresTests],
       },
       host,
@@ -203,7 +209,7 @@ describe("push-requires-tests", () => {
     // circuits and `git push` never runs.
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin, exampleNpmFacts],
         rules: [pushRequiresTests],
       },
     });
@@ -218,7 +224,7 @@ describe("push-requires-tests", () => {
     // cite; the rule fires normally.
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin, exampleNpmFacts],
         rules: [pushRequiresTests],
       },
     });
@@ -235,7 +241,7 @@ describe("push-requires-tests", () => {
     // allow would be unsafe.
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin, exampleNpmFacts],
         rules: [pushRequiresTests],
       },
     });

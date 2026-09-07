@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import {
   createRecordingHost,
   expectAllows,
@@ -33,10 +34,10 @@ describe("commit-description-check", () => {
     const ctx = mockExtensionContext("/tmp/test", host.entries);
 
     const harness = loadHarness({
-      // Explicit strict: pins self-mark behavior, not argv arity
-      // (issue #107: absent descriptors are loud).
       config: {
-        plugins: [{ name: "test-strict", cliDescriptors: { git: {} } }],
+        plugins: [gitPlugin],
+        // no-main-commit* fail closed on the harness's unresolvable branch; this suite pins self-mark behavior.
+        disabledRules: ["no-main-commit", "no-main-commit-github"],
         rules: [commitDescriptionCheck],
       },
       host,
@@ -105,10 +106,8 @@ describe("commit-description-check", () => {
 
   it("does NOT fire on a non-commit command", async () => {
     const harness = loadHarness({
-      // Explicit strict: pins non-commit allow, not argv arity
-      // (issue #107: absent descriptors are loud).
       config: {
-        plugins: [{ name: "test-strict", cliDescriptors: { git: {} } }],
+        plugins: [gitPlugin],
         rules: [commitDescriptionCheck],
       },
     });

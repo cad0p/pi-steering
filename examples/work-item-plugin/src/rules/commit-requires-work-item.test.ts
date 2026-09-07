@@ -12,6 +12,7 @@
 
 import { describe, it } from "node:test";
 import type { Plugin } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import {
   expectAllows,
   expectBlocks,
@@ -29,15 +30,14 @@ import { commitRequiresWorkItem } from "./commit-requires-work-item.ts";
 const testPlugin: Plugin = {
   name: "test",
   predicates: { workItemFormat },
-  // Explicit strict: these tests pin predicate behavior, not argv
-  // arity (issue #107: absent descriptors are loud).
-  cliDescriptors: { git: {} },
 };
 
 describe("commit-requires-work-item", () => {
   const harness = loadHarness({
     config: {
-      plugins: [testPlugin],
+      plugins: [testPlugin, gitPlugin],
+      // no-main-commit* fail closed on the harness's unresolvable branch; this suite pins predicate behavior.
+      disabledRules: ["no-main-commit", "no-main-commit-github"],
       rules: [commitRequiresWorkItem],
     },
   });

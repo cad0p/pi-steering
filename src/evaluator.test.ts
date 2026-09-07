@@ -44,6 +44,7 @@ import {
   type EvaluatorHost,
 } from "./evaluator.ts";
 import { evaluateWhen } from "./evaluator-internals/predicates.ts";
+import { MissingDescriptorError } from "./arity.ts";
 import {
   BLOCK_REASON_PREAMBLE,
   ENGINE_ERROR_PREAMBLE,
@@ -53,8 +54,10 @@ import { resolvePlugins } from "./plugin-merger.ts";
 import type {
   CLIDescriptor,
   Observer,
+  Pattern,
   Plugin,
   PredicateContext,
+  PredicateFn,
   PredicateHandler,
   Rule,
   SteeringConfig,
@@ -406,6 +409,256 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
     );
     assert.equal(ctx.agentLoopIndex, 3);
     assert.equal(seen[1]!.agentLoopIndex, 4);
+  });
+
+  it("requires-fn sync throw projects to satisfied: rule fires, single warn", async () => {
+    const rule: Rule = {
+      name: "req-throws",
+      tool: "bash",
+      field: "command",
+      pattern: "^git\\s+push",
+      reason: "req-throws",
+      requires: () => {
+        throw new Error("boom-requires");
+      },
+    };
+    const warnings = captureWarnings();
+    try {
+      const evaluator = buildEvaluator(
+        { rules: [rule] },
+        resolve(),
+        makeHost(),
+      );
+      const res = await evaluator.evaluate(
+        bashEvent("git push"),
+        makeCtx("/repo"),
+        0,
+      );
+      // Strict projection: unknown requires → satisfied → chain
+      // continues → rule fires (fail CLOSED, not warn+skip).
+      assert.ok(res && res.block === true);
+      // Exactly one rule-tagged warn (locks no double-warn with the
+      // shared backstop catch).
+      assert.equal(
+        warnings.filter((w) =>
+          /predicate threw for rule "req-throws"@user/.test(w),
+        ).length,
+        1,
+      );
+      assert.ok(
+        warnings.some((w) => /boom-requires/.test(w)),
+        `no matching warning in:\n${warnings.join("\n")}`,
+      );
+    } finally {
+      warnings.restore();
+    }
+  });
+
+  it("requires-fn async rejection projects to satisfied: rule fires, single warn", async () => {
+    const rule: Rule = {
+      name: "req-rejects",
+      tool: "bash",
+      field: "command",
+      pattern: "^git\\s+push",
+      reason: "req-rejects",
+      requires: async () => {
+        throw new Error("boom-requires-async");
+      },
+    };
+    const warnings = captureWarnings();
+    try {
+      const evaluator = buildEvaluator(
+        { rules: [rule] },
+        resolve(),
+        makeHost(),
+      );
+      const res = await evaluator.evaluate(
+        bashEvent("git push"),
+        makeCtx("/repo"),
+        0,
+      );
+      // Sync throw and async rejection project identically (both
+      // surface at the clause's `await`).
+      assert.ok(res && res.block === true);
+      assert.equal(
+        warnings.filter((w) =>
+          /predicate threw for rule "req-rejects"@user/.test(w),
+        ).length,
+        1,
+      );
+      assert.ok(
+        warnings.some((w) => /boom-requires-async/.test(w)),
+        `no matching warning in:\n${warnings.join("\n")}`,
+      );
+    } finally {
+      warnings.restore();
+    }
+  });
+
+  it("unless-fn throw (sync + async) projects to absent: rule fires, single warn per throw", async () => {
+    const cases: Array<{ name: string; unless: Pattern | PredicateFn }> = [
+      {
+        name: "unl-throws-sync",
+        unless: () => {
+          throw new Error("boom-unless-sync");
+        },
+      },
+      {
+        name: "unl-rejects-async",
+        unless: async () => {
+          throw new Error("boom-unless-async");
+        },
+      },
+    ];
+    // Mirrors the issue's draft-prs-only exploit trace: pattern
+    // matches, throwing `unless` fn must NOT skip the rule.
+    for (const { name, unless } of cases) {
+      const rule: Rule = {
+        name,
+        tool: "bash",
+        field: "command",
+        pattern: "^git\\s+push",
+        reason: name,
+        unless,
+      };
+      const warnings = captureWarnings();
+      try {
+        const evaluator = buildEvaluator(
+          { rules: [rule] },
+          resolve(),
+          makeHost(),
+        );
+        const res = await evaluator.evaluate(
+          bashEvent("git push"),
+          makeCtx("/repo"),
+          0,
+        );
+        assert.ok(res && res.block === true);
+        assert.equal(
+          warnings.filter((w) =>
+            new RegExp(
+              `predicate threw for rule "${name}"@user`,
+            ).test(w),
+          ).length,
+          1,
+        );
+      } finally {
+        warnings.restore();
+      }
+    }
+  });
+
+  it("MissingDescriptorError from requires/unless fns passes through to a loud rule-tagged block (no warn)", async () => {
+    const clauses: Array<{
+      name: string;
+      makeClause: () => Pick<Rule, "requires" | "unless">;
+    }> = [
+      {
+        name: "req-mde",
+        makeClause: () => ({
+          requires: () => {
+            throw new MissingDescriptorError("gh");
+          },
+        }),
+      },
+      {
+        name: "unl-mde",
+        makeClause: () => ({
+          unless: () => {
+            throw new MissingDescriptorError("gh");
+          },
+        }),
+      },
+    ];
+    const warnings = captureWarnings();
+    try {
+      for (const { name, makeClause } of clauses) {
+        const rule: Rule = {
+          name,
+          tool: "bash",
+          field: "command",
+          pattern: "^git\\s+push",
+          reason: name,
+          ...makeClause(),
+        };
+        const evaluator = buildEvaluator(
+          { rules: [rule] },
+          resolve(),
+          makeHost(),
+        );
+        const res = await evaluator.evaluate(
+          bashEvent("git push"),
+          makeCtx("/repo"),
+          0,
+        );
+        // Loud-block passthrough wins over projection: rule-tagged
+        // block naming the basename + remedy, never warn+skip.
+        assert.ok(res && res.block === true);
+        assert.match(
+          res.reason!,
+          new RegExp(`\\[steering:${name}@user\\]`),
+        );
+        assert.match(res.reason!, /No CLI descriptor for basename "gh"/);
+      }
+      assert.equal(warnings.length, 0);
+    } finally {
+      warnings.restore();
+    }
+  });
+
+  it("Pattern requires/unless forms are unaffected", async () => {
+    const base: Rule = {
+      name: "pat",
+      tool: "bash",
+      field: "command",
+      pattern: "\\bgit\\s+push\\b",
+      reason: "pat",
+    };
+    // requires-Pattern non-match → skip.
+    const reqSkip = buildEvaluator(
+      { rules: [{ ...base, requires: "\\bmain\\b" }] },
+      resolve(),
+      makeHost(),
+    );
+    assert.equal(
+      await reqSkip.evaluate(
+        bashEvent("git push origin feature"),
+        makeCtx("/repo"),
+        0,
+      ),
+      undefined,
+    );
+    // unless-Pattern match → skip.
+    const unlSkip = buildEvaluator(
+      { rules: [{ ...base, unless: "\\bmain\\b" }] },
+      resolve(),
+      makeHost(),
+    );
+    assert.equal(
+      await unlSkip.evaluate(
+        bashEvent("git push origin main"),
+        makeCtx("/repo"),
+        0,
+      ),
+      undefined,
+    );
+    // requires-Pattern match + unless-Pattern non-match → fires.
+    const fires = buildEvaluator(
+      {
+        rules: [
+          { ...base, requires: "\\bmain\\b", unless: "\\bfeature\\b" },
+        ],
+      },
+      resolve(),
+      makeHost(),
+    );
+    assert.ok(
+      await fires.evaluate(
+        bashEvent("git push origin main"),
+        makeCtx("/repo"),
+        0,
+      ),
+    );
   });
 });
 

@@ -85,7 +85,10 @@ describe("schema: shape smoke tests", () => {
   it("TopLevelWhenClause accepts subcommand/flag ARGV leaves (issue #90)", () => {
     const w: TopLevelWhenClause = {
       subcommand: "push",
-      flag: { anyOf: [{ aliases: ["--force"], takesValue: false }], bundleAware: true },
+      flag: {
+        anyOf: [{ aliases: ["--force"], takesValue: false }],
+        bundleAware: true,
+      },
     };
     const spread: TopLevelWhenClause = {
       subcommand: {
@@ -296,7 +299,10 @@ describe("package-root exports", () => {
 describe("collapse pins (issue #110: two-list seam is gone, not deprecated)", () => {
   it("CLIDescriptor carries flags only (no legacy valueConsumingFlags key)", async () => {
     const { GIT_CLI_DESCRIPTOR } = await import("./plugins/git/descriptors.ts");
-    assert.equal("valueConsumingFlags" in (GIT_CLI_DESCRIPTOR as object), false);
+    assert.equal(
+      "valueConsumingFlags" in (GIT_CLI_DESCRIPTOR as object),
+      false,
+    );
     assert.ok("flags" in (GIT_CLI_DESCRIPTOR as object));
   });
 

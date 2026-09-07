@@ -75,10 +75,7 @@ describe("hasFlag", () => {
   it("entry-queries OR aliases identically to alias sets", () => {
     // Single entry with both spellings ORs at every position.
     const entry = C("-t", "--subject");
-    assert.equal(
-      hasFlag([W("--subject"), W("x")], entry),
-      true,
-    );
+    assert.equal(hasFlag([W("--subject"), W("x")], entry), true);
     assert.equal(hasFlag([W("-t"), W("x")], entry), true);
     assert.equal(hasFlag([W("--other"), W("x")], entry), false);
   });
@@ -149,20 +146,14 @@ describe("getFlagValue", () => {
 
   it("mixed attached/separated across occurrences: separated-last wins", () => {
     assert.equal(
-      getFlagValue(
-        [W("--subject=a"), W("--subject"), W("b")],
-        C("--subject"),
-      ),
+      getFlagValue([W("--subject=a"), W("--subject"), W("b")], C("--subject")),
       "b",
     );
   });
 
   it("mixed attached/separated across occurrences: attached-last wins", () => {
     assert.equal(
-      getFlagValue(
-        [W("--subject"), W("a"), W("--subject=b")],
-        B("--subject"),
-      ),
+      getFlagValue([W("--subject"), W("a"), W("--subject=b")], B("--subject")),
       "b",
     );
   });
@@ -187,17 +178,11 @@ describe("getFlagValue", () => {
   it("trailing flag is fail-closed: null, no fallback", () => {
     assert.equal(getFlagValue([W("--subject")], B("--subject")), null);
     assert.equal(
-      getFlagValue(
-        [W("--profile"), W("dev"), W("--subject")],
-        B("--subject"),
-      ),
+      getFlagValue([W("--profile"), W("dev"), W("--subject")], B("--subject")),
       null,
     );
     assert.equal(
-      getFlagValue(
-        [W("--subject"), W("dev"), W("--subject")],
-        C("--subject"),
-      ),
+      getFlagValue([W("--subject"), W("dev"), W("--subject")], C("--subject")),
       null,
     );
   });
@@ -229,10 +214,7 @@ describe("getFlagValue", () => {
   });
 
   it("separated form with empty next value returns null", () => {
-    assert.equal(
-      getFlagValue([W("--subject"), W("")], C("--subject")),
-      null,
-    );
+    assert.equal(getFlagValue([W("--subject"), W("")], C("--subject")), null);
   });
 
   it("does not confuse prefix collisions (--profile-unrelated vs --profile)", () => {
@@ -275,10 +257,7 @@ describe("getFlagValue", () => {
 
   it("adjacent duplicate bare flags: next token resolves the winner", () => {
     assert.equal(
-      getFlagValue(
-        [W("--subject"), W("--subject"), W("x")],
-        C("--subject"),
-      ),
+      getFlagValue([W("--subject"), W("--subject"), W("x")], C("--subject")),
       "x",
     );
   });
@@ -308,24 +287,28 @@ describe("strict-always arity (issue #107; #110 entries)", () => {
 
   it("attached --f=v applies even all-bool", () => {
     assert.equal(getFlagValue([W("--frobnicate=v")], B("--frobnicate")), "v");
-    assert.deepEqual(getAllFlagValues([W("--frobnicate=v")], B("--frobnicate")), [
-      "v",
-    ]);
+    assert.deepEqual(
+      getAllFlagValues([W("--frobnicate=v")], B("--frobnicate")),
+      ["v"],
+    );
     assert.equal(getFlagValue([W("--frobnicate=")], B("--frobnicate")), "");
   });
 
   it("isValueConsuming(entry): takesValue passthrough", () => {
-    assert.equal(isValueConsuming({ aliases: ["--body"], takesValue: true }), true);
-    assert.equal(isValueConsuming({ aliases: ["--body"], takesValue: false }), false);
+    assert.equal(
+      isValueConsuming({ aliases: ["--body"], takesValue: true }),
+      true,
+    );
+    assert.equal(
+      isValueConsuming({ aliases: ["--body"], takesValue: false }),
+      false,
+    );
   });
 
   it("strict gate pin: ANY takesValue entry makes exact consume", () => {
     const args = [W("-t"), W("see #13")];
     // ANY takesValue entry in the query ⇒ every exact occurrence consumes.
-    assert.equal(
-      getFlagValue(args, [B("-t"), C("--subject")]),
-      "see #13",
-    );
+    assert.equal(getFlagValue(args, [B("-t"), C("--subject")]), "see #13");
     assert.deepEqual(getAllFlagValues(args, [B("-t"), C("--subject")]), [
       "see #13",
     ]);
@@ -445,10 +428,7 @@ describe("glued short flags (issue #11; #110 derived)", () => {
   describe("bool shorts never glue (blind default is now takesValue:false)", () => {
     it("getFlagValue does NOT decompose -Rcad0p/x with a bool entry", () => {
       assert.equal(getFlagValue([W("-Rcad0p/x")], B("-R")), null);
-      assert.equal(
-        getFlagValue([W("-Rcad0p/x")], B("-R", "--repo")),
-        null,
-      );
+      assert.equal(getFlagValue([W("-Rcad0p/x")], B("-R", "--repo")), null);
     });
 
     it("hasFlag does NOT match -Rcad0p/x with a bool entry", () => {
@@ -462,10 +442,7 @@ describe("glued short flags (issue #11; #110 derived)", () => {
 
     it("resolves the glued form -Rx/y", () => {
       assert.equal(
-        getFlagValue(
-          [W("gh"), W("-Rcad0p/x"), W("pr"), W("create")],
-          repo,
-        ),
+        getFlagValue([W("gh"), W("-Rcad0p/x"), W("pr"), W("create")], repo),
         "cad0p/x",
       );
     });
@@ -479,10 +456,7 @@ describe("glued short flags (issue #11; #110 derived)", () => {
     });
 
     it("trailing valueless -R stays fail-closed null", () => {
-      assert.equal(
-        getFlagValue([W("pr"), W("merge"), W("-R")], C("-R")),
-        null,
-      );
+      assert.equal(getFlagValue([W("pr"), W("merge"), W("-R")], C("-R")), null);
     });
 
     it("single-entry flags arg works too", () => {
@@ -490,10 +464,7 @@ describe("glued short flags (issue #11; #110 derived)", () => {
     });
 
     it("longs never glue even takesValue:true", () => {
-      assert.equal(
-        getFlagValue([W("--repox/y")], C("--repo")),
-        null,
-      );
+      assert.equal(getFlagValue([W("--repox/y")], C("--repo")), null);
       assert.equal(hasFlag([W("--repox/y")], C("--repo")), false);
     });
   });
@@ -509,7 +480,10 @@ describe("glued short flags (issue #11; #110 derived)", () => {
       // resolves via glued `-R` + rest `x=y` (not attached `y`).
       // This retires the old string-alias pathological pin: degenerate
       // alias sets are now construction-time invalid, not precedence.
-      const bad = { aliases: ["-Rx", "-R"], takesValue: true } as unknown as CLIFlag;
+      const bad = {
+        aliases: ["-Rx", "-R"],
+        takesValue: true,
+      } as unknown as CLIFlag;
       assert.equal(getFlagValue([W("-Rx=y")], bad), null);
       assert.equal(getFlagValue([W("-Rx=y")], C("-R")), "x=y");
     });
@@ -581,10 +555,7 @@ describe("glued short flags (issue #11; #110 derived)", () => {
     });
 
     it("--repo cad0p/x separated unchanged", () => {
-      assert.equal(
-        getFlagValue([W("--repo"), W("cad0p/x")], flags),
-        "cad0p/x",
-      );
+      assert.equal(getFlagValue([W("--repo"), W("cad0p/x")], flags), "cad0p/x");
     });
 
     it("double-dash tokens are never glued (--Rx/y)", () => {
@@ -594,15 +565,9 @@ describe("glued short flags (issue #11; #110 derived)", () => {
 
     it("glue needs its own -X alias in the queried entry: no glue", () => {
       // Only --repo queried (bool long): -Ra/b stays opaque.
-      assert.equal(
-        getFlagValue([W("--repo"), W("a/b")], B("--repo")),
-        null,
-      );
+      assert.equal(getFlagValue([W("--repo"), W("a/b")], B("--repo")), null);
       // TakesValue long still consumes separate, but never glues.
-      assert.equal(
-        getFlagValue([W("--repo"), W("a/b")], C("--repo")),
-        "a/b",
-      );
+      assert.equal(getFlagValue([W("--repo"), W("a/b")], C("--repo")), "a/b");
       assert.equal(getFlagValue([W("-Ra/b")], C("--repo")), null);
     });
 
@@ -657,7 +622,10 @@ describe("glued short flags (issue #11; #110 derived)", () => {
     it("runtime garbage entries are ignored (house fail-open precedent)", () => {
       const bad = { aliases: ["-R"], takesValue: 123 } as unknown as CLIFlag;
       assert.equal(getFlagValue(args, flags && bad), null);
-      assert.equal(hasFlag(args, [flags, bad].filter(Boolean) as CLIFlag[]), true);
+      assert.equal(
+        hasFlag(args, [flags, bad].filter(Boolean) as CLIFlag[]),
+        true,
+      );
     });
 
     it("empty-alias entries are ignored", () => {
@@ -760,10 +728,7 @@ describe("command facade: package-root surface pin (#101; #110 entries)", () => 
         tool: "bash",
         args: [PW("-m"), PW("a"), PW("--message"), PW("b")],
       },
-      resolveDescriptor(
-        "npm",
-        { npm: { flags: { m: C("-m", "--message") } } },
-      ),
+      resolveDescriptor("npm", { npm: { flags: { m: C("-m", "--message") } } }),
     );
     assert.equal(cmd.getAllFlagValues(C("-m", "--message")).join("|"), "a|b");
   });

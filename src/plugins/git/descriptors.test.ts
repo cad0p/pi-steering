@@ -45,8 +45,9 @@ describe("git seed oracles-lite (Fig → --help verdict)", () => {
     if (help === null) return;
     assert.match(help, /-C <path>/);
     assert.equal(
-      (GIT_CLI_DESCRIPTOR.flags as Record<string, { takesValue: boolean }>)["C"]!
-        .takesValue,
+      (GIT_CLI_DESCRIPTOR.flags as Record<string, { takesValue: boolean }>)[
+        "C"
+      ]!.takesValue,
       true,
     );
   });
@@ -86,9 +87,9 @@ describe("git seed oracles-lite (Fig → --help verdict)", () => {
     if (help === null) return;
     assert.match(help, /--exec-path\[=<path>\]/);
     assert.equal(
-      (
-        GIT_CLI_DESCRIPTOR.flags as Record<string, { takesValue: boolean }>
-      )["execPath"]!.takesValue,
+      (GIT_CLI_DESCRIPTOR.flags as Record<string, { takesValue: boolean }>)[
+        "execPath"
+      ]!.takesValue,
       false,
     );
   });

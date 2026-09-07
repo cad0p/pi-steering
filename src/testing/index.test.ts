@@ -827,18 +827,38 @@ describe("mockContext", () => {
       },
       // Strict-always arity: the facade consumes `-m` only via the
       // descriptor binding (same channel the engine uses per ref).
-      descriptors: { testcli: { flags: { m: { aliases: ["-m"], takesValue: true } } } },
+      descriptors: {
+        testcli: { flags: { m: { aliases: ["-m"], takesValue: true } } },
+      },
     });
-    assert.deepEqual(ctx.command.getAllFlagValues({ aliases: ["-m"], takesValue: true }), ["a", "b"]);
-    assert.equal(ctx.command.getFlagValue({ aliases: ["-m"], takesValue: true }), "b");
-    assert.equal(ctx.command.hasFlag({ aliases: ["-m"], takesValue: false }), true);
+    assert.deepEqual(
+      ctx.command.getAllFlagValues({ aliases: ["-m"], takesValue: true }),
+      ["a", "b"],
+    );
+    assert.equal(
+      ctx.command.getFlagValue({ aliases: ["-m"], takesValue: true }),
+      "b",
+    );
+    assert.equal(
+      ctx.command.hasFlag({ aliases: ["-m"], takesValue: false }),
+      true,
+    );
   });
 
   it("default input drives an empty command view (no throw)", () => {
     const ctx = mockContext();
-    assert.equal(ctx.command.hasFlag({ aliases: ["--help"], takesValue: false }), false);
-    assert.equal(ctx.command.getFlagValue({ aliases: ["--help"], takesValue: false }), null);
-    assert.deepEqual(ctx.command.getAllFlagValues({ aliases: ["--help"], takesValue: false }), []);
+    assert.equal(
+      ctx.command.hasFlag({ aliases: ["--help"], takesValue: false }),
+      false,
+    );
+    assert.equal(
+      ctx.command.getFlagValue({ aliases: ["--help"], takesValue: false }),
+      null,
+    );
+    assert.deepEqual(
+      ctx.command.getAllFlagValues({ aliases: ["--help"], takesValue: false }),
+      [],
+    );
     assert.equal(ctx.command.isInfoOnly(), false);
   });
 
@@ -1106,7 +1126,9 @@ describe("ctx.command harness integration", () => {
       pattern: "^git\\b",
       reason: "two -m values",
       when: {
-        condition: (ctx) => ctx.command.getAllFlagValues([{ aliases: ["-m"], takesValue: true }]).length === 2,
+        condition: (ctx) =>
+          ctx.command.getAllFlagValues([{ aliases: ["-m"], takesValue: true }])
+            .length === 2,
       },
     };
     const h = loadHarness({
@@ -1116,7 +1138,9 @@ describe("ctx.command harness integration", () => {
         plugins: [
           {
             name: "test-facts",
-            cliDescriptors: { git: { flags: { m: { aliases: ["-m"], takesValue: true } } } },
+            cliDescriptors: {
+              git: { flags: { m: { aliases: ["-m"], takesValue: true } } },
+            },
           },
         ],
         rules: [rule],
@@ -1157,9 +1181,13 @@ describe("ctx.command harness integration", () => {
       when: {
         condition: (ctx) => {
           sawEmpty =
-            ctx.command.getAllFlagValues([{ aliases: ["-m"], takesValue: true }]).length === 0 &&
-            ctx.command.getFlagValue({ aliases: ["-m"], takesValue: true }) === null &&
-            ctx.command.hasFlag({ aliases: ["-m"], takesValue: false }) === false;
+            ctx.command.getAllFlagValues([
+              { aliases: ["-m"], takesValue: true },
+            ]).length === 0 &&
+            ctx.command.getFlagValue({ aliases: ["-m"], takesValue: true }) ===
+              null &&
+            ctx.command.hasFlag({ aliases: ["-m"], takesValue: false }) ===
+              false;
           return true;
         },
       },
@@ -2118,7 +2146,12 @@ describe("issue #54: harness parity for plugin env trackers", () => {
 describe("mockContext binding symmetry (issue #110)", () => {
   it("with descriptors → derived arity (glued gh -Rfoo TRUE through the mock facade)", async () => {
     const { mockContext } = await import("./index.ts");
-    const W = (value: string) => ({ value, text: value, pos: 0, end: value.length });
+    const W = (value: string) => ({
+      value,
+      text: value,
+      pos: 0,
+      end: value.length,
+    });
     const ctx = mockContext({
       input: {
         tool: "bash",
@@ -2127,7 +2160,9 @@ describe("mockContext binding symmetry (issue #110)", () => {
         args: [W("-Rfoo")],
       } as never,
       descriptors: {
-        gh: { flags: { repo: { aliases: ["-R", "--repo"], takesValue: true } } },
+        gh: {
+          flags: { repo: { aliases: ["-R", "--repo"], takesValue: true } },
+        },
       },
     });
     assert.equal(

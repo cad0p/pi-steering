@@ -562,7 +562,10 @@ describe("BuiltInWhenLeaves: shape pin", () => {
       when: {
         not: {
           subcommand: { pattern: ["s3", "ls"], depth: 2 },
-          flag: { anyOf: [{ aliases: ["-f"], takesValue: false }], bundleAware: true },
+          flag: {
+            anyOf: [{ aliases: ["-f"], takesValue: false }],
+            bundleAware: true,
+          },
           onUnknown: "block",
         },
       },

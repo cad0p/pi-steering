@@ -137,7 +137,9 @@ function boundEntryViews(
   requested: CLIFlag | readonly CLIFlag[],
   arity: ResolvedArity,
 ): readonly CLIFlag[] {
-  const list = (Array.isArray(requested) ? requested : [requested]) as readonly {
+  const list = (
+    Array.isArray(requested) ? requested : [requested]
+  ) as readonly {
     aliases?: unknown;
   }[];
   const views: CLIFlag[] = [];
@@ -188,8 +190,7 @@ export function commandFromInput(
   const consuming = new Set<string>(bound.valueConsumingFlags);
   return {
     hasFlag: (flag) => hasFlag(args, boundEntryViews(flag, bound)),
-    getFlagValue: (flags) =>
-      getFlagValue(args, boundEntryViews(flags, bound)),
+    getFlagValue: (flags) => getFlagValue(args, boundEntryViews(flags, bound)),
     getAllFlagValues: (flags) =>
       getAllFlagValues(args, boundEntryViews(flags, bound)),
     positionals: () => positionalsOf(args, consuming),

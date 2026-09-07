@@ -259,7 +259,9 @@ export function resolveDescriptor(
   // Flags: table derivation ONLY (sole source). Legacy `valueConsumingFlags`
   // key present → whole-descriptor skip + WARN (stale plugin); the field is
   // deleted and a plugin still shipping it is stale (fail-closed via absent).
-  const rawLegacy: unknown = (registryEntry as { valueConsumingFlags?: unknown })?.valueConsumingFlags;
+  const rawLegacy: unknown = (
+    registryEntry as { valueConsumingFlags?: unknown }
+  )?.valueConsumingFlags;
   if (rawLegacy !== undefined) {
     warnInvalidDescriptorOnce(
       basename,

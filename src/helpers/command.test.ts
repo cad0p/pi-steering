@@ -101,9 +101,13 @@ describe("SteeringCommand.getAllFlagValues", () => {
   });
 
   it("trailing empty-next-token contributes nothing (scalar poisoned to null)", () => {
-    const cmd = bashCmd([PW("-m"), PW("a"), PW("-m"), PW("", '""')], undefined, {
-      m: C("-m"),
-    });
+    const cmd = bashCmd(
+      [PW("-m"), PW("a"), PW("-m"), PW("", '""')],
+      undefined,
+      {
+        m: C("-m"),
+      },
+    );
     assert.deepEqual(cmd.getAllFlagValues(C("-m")), ["a"]);
     assert.equal(cmd.getFlagValue(C("-m")), null);
   });
@@ -289,9 +293,13 @@ describe("SteeringCommand.positionals (issue #107)", () => {
       bashCmd([PW("see --help", '"see --help"')]).positionals(),
       ["see --help"],
     );
-    const declared = bashCmd([PW("--body", '"--body"'), PW("TEXT")], undefined, {
-      body: C("--body"),
-    });
+    const declared = bashCmd(
+      [PW("--body", '"--body"'), PW("TEXT")],
+      undefined,
+      {
+        body: C("--body"),
+      },
+    );
     assert.deepEqual(declared.positionals(), []);
   });
 
@@ -341,10 +349,7 @@ describe("SteeringCommand delegation", () => {
     const cmd = bashCmd(args, env, table);
     const views = [{ aliases: ["--profile"], takesValue: true }];
     assert.equal(cmd.hasFlag(B("--profile")), hasFlag(args, views));
-    assert.equal(
-      cmd.getFlagValue(C("--profile")),
-      getFlagValue(args, views),
-    );
+    assert.equal(cmd.getFlagValue(C("--profile")), getFlagValue(args, views));
     assert.equal(
       cmd.hasEnvAssignment("AWS_PROFILE"),
       hasEnvAssignment(env, "AWS_PROFILE"),

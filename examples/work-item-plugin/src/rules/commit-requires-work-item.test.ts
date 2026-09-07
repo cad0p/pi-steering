@@ -19,6 +19,7 @@ import {
   loadHarness,
 } from "@cad0p/pi-steering/testing";
 import { workItemFormat } from "../predicates/work-item-format.ts";
+import { featureBranchHost } from "../test-helpers.ts";
 import { commitRequiresWorkItem } from "./commit-requires-work-item.ts";
 
 /**
@@ -36,10 +37,9 @@ describe("commit-requires-work-item", () => {
   const harness = loadHarness({
     config: {
       plugins: [testPlugin, gitPlugin],
-      // no-main-commit* fail closed on the harness's unresolvable branch; this suite pins predicate behavior.
-      disabledRules: ["no-main-commit", "no-main-commit-github"],
       rules: [commitRequiresWorkItem],
     },
+    host: featureBranchHost(),
   });
 
   it("blocks a commit missing the work-item tag", async () => {

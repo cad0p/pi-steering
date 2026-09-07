@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Observer, Plugin } from "@cad0p/pi-steering";
+import type { Observer } from "@cad0p/pi-steering";
 import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import {
   createRecordingHost,
@@ -26,14 +26,7 @@ import workItemPlugin, {
   DESCRIPTION_REVIEWED_EVENT,
   TEST_PASSED_EVENT,
 } from "./index.ts";
-
-// Minimal npm facts for the `npm test` dispatch harness below (issue #107:
-// absent descriptors are loud); `{ npm: {} }` is explicit-strict, honest for
-// the plain `npm test` invocation used here.
-const exampleNpmFacts = {
-  name: "example-npm-facts",
-  cliDescriptors: { npm: {} },
-} as const satisfies Plugin;
+import { exampleNpmFacts, featureBranchHost } from "./test-helpers.ts";
 
 describe("work-item-plugin (end-to-end)", () => {
   it("registers the expected predicates, rules, observers", () => {
@@ -65,9 +58,8 @@ describe("work-item-plugin (end-to-end)", () => {
     const harness = loadHarness({
       config: {
         plugins: [workItemPlugin, gitPlugin],
-        // no-main-commit* fail closed on the harness's unresolvable branch; this suite pins work-item behavior.
-        disabledRules: ["no-main-commit", "no-main-commit-github"],
       },
+      host: featureBranchHost(),
     });
     await expectBlocks(
       harness,
@@ -91,13 +83,11 @@ describe("work-item-plugin (end-to-end)", () => {
     // This test is intentionally the FULL happy-path: block on
     // first commit (description-check fires), self-mark, then
     // allow the second commit that carries a [PROJ-N] tag.
-    const host = createRecordingHost();
+    const host = featureBranchHost();
     const ctx = mockExtensionContext("/tmp/test", host.entries);
     const harness = loadHarness({
       config: {
         plugins: [workItemPlugin, gitPlugin],
-        // no-main-commit* fail closed on the harness's unresolvable branch; this suite pins work-item behavior.
-        disabledRules: ["no-main-commit", "no-main-commit-github"],
       },
       host,
     });

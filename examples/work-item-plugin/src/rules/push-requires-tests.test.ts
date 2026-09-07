@@ -40,6 +40,7 @@ import {
   RETEST_REQUIRED_EVENT,
   retestRequiredTracker,
 } from "../observers/retest-required-tracker.ts";
+import { exampleNpmFacts } from "../test-helpers.ts";
 import { pushRequiresTests } from "./push-requires-tests.ts";
 
 /**
@@ -51,14 +52,6 @@ const testPlugin: Plugin = {
   name: "test",
   observers: [npmTestTracker, retestRequiredTracker],
 };
-
-// Minimal npm facts for the `npm test` harnesses below (issue #107: absent
-// descriptors are loud); `{ npm: {} }` is explicit-strict, honest for the
-// plain `npm test` invocations used here.
-const exampleNpmFacts = {
-  name: "example-npm-facts",
-  cliDescriptors: { npm: {} },
-} as const satisfies Plugin;
 
 describe("push-requires-tests", () => {
   it("blocks git push when no TEST_PASSED entry exists", async () => {

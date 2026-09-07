@@ -109,15 +109,25 @@ describe("resolveDescriptor: registry > table > strict-default", () => {
   });
 
   it("git plugin descriptor is pinned (plugin-owned, core seeds nothing)", () => {
-    // Value pin against the plugin-owned const (imported from its
-    // plugin home, not core). Cutover minimal entries; the seed step
-    // expands the table with provenance + oracles-lite pins.
-    assert.deepEqual(GIT_CLI_DESCRIPTOR, {
-      positionPolicy: "globals-before-only",
-      flags: {
-        C: { aliases: ["-C"], takesValue: true },
-        config: { aliases: ["-c"], takesValue: true },
-      },
+    // Spot-pin the Fig-seeded table (full shape pinned in
+    // `src/plugins/git/descriptors.test.ts` oracles-lite). Core seeds nothing.
+    assert.equal(GIT_CLI_DESCRIPTOR.positionPolicy, "globals-before-only");
+    const flags = GIT_CLI_DESCRIPTOR.flags as Record<
+      string,
+      { aliases: readonly string[]; takesValue: boolean }
+    >;
+    assert.deepEqual(flags["C"], { aliases: ["-C"], takesValue: true });
+    assert.deepEqual(flags["config"], {
+      aliases: ["-c"],
+      takesValue: true,
+    });
+    assert.deepEqual(flags["gitDir"], {
+      aliases: ["--git-dir"],
+      takesValue: true,
+    });
+    assert.deepEqual(flags["noPager"], {
+      aliases: ["-P", "--no-pager"],
+      takesValue: false,
     });
     // Assignability pin (§9): the const satisfies CLIDescriptor
     // (JSDoc presence itself is not tsc-pinnable — hover rides on

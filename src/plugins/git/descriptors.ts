@@ -9,7 +9,8 @@
  * external plugin copies. Core seeds nothing; the merger fills absent
  * basenames from its (empty) fallback map, so disabling this plugin
  * drops `git` facts and bare `subcommand: "push"` on
- * `git -C /x …` falls back to the strict default (fail-open skip).
+ * `git -C /x …` throws `MissingDescriptorError` (loud block naming
+ * the missing facts — declare them or go explicit-strict).
  */
 
 import type { CLIDescriptor } from "../../schema.ts";

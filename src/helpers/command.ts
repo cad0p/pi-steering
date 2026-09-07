@@ -49,8 +49,9 @@ import {
  * Registry-only arity (issue #107): the bound methods take NO opts —
  * the `commandFromInput(input, resolvedFlags)` binding carries the
  * descriptor-resolved consuming-flag list, so consumption and
- * skipping cannot diverge. Absent binding → strict empty set
- * (undeclared flags never consume).
+ * skipping cannot diverge. The engine resolves via the registry before
+ * binding and throws `MissingDescriptorError` for undeclared basenames;
+ * an omitted list (direct/test use) means explicit-strict empty.
  *
  * Obscure binaries (no owning plugin): rule authors declare argv
  * facts via an inline plugin literal — NO new top-level config field,
@@ -132,9 +133,11 @@ export function commandFromInput(
 ): SteeringCommand {
   const args: readonly Word[] = [...(input?.args ?? [])];
   const envAssignments: readonly Word[] = [...(input?.envAssignments ?? [])];
-  // Registry-only arity: absent binding → strict empty set (nothing
-  // consumes). One list backs getFlagValue / getAllFlagValues /
-  // positionals() — consumption and skipping cannot diverge.
+  // Registry-only arity: the list arrives registry-resolved (the engine
+  // throws MissingDescriptorError before binding an undeclared basename);
+  // an omitted list is explicit-strict empty (direct/test use). One list
+  // backs getFlagValue / getAllFlagValues / positionals() — consumption
+  // and skipping cannot diverge.
   const consuming: readonly string[] =
     resolvedFlags !== undefined ? [...resolvedFlags] : [];
   const opts = { valueConsumingFlags: consuming };
@@ -176,16 +179,18 @@ function wordValue(w: Word | undefined): string {
  *      run and clean `--long` / `-x` / `-` flag-words that are not
  *      declared-consuming (registry-only pin: `push --delete origin`
  *      → `["push","--delete","origin"]`).
- *   6. No descriptor for the basename → strict default (empty consuming
- *      set): rule 3 never fires, all separated next-tokens surface.
+ *   6. No descriptor lookup here: the engine throws
+ *      `MissingDescriptorError` before binding an undeclared basename
+ *      (`{<bin>:{}}` binds `[]` = explicit strict).
  *
  * `--` divergence (documented, no action): `positionals()` is
  * `--`-aware while `when.flag`'s post-`--` limitation is UNCHANGED
  * (a `--force` after `--` still scans present) — flag-side
  * over-presence is the fail-closed direction.
  *
- * Total: never throws on weird input (missing/odd shapes degrade to
- * empty behavior, never escape).
+ * Total over input shapes: missing/odd shapes degrade to empty behavior,
+ * never escape. (Absent-descriptor loudness lives at the engine binding
+ * site, not in this pure scan.)
  */
 function positionalsOf(
   args: readonly Word[],

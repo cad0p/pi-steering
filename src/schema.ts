@@ -422,8 +422,9 @@ export interface SubcommandSpreadBase {
    * Arity resolves ONLY via the CLI-descriptor registry by basename
    * (issue #107): flags that consume the following token (`-C`, `-c`,
    * `-R`, `--repo`, `--profile`, …) so values never read as
-   * subcommands. No descriptor → strict empty set (nothing consumes).
-   * The walker stays arity-ignorant.
+   * subcommands. No descriptor → the engine throws `MissingDescriptorError`
+   * before evaluation (loud block naming the missing facts); `{<bin>: {}}`
+   * present-empty is explicit strict. The walker stays arity-ignorant.
    */
 }
 
@@ -475,8 +476,9 @@ export interface FlagSpreadBase {
   /**
    * Arity resolves ONLY via the CLI-descriptor registry by basename
    * (issue #107): flags that consume the following token, skipped BY
-   * POSITION during the presence scan (never by content). No
-   * descriptor → strict empty set (nothing consumes).
+   * POSITION during the presence scan (never by content). No descriptor
+   * → the engine throws `MissingDescriptorError` before evaluation
+   * (loud block); `{<bin>: {}}` present-empty is explicit strict.
    */
 }
 
@@ -503,12 +505,11 @@ export type FlagLeafInner = FlagSpreadBase;
  * A `CLIDescriptor` supplies `positionPolicy` + `valueConsumingFlags`
  * to both ARGV leaves (`when.subcommand` / `when.flag`) and to the
  * bound `SteeringCommand` facade — the ONLY arity channel (issue
- * #107, registry-only: no inline declaration). Resolution: registry
- * entry > strict default (flags: empty set — nothing consumes;
- * policy: `"globals-anywhere"`, except the walker's
- * `DEFAULT_POSITION_POLICIES` table still backs the policy when the
- * registry is absent). Registry `positionPolicy` always overrides the
- * table fallback.
+ * #107, registry-only: no inline declaration). Resolution: registry entry
+ * (present-empty `{<bin>: {}}` = explicit strict: flags `[]`, policy table
+ * fallback) else throw `MissingDescriptorError` (loud block on the rule
+ * path, non-match on the exemption path). Registry `positionPolicy` always
+ * overrides the table fallback.
  *
  * Keyed by command basename (`"git"`, `"gh"`) in
  * {@link Plugin.cliDescriptors} and the merged
@@ -728,8 +729,9 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
    * rules; prefer import-plugin + `disabledRules` over going without).
    * The walker stays arity-ignorant; per-binary lists are
    * plugin-declared. Attached `--flag=value` forms consume without
-   * declaration (single token by construction). No descriptor → strict
-   * empty set (nothing consumes).
+   * declaration (single token by construction). No descriptor → the engine
+   * throws `MissingDescriptorError` before evaluation (loud block;
+   * `{<bin>: {}}` present-empty is explicit strict).
    *
    * Position policy resolves from the walker's
    * `DEFAULT_POSITION_POLICIES` table keyed on the ref basename
@@ -762,7 +764,8 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
    * Values of registry-declared consuming flags are skipped BY POSITION
    * (`i += 2`), never by content: `gh -R --force pr` with `-R`
    * declared (via a plugin `cliDescriptors` entry for `gh`) does NOT
-   * report `--force` present. No descriptor → strict empty set. `--`
+   * report `--force` present. No descriptor → the engine throws
+   * `MissingDescriptorError` before evaluation (loud block). `--`
    * itself is a
    * flag-shaped token; post-`--` positionals are unmodelled (walker
    * limitation) — a `--force` after `--` still scans as present.
@@ -2126,9 +2129,11 @@ export interface Plugin {
    * / merge machinery, no new concepts. First-wins on collision;
    * the core fallback map is currently empty (core seeds nothing —
    * each plugin owns its binary's facts via this slot), so absent
-   * basenames stay absent. An absent descriptor resolves to the
-   * strict default and a resulting miss is definite (a data-knowledge
-   * axis), NOT an unknown-escape — no `onUnknown:` projection applies.
+   * basenames stay absent. An absent descriptor throws
+   * `MissingDescriptorError` at resolution (loud block on the rule path,
+   * non-match on the exemption path — a fail-CLOSED config hole),
+   * NOT an unknown-escape — no `onUnknown:` projection applies.
+   * Present-empty (`{<bin>: {}}`) is explicit strict.
    */
   cliDescriptors?: Record<string, CLIDescriptor>;
 }
@@ -2473,8 +2478,9 @@ export type SteeringDiagnosticKind =
   /**
    * A plugin's `cliDescriptors` entry is malformed (non-object
    * descriptor, non-array `valueConsumingFlags`, invalid
-   * `positionPolicy`). The entry is skipped; resolution falls back
-   * to the strict default. Never throws.
+   * `positionPolicy`). The entry is skipped at merge time (never throws
+   * there); later lookups for that basename then throw
+   * `MissingDescriptorError` (absent).
    */
   | "invalid-descriptor";
 

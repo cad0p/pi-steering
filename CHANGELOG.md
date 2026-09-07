@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file.
 - *(core)* Context-provided SteeringCommand facade for flag value access (closes #101)
 - *(core)* Central CLI descriptors (closes #106)
 - *(core)* Positional argv view + registry-only arity (closes #107)
+- *(core)* Per-binary flag table ({aliases, takesValue}) (closes #110)
 
 ### 🐛 Bug Fixes
 

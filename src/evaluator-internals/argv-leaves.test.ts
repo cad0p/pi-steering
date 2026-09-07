@@ -1403,7 +1403,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
 
   it("invalid registry policy → skip + one-shot WARN ([invalid-descriptor])", async () => {
     const { __resetDescriptorWarningsForTests } = await import(
-      "../cli-descriptors.ts"
+      "../arity.ts"
     );
     __resetDescriptorWarningsForTests();
     const warnings: string[] = [];
@@ -1463,7 +1463,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
 
   it("invalid registry flags → treated absent + one-shot WARN ([invalid-descriptor])", async () => {
     const { __resetDescriptorWarningsForTests } = await import(
-      "../cli-descriptors.ts"
+      "../arity.ts"
     );
     __resetDescriptorWarningsForTests();
     const warnings: string[] = [];

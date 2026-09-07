@@ -104,7 +104,7 @@ function editEvent(
  * Basenames these suites drive without owning plugins (issue #107:
  * absent descriptors are loud). Pinned explicit-strict here so each
  * suite exercises its own feature — argv-descriptor loudness itself is
- * pinned in the `cli-descriptors` / `argv-leaves` suites, not here.
+ * pinned in the `arity` / `argv-leaves` suites, not here.
  * Gaps stay loud: resolution names the missing basename, so a new
  * command surfaces as a failure pointing at this list.
  */

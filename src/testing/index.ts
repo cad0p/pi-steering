@@ -49,7 +49,7 @@ import type {
   ToolCallEvent,
   ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
-import { resolveDescriptor } from "../cli-descriptors.ts";
+import { resolveDescriptor } from "../arity.ts";
 import {
   buildEvaluator,
   EVALUATOR_BUILTIN_TRACKERS,

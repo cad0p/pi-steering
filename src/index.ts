@@ -180,7 +180,7 @@ export {
 // Core CLI-descriptor fallback map (issue #106): currently empty —
 // core seeds nothing. Per-binary facts live in their owning plugins
 // (the git const re-exports from `pi-steering/plugins/git`).
-export { CORE_CLI_DESCRIPTORS } from "./cli-descriptors.ts";
+export { CORE_CLI_DESCRIPTORS } from "./arity.ts";
 // JSON compat — convert v1 JSON configs to v2 TS configs.
 export { FromJSONError, fromJSON } from "./compat.ts";
 export type { DefineConfigInput } from "./define-config.ts";

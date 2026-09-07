@@ -64,7 +64,7 @@ import {
   MissingDescriptorError,
   missingDescriptorRemedy,
   resolveDescriptor,
-} from "./cli-descriptors.ts";
+} from "./arity.ts";
 import {
   createAppendEntry,
   createExecCache,

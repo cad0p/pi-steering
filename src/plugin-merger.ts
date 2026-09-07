@@ -31,7 +31,7 @@
  */
 
 import type { Modifier, Tracker } from "@cad0p/unbash-walker";
-import { CORE_CLI_DESCRIPTORS } from "./cli-descriptors.ts";
+import { CORE_CLI_DESCRIPTORS } from "./arity.ts";
 import {
   isReservedPredicateKey,
   RESERVED_PREDICATE_KEYS,

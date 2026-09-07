@@ -19,7 +19,7 @@ import {
   CORE_CLI_DESCRIPTORS,
   MissingDescriptorError,
   resolveDescriptor,
-} from "./cli-descriptors.ts";
+} from "./arity.ts";
 import { GIT_CLI_DESCRIPTOR } from "./plugins/git/descriptors.ts";
 import type { CLIDescriptor } from "./schema.ts";
 

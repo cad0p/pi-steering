@@ -550,7 +550,7 @@ describe("argv leaves: flag presence semantics", () => {
     );
   });
 
-  it("short exact token matches without bundleAware", async () => {
+  it("short exact token matches", async () => {
     assert.equal(
       await fires(
         { flag: { anyOf: [{ aliases: ["-f"], takesValue: false }] } },
@@ -561,7 +561,10 @@ describe("argv leaves: flag presence semantics", () => {
     );
   });
 
-  it("bundleAware routes -uf through bundleContains (-u and -f)", async () => {
+  it("bundles always match single-char shorts (-uf contains -u and -f)", async () => {
+    // No opt-in (issue #115): bundling derives from the table. The git
+    // table declares neither `-u` nor `-f`, so both bundle (undeclared
+    // letters never glue).
     const args = [w("push"), w("-uf")];
     assert.equal(
       await fires(
@@ -569,16 +572,11 @@ describe("argv leaves: flag presence semantics", () => {
         args,
         g,
       ),
-      false,
+      true,
     );
     assert.equal(
       await fires(
-        {
-          flag: {
-            anyOf: [{ aliases: ["-f"], takesValue: false }],
-            bundleAware: true,
-          },
-        },
+        { flag: { anyOf: [{ aliases: ["-u"], takesValue: false }] } },
         args,
         g,
       ),
@@ -586,25 +584,7 @@ describe("argv leaves: flag presence semantics", () => {
     );
     assert.equal(
       await fires(
-        {
-          flag: {
-            anyOf: [{ aliases: ["-u"], takesValue: false }],
-            bundleAware: true,
-          },
-        },
-        args,
-        g,
-      ),
-      true,
-    );
-    assert.equal(
-      await fires(
-        {
-          flag: {
-            anyOf: [{ aliases: ["-x"], takesValue: false }],
-            bundleAware: true,
-          },
-        },
+        { flag: { anyOf: [{ aliases: ["-x"], takesValue: false }] } },
         args,
         g,
       ),
@@ -612,16 +592,182 @@ describe("argv leaves: flag presence semantics", () => {
     );
   });
 
+  it("bundle presence derives from the table (decidability matrix)", async () => {
+    // Lead-letter rule on `-uf`: the first table-declared value-taking
+    // letter glues the remainder; every other letter is present.
+    const token = [w("push"), w("-uf")];
+    const queryF = {
+      flag: { anyOf: [{ aliases: ["-f"], takesValue: false }] },
+    };
+    const queryU = {
+      flag: { anyOf: [{ aliases: ["-u"], takesValue: false }] },
+    };
+    const table = (
+      uTakes: boolean,
+      fTakes: boolean,
+    ): Record<string, CLIDescriptor> => ({
+      bin: {
+        positionPolicy: "globals-anywhere",
+        flags: {
+          u: { aliases: ["-u"], takesValue: uTakes },
+          f: { aliases: ["-f"], takesValue: fTakes },
+        },
+      },
+    });
+    const onBin = (d: Record<string, CLIDescriptor>) => ({
+      basename: "bin",
+      descriptors: d,
+    });
+    // Neither takes a value → bundle, both present.
+    assert.equal(await fires(queryF, token, onBin(table(false, false))), true);
+    assert.equal(await fires(queryU, token, onBin(table(false, false))), true);
+    // `u` takes a value → glued, `-f` absent; `-u` itself present.
+    assert.equal(await fires(queryF, token, onBin(table(true, false))), false);
+    assert.equal(await fires(queryU, token, onBin(table(true, false))), true);
+    // Only `f` takes a value → bundle, `-f` present (`f` glues the
+    // empty remainder; `u` precedes it, still present).
+    assert.equal(await fires(queryF, token, onBin(table(false, true))), true);
+    assert.equal(await fires(queryU, token, onBin(table(false, true))), true);
+    // Both take a value → glued at `u`, `-f` absent.
+    assert.equal(await fires(queryF, token, onBin(table(true, true))), false);
+    assert.equal(await fires(queryU, token, onBin(table(true, true))), true);
+  });
+
+  it("undeclared letters never glue (strict-always, fail-closed)", async () => {
+    // The git table declares neither `-u` nor `-f`: `-uf` bundles, so
+    // `-f` is present. Over-presence fires the guard; the only remedy
+    // for a false block is a table row (see the decidability matrix).
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["-f"], takesValue: false }] } },
+        [w("push"), w("-uf")],
+        g,
+      ),
+      true,
+    );
+  });
+
+  it("declared-glued remainders never bundle-match", async () => {
+    const gh = { basename: "gh", descriptors: GH_DESCRIPTORS };
+    // `-Rfoo`: `R` is table-declared value-taking → glues `foo`.
+    // `-R` itself IS present (glued form); `-f` rides in the glued
+    // remainder → absent.
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["-R"], takesValue: false }] } },
+        [w("pr"), w("-Rfoo")],
+        gh,
+      ),
+      true,
+    );
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["-f"], takesValue: false }] } },
+        [w("pr"), w("-Rfoo")],
+        gh,
+      ),
+      false,
+    );
+    // Mid-token glue: `-xRfoo` presents the non-glued prefix `xR`
+    // only — `f` past the declared glue letter is absent. (The scan
+    // used to be glue-blind past the first letter.)
+    const mid = [w("pr"), w("-xRfoo")];
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["-x"], takesValue: false }] } },
+        mid,
+        gh,
+      ),
+      true,
+    );
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["-R"], takesValue: false }] } },
+        mid,
+        gh,
+      ),
+      true,
+    );
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["-f"], takesValue: false }] } },
+        mid,
+        gh,
+      ),
+      false,
+    );
+  });
+
+  it("glue letter present, its remainder absent (tar -fX vs -vf)", async () => {
+    const tar = {
+      basename: "tar",
+      descriptors: {
+        tar: {
+          positionPolicy: "globals-anywhere",
+          flags: {
+            f: { aliases: ["-f"], takesValue: true },
+            v: { aliases: ["-v"], takesValue: false },
+          },
+        },
+      } as Record<string, CLIDescriptor>,
+    };
+    const queryF = {
+      flag: { anyOf: [{ aliases: ["-f"], takesValue: false }] },
+    };
+    const queryV = {
+      flag: { anyOf: [{ aliases: ["-v"], takesValue: false }] },
+    };
+    // `-vf`: `v` precedes the glue letter → present; `f` glues the
+    // empty remainder → present.
+    assert.equal(await fires(queryV, [w("x"), w("-vf")], tar), true);
+    assert.equal(await fires(queryF, [w("x"), w("-vf")], tar), true);
+    // `-fX`: `f` present (glued form); `v` absent (nowhere in the token).
+    assert.equal(await fires(queryF, [w("x"), w("-fX")], tar), true);
+    assert.equal(await fires(queryV, [w("x"), w("-fX")], tar), false);
+  });
+
+  it("anyOf entries OR unchanged (multi-entry, multi-alias)", async () => {
+    const leaf = {
+      flag: {
+        anyOf: [
+          { aliases: ["-f", "--force"], takesValue: false },
+          { aliases: ["-u", "--update"], takesValue: false },
+        ],
+      },
+    };
+    assert.equal(await fires(leaf, [w("push"), w("--force")], g), true);
+    assert.equal(await fires(leaf, [w("push"), w("-u")], g), true);
+    assert.equal(await fires(leaf, [w("push"), w("-x")], g), false);
+    // Bundles fan out across entries too: `-ux` presents `-u`.
+    assert.equal(await fires(leaf, [w("push"), w("-ux")], g), true);
+  });
+
+  it("stale bundleAware key is ignored (deleted-means-deleted)", async () => {
+    // No stale-shape detection: the deleted opt-in channel is an
+    // unknown key, ignored — the leaf stays valid and bundles match.
+    const stale = {
+      flag: {
+        anyOf: [{ aliases: ["-f"], takesValue: false }],
+        bundleAware: true,
+      },
+    } as unknown as TopLevelWhenClause;
+    assert.equal(await fires(stale, [w("push"), w("-uf")], g), true);
+  });
+
   it("longs NEVER bundle-match", async () => {
     assert.equal(
       await fires(
-        {
-          flag: {
-            anyOf: [{ aliases: ["--force"], takesValue: false }],
-            bundleAware: true,
-          },
-        },
+        { flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } },
         [w("--forceful")],
+        g,
+      ),
+      false,
+    );
+    // Not even inside a real bundle: `-uf` carries no longs.
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } },
+        [w("push"), w("-uf")],
         g,
       ),
       false,
@@ -685,7 +831,6 @@ describe("argv leaves: flag presence semantics", () => {
       {
         flag: {
           anyOf: [{ aliases: ["-ff"], takesValue: false }],
-          bundleAware: true,
         },
       },
       // bare `-` / `--` / non-dash spellings invalid
@@ -702,38 +847,15 @@ describe("argv leaves: flag presence semantics", () => {
     }
   });
 
-  it("bundleAware typo-defense: only === true enables bundles", async () => {
-    const args = [w("push"), w("-uf")];
-    assert.equal(
-      await fires(
-        {
-          flag: {
-            anyOf: [{ aliases: ["-f"], takesValue: false }],
-            bundleAware: "yes",
-          },
-        } as unknown as TopLevelWhenClause,
-        args,
-        g,
-      ),
-      false,
-    );
-  });
-
-  it("bundleAware + rawText-only word does not throw (S1: resolved form decides)", async () => {
-    // Regression: `flagPresent` passed the original Word to
-    // `bundleContains` (which reads `value ?? text` with no `rawText`
+  it("rawText-only word does not throw (S1: resolved form decides)", async () => {
+    // Regression: the bundle scan used to pass the original Word to
+    // the walker (which reads resolved forms with no `rawText`
     // fallback → TypeError on `undefined.startsWith`), escaping out of
-    // `evaluateFlag` into a fail-OPEN skip. The projected probe
-    // classifies on the same resolved form as the rest of the scan →
-    // match → fires.
+    // `evaluateFlag` into a fail-OPEN skip. The scan classifies on the
+    // same resolved form as the rest of the scan → match → fires.
     assert.equal(
       await fires(
-        {
-          flag: {
-            anyOf: [{ aliases: ["-f"], takesValue: false }],
-            bundleAware: true,
-          },
-        },
+        { flag: { anyOf: [{ aliases: ["-f"], takesValue: false }] } },
         [rawOnly("-uf")],
         g,
       ),
@@ -742,12 +864,7 @@ describe("argv leaves: flag presence semantics", () => {
     // Non-matching bundle letter skips cleanly (no throw).
     assert.equal(
       await fires(
-        {
-          flag: {
-            anyOf: [{ aliases: ["-x"], takesValue: false }],
-            bundleAware: true,
-          },
-        },
+        { flag: { anyOf: [{ aliases: ["-x"], takesValue: false }] } },
         [rawOnly("-uf")],
         g,
       ),
@@ -758,12 +875,7 @@ describe("argv leaves: flag presence semantics", () => {
     const absent = {} as unknown as PredicateWord;
     assert.equal(
       await fires(
-        {
-          flag: {
-            anyOf: [{ aliases: ["-f"], takesValue: false }],
-            bundleAware: true,
-          },
-        },
+        { flag: { anyOf: [{ aliases: ["-f"], takesValue: false }] } },
         [absent],
         g,
       ),
@@ -978,22 +1090,6 @@ describe("argv leaves: exemption strictness (S1)", () => {
         } as unknown as TopLevelWhenClause,
       ],
       [
-        "bundleAware-only",
-        {
-          flag: {
-            anyOf: [{ aliases: ["--force"], takesValue: false }],
-            bundleAware: true,
-            onUnknown: "allow",
-          },
-        } as unknown as TopLevelWhenClause,
-      ],
-      [
-        "bare bundleAware",
-        {
-          flag: { bundleAware: true, onUnknown: "allow" },
-        } as unknown as TopLevelWhenClause,
-      ],
-      [
         "depth-only",
         {
           subcommand: { depth: 1, onUnknown: "allow" },
@@ -1183,7 +1279,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
     await expectAllows(h, { command: "git pull" });
   });
 
-  it("flag bundleAware matches git push -uf for -u/-f", async () => {
+  it("flag bundles match git push -uf for -f (always on)", async () => {
     const h = loadHarness({
       config: {
         // Explicit strict: bundle matching needs no consumption facts.
@@ -1192,7 +1288,6 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
           gitRule({
             flag: {
               anyOf: [{ aliases: ["-f", "--force"], takesValue: false }],
-              bundleAware: true,
             },
           }),
         ],
@@ -1317,7 +1412,6 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
           gitRule({
             flag: {
               anyOf: [{ aliases: ["-f", "--force"], takesValue: false }],
-              bundleAware: true,
             },
           }),
         ],

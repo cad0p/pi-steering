@@ -17,6 +17,8 @@
  */
 
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import * as path from "node:path";
 import { describe, it } from "node:test";
 import { commandFromInput } from "./helpers/command.ts";
 import type {
@@ -87,7 +89,6 @@ describe("schema: shape smoke tests", () => {
       subcommand: "push",
       flag: {
         anyOf: [{ aliases: ["--force"], takesValue: false }],
-        bundleAware: true,
       },
     };
     const spread: TopLevelWhenClause = {
@@ -320,5 +321,35 @@ describe("collapse pins (issue #110: two-list seam is gone, not deprecated)", ()
     assert.equal("gluedShorts" in (GIT_CLI_DESCRIPTOR as object), false);
     const arityMod = await import("./arity.ts");
     assert.equal(typeof arityMod.deriveFlagSets, "function");
+  });
+});
+
+describe("collapse pins (issue #115: bundleAware is gone, not deprecated)", () => {
+  it("no bundleAware remnants in non-test sources or README", () => {
+    // Deleted means deleted: the per-call-site bundle opt-in is gone
+    // (bundling derives from the flag table), so the channel name must
+    // not appear outside `*.test.ts` (behavioral pins) and the git
+    // history. Scans every non-test `src/**/*.ts` plus the README.
+    const here = import.meta.dirname;
+    const hits: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const full = path.join(dir, name);
+        if (statSync(full).isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!full.endsWith(".ts") || full.endsWith(".test.ts")) continue;
+        if (readFileSync(full, "utf8").includes("bundleAware")) {
+          hits.push(path.relative(here, full));
+        }
+      }
+    };
+    walk(here);
+    const readme = path.join(here, "..", "README.md");
+    if (readFileSync(readme, "utf8").includes("bundleAware")) {
+      hits.push("README.md");
+    }
+    assert.deepEqual(hits, []);
   });
 });

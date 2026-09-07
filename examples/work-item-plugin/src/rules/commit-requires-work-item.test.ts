@@ -18,8 +18,8 @@ import {
   expectBlocks,
   loadHarness,
 } from "@cad0p/pi-steering/testing";
-import { workItemFormat } from "../predicates/work-item-format.ts";
 import { featureBranchHost } from "../__test-helpers__.ts";
+import { workItemFormat } from "../predicates/work-item-format.ts";
 import { commitRequiresWorkItem } from "./commit-requires-work-item.ts";
 
 /**

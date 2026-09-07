@@ -116,16 +116,16 @@ describe("resolveDescriptor: registry > table > strict-default", () => {
       string,
       { aliases: readonly string[]; takesValue: boolean }
     >;
-    assert.deepEqual(flags["C"], { aliases: ["-C"], takesValue: true });
-    assert.deepEqual(flags["config"], {
+    assert.deepEqual(flags.C, { aliases: ["-C"], takesValue: true });
+    assert.deepEqual(flags.config, {
       aliases: ["-c"],
       takesValue: true,
     });
-    assert.deepEqual(flags["gitDir"], {
+    assert.deepEqual(flags.gitDir, {
       aliases: ["--git-dir"],
       takesValue: true,
     });
-    assert.deepEqual(flags["noPager"], {
+    assert.deepEqual(flags.noPager, {
       aliases: ["-P", "--no-pager"],
       takesValue: false,
     });

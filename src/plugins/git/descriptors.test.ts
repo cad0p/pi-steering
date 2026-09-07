@@ -13,8 +13,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { describe, it } from "node:test";
-import { GIT_CLI_DESCRIPTOR } from "./descriptors.ts";
 import { RM_CLI_DESCRIPTOR } from "../rm/descriptors.ts";
+import { GIT_CLI_DESCRIPTOR } from "./descriptors.ts";
 
 /** Capture `git --help`, skipping (not failing) when git is unavailable. */
 function gitHelp(): string | null {

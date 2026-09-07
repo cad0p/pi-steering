@@ -32,8 +32,8 @@ import {
   DEFAULT_POSITION_POLICIES,
   locateSubcommandRun,
 } from "@cad0p/unbash-walker";
-import { arityOf, EMPTY_ARITY, resolveDescriptor } from "../arity.ts";
 import type { ResolvedArity } from "../arity.ts";
+import { arityOf, EMPTY_ARITY, resolveDescriptor } from "../arity.ts";
 import { isPattern } from "../internal/pattern-utils.ts";
 import type {
   CLIDescriptor,

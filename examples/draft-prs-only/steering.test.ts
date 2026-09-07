@@ -19,7 +19,8 @@ describe("example: draft-prs-only", () => {
   });
 
   it("registers pr-create-must-be-draft", () => {
-    const names = config.rules!.map((r) => r.name);
+    assert.ok(config.rules);
+    const names = config.rules.map((r) => r.name);
     assert.ok(
       names.includes("pr-create-must-be-draft"),
       `expected pr-create-must-be-draft in rules, got: ${names.join(", ")}`,
@@ -27,9 +28,8 @@ describe("example: draft-prs-only", () => {
   });
 
   it("rule declares an `unless` escape hatch for --draft", () => {
-    const rule = config.rules!.find(
-      (r) => r.name === "pr-create-must-be-draft",
-    );
+    assert.ok(config.rules);
+    const rule = config.rules.find((r) => r.name === "pr-create-must-be-draft");
     assert.ok(rule);
     // Structural check: rule.unless must be declared (as a string
     // pattern or RegExp). Its specific contents are pinned by the

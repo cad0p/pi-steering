@@ -21,8 +21,8 @@ import { describe, it } from "node:test";
 import { evaluateExemptionClause } from "../evaluator.ts";
 import gitPlugin from "../plugins/git/index.ts";
 import type {
-  CLIFlag,
   CLIDescriptor,
+  CLIFlag,
   Exemption,
   FlagLeaf,
   PredicateWord,

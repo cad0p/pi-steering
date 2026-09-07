@@ -34,8 +34,8 @@
  */
 
 import type { Word } from "@cad0p/unbash-walker";
-import type { CLIFlag, PredicateToolInput } from "../schema.ts";
 import { EMPTY_ARITY, type ResolvedArity } from "../arity.ts";
+import type { CLIFlag, PredicateToolInput } from "../schema.ts";
 import {
   getAllFlagValues,
   getFlagValue,

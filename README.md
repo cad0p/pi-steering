@@ -344,7 +344,7 @@ Built-ins:
 - **`missing`** — fires while an entry of `event` is missing in `in` scope. `"agent_loop"` filters by `_agentLoopIndex === ctx.agentLoopIndex` (one user prompt + its tool calls); `"session"` scans the whole session JSONL; `"tool_call"` considers only speculative entries synthesized for THIS tool_call's `&&`-chain. Optional `since` acts as an invalidation sentinel — see "Temporal ordering with `missing.since`" below. Optional `notIn` subtracts a narrower scope from `in` (e.g. `{ in: "agent_loop", notIn: "tool_call" }` means "recorded in a prior tool_call in this loop", blocking the same-tool_call speculative bypass). `notIn` is set subtraction, distinct from the clause-level `not` (boolean negation). Synthesizes speculative entries across `&&` bash chains — see "`&&`-chain speculative allow" below.
 - **`not`** — boolean NOT over an inner predicate block. One level only (no `not: not: ...` recursion). Inside `not:`, leaf-level `onUnknown:` is forbidden; the block-level `onUnknown:` modifier projects walker-unknown verdicts (default `"block"` = fail-CLOSED, rule fires).
 - **`subcommand`** — rule fires only when the command's extracted subcommand matches. Bare `string` = EXACT equality (`"push"` ≠ `"pushback"`, deliberately not `cwd:`'s regex-source semantics); `RegExp` = test; bare array = OR at depth 1; spread `{ pattern, depth?, onUnknown? }` covers multi-word runs (`{ pattern: ["s3", "ls"], depth: 2 }` — array length must equal `depth`). Consuming-flag arity resolves ONLY via the CLI-descriptor registry by basename (`Plugin.cliDescriptors` — e.g. bare `subcommand: "push"` already extracts `push` from `git -C /x push` via the git plugin's declared descriptor, so the plugin must be declared for the match). No descriptor for the ref's basename → the engine throws `MissingDescriptorError` and blocks with an actionable reason (declare the descriptor, or `{ "<basename>": {} }` for explicit strict) — absent descriptors are loud, never silent. `null` extraction (all-flags, trailing consuming flag, after-only shapes like `go -v build`, non-bash tools) → `"unknown"` → `onUnknown:` (default `"block"`, fail-closed).
-- **`flag`** — rule fires when any listed entry is present: `{ anyOf: [{ aliases: ["--force"], takesValue: false }], bundleAware?, onUnknown? }` (entries, OR over entries, each entry ORs aliases — a flag worth gating is worth a table row). Longs match the exact token or `--flag=value`; single-char shorts match exactly, inside bundles (`-uf`) with `bundleAware: true` (longs never bundle-match), or glued (`-Rfoo` iff the entry takes a value and the table derives glue). Consuming-flag values are skipped by position, never by content (table-derived arity; absent basename → `MissingDescriptorError` block, same loudness as `subcommand`). Non-bash tools → `"unknown"` → default `"block"`; otherwise presence is definite.
+- **`flag`** — rule fires when any listed entry is present: `{ anyOf: [gitFlags.noPager], bundleAware?, onUnknown? }` (`gitFlags` = `GIT_CLI_DESCRIPTOR.flags` from `@cad0p/pi-steering/plugins/git` — entries, OR over entries, each entry ORs aliases; a flag worth gating is worth a table row, so import the owning plugin's table, never hand-build literals in rules). Longs match the exact token or `--flag=value`; single-char shorts match exactly, inside bundles (`-uf`) with `bundleAware: true` (longs never bundle-match), or glued (`-Rfoo` iff the entry takes a value and the table derives glue). Consuming-flag values are skipped by position, never by content (table-derived arity; absent basename → `MissingDescriptorError` block, same loudness as `subcommand`). Non-bash tools → `"unknown"` → default `"block"`; otherwise presence is definite.
 - **`condition`** — escape hatch for one-off logic. Prefer plugin predicates when the logic is reusable. Throws (sync or rejected promise) are caught and treated as `"unknown"` → default `"block"` policy fires the rule fail-CLOSED. Authors needing fail-OPEN wrap inside `not: { condition: fn, onUnknown: "allow" }` OR catch the throw inside the callback body.
 
 Plugin-registered predicate leaves come from the `PiSteeringPredicates` registry, populated by each plugin's `declare global` block:
@@ -664,8 +664,11 @@ Production plugins in this repo:
 
 ```ts
 // In a predicate / condition / reason fn with ctx:
-ctx.command.hasFlag("--profile");
-ctx.command.getAllFlagValues(["-m", "--message"]); // ["a", "b"], argv order
+import { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
+
+const { flags: git } = GIT_CLI_DESCRIPTOR;
+ctx.command.hasFlag(git.noPager);
+ctx.command.getAllFlagValues(git.config); // ["a=b", "c=d"], argv order
 ctx.command.positionals(); // ["push", "origin", ":branch"], subcommand INCLUDED
 ```
 
@@ -711,8 +714,12 @@ The same rule applies to flag reads — use the context-provided command view, n
 
 ```ts
 // In a predicate / condition with ctx:
-ctx.command.hasFlag({ aliases: ["--profile"], takesValue: false }); // bound to the already-parsed args
+import { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
+
+ctx.command.hasFlag(GIT_CLI_DESCRIPTOR.flags.noPager); // bound to the already-parsed args
 ```
+
+Entries always come from the owning plugin's table — never hand-build literals in rules. A typo'd `"--delet"` string was a silent fail-open skip; a typo'd `flags.delet` property is a compile error.
 
 (`hasFlag` / `getFlagValue` / `getAllFlagValues` / `positionals` / `hasEnvAssignment` / `isInfoOnly` live on `ctx.command` since #101, which replaced the P3 (#99) bare-helper root exports; entry-only since #110 (`CLIFlag` on the root, `FlagLookupOptions` deleted). Out-of-handler use goes through the root-exported `commandFromInput` factory + `SteeringCommand` type. The flags plugin keeps only the POLICY predicates `requiresFlag` / `allowlistedFlagsOnly`.)
 

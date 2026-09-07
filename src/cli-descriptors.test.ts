@@ -8,8 +8,8 @@
  *   - registry `valueConsumingFlags` (validated) else strict empty set.
  *   - registry `positionPolicy` always overrides the
  *     `DEFAULT_POSITION_POLICIES` table fallback.
- *   - registry-absent + table-miss → strict `globals-anywhere` /
- *     empty set (table stays the fallback when registry absent).
+ *   - registry-absent → throws `MissingDescriptorError` (no silent
+ *     fallback; present-empty `{<bin>: {}}` is explicit strict).
  */
 
 import assert from "node:assert/strict";

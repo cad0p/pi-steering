@@ -733,8 +733,8 @@ function evaluateSubcommand(
   if (normalized === null) return false;
   const { patterns, depth, sequence } = normalized;
   // Resolve per-binary argv knowledge (registry-only, issue #107):
-  // registry policy overrides the table fallback; absent → strict
-  // globals-anywhere/empty set. Re-validates at resolution time
+  // registry policy overrides the table fallback; absent throws
+  // `MissingDescriptorError` (loud, §12 — no silent fallback). Re-validates at resolution time
   // (post-merge mutation by plain-JS callers) with one-shot
   // [invalid-descriptor] WARNs. Nameless refs (bare `VAR=x`, basename
   // `undefined`) skip resolution — silent strict, exactly the

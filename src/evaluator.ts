@@ -835,7 +835,7 @@ async function runPredicateChain(
  * {@link runPredicateChain} — a throw is logged and treated as "rule
  * did not fire" (sole exception: `MissingDescriptorError`, which the
  * catch rethrows with rule context to the top-level fail-closed
- * catch — absent descriptors fail CLOSED, never silent). That way a the
+ * catch — absent descriptors fail CLOSED, never silent). That way a
  * whole rule list (a broken guardrail rule silently poisoning the
  * rest) nor leaks its raw `error.message` back to the agent via a
  * pi-level error tool_result.

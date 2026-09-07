@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - *(core)* Built-in ARGV leaves (closes #90)
 - *(core)* Promote flag primitives to core root (P3, closes #99)
 - *(core)* Context-provided SteeringCommand facade for flag value access (closes #101)
+- *(core)* Central CLI descriptors (closes #106)
 
 ### 🐛 Bug Fixes
 

@@ -368,10 +368,9 @@ const VALID_DESCRIPTOR_POLICIES: ReadonlySet<string> = new Set([
  * with `invalid-descriptor`, never throws).
  *
  * Malformed: non-object descriptor, invalid `positionPolicy`, non-object
- * `flags` table, or PRESENT `valueConsumingFlags` (legacy key deleted in
- * #110 — a plugin still shipping it is stale; whole-descriptor skip +
- * WARN naming the migration, so a half-migrated descriptor never silently
- * carries half its arity).
+ * `flags` table. Unknown keys (including a stale `valueConsumingFlags`
+ * key from pre-#110 plugins) are simply ignored — the `flags` table is
+ * the sole arity source, so a stale key resolves as empty-strict.
  *
  * Per-entry malformation inside `flags` does NOT fail the whole
  * descriptor here — the caller splits valid entries from warned ones
@@ -383,21 +382,12 @@ function validateDescriptorValue(value: unknown): CLIDescriptor | null {
   }
   const obj = value as Partial<CLIDescriptor> & {
     flags?: unknown;
-    valueConsumingFlags?: unknown;
   };
   if (
     obj.positionPolicy !== undefined &&
     (typeof obj.positionPolicy !== "string" ||
       !VALID_DESCRIPTOR_POLICIES.has(obj.positionPolicy))
   ) {
-    return null;
-  }
-  // Legacy key: PRESENT-but-anything (even well-formed, whether or not
-  // `flags` is also present) → whole descriptor malformed. Justification:
-  // silently carrying a half-migrated descriptor would re-create the
-  // two-source seam this PR deletes; skip ⇒ absent ⇒ loud
-  // MissingDescriptorError (fail-closed), never silent carry.
-  if (obj.valueConsumingFlags !== undefined) {
     return null;
   }
   if (obj.flags !== undefined) {
@@ -822,22 +812,13 @@ export function resolvePlugins(
     )) {
       const valid = validateDescriptorValue(descriptor);
       if (valid === null) {
-        const hasLegacy =
-          descriptor !== null &&
-          typeof descriptor === "object" &&
-          !Array.isArray(descriptor) &&
-          (descriptor as { valueConsumingFlags?: unknown })
-            .valueConsumingFlags !== undefined;
         diagnostics.push({
           type: "warning",
           kind: "invalid-descriptor",
-          message: hasLegacy
-            ? `invalid CLI descriptor "${basename}" — plugin "${plugin.name}" ` +
-              `(ignored); valueConsumingFlags was replaced by flags entries in ` +
-              `#110 (whole descriptor skipped)`
-            : `invalid CLI descriptor "${basename}" — plugin "${plugin.name}" ` +
-              `(ignored); expected { positionPolicy?, flags?: Record<name, ` +
-              `{ aliases, takesValue }> } with a valid policy and flag entries`,
+          message:
+            `invalid CLI descriptor "${basename}" — plugin "${plugin.name}" ` +
+            `(ignored); expected { positionPolicy?, flags?: Record<name, ` +
+            `{ aliases, takesValue }> } with a valid policy and flag entries`,
         });
         continue;
       }

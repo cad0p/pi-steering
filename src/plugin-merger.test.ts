@@ -1178,25 +1178,14 @@ describe("resolvePlugins: CLI descriptors (issue #106; #110 table)", () => {
       name: "bad-policy",
       cliDescriptors: { mycli2: { positionPolicy: "bogus-policy" } },
     } as unknown as Plugin;
-    const legacy = {
-      name: "legacy",
-      cliDescriptors: {
-        // Legacy key present (even well-formed) → whole-descriptor skip.
-        mycli3: { valueConsumingFlags: ["--take"] },
-      },
-    } as unknown as Plugin;
-    const state = resolvePlugins([badFlags, badPolicy, legacy], {});
+    const state = resolvePlugins([badFlags, badPolicy], {});
     assert.equal("mycli" in state.cliDescriptors, false);
     assert.equal("mycli2" in state.cliDescriptors, false);
-    assert.equal("mycli3" in state.cliDescriptors, false);
     const hits = state.diagnostics.filter(
       (d) => d.kind === "invalid-descriptor",
     );
-    assert.equal(hits.length, 3);
+    assert.equal(hits.length, 2);
     for (const hit of hits) assert.equal(hit.type, "warning");
-    const legacyHit = hits.find((h) => h.message.includes("mycli3"));
-    assert.ok(legacyHit, "expected legacy-key WARN naming migration");
-    assert.match(legacyHit!.message, /valueConsumingFlags was replaced/);
     // Core seeds nothing — skipped entries leave the map empty.
     assert.deepEqual(state.cliDescriptors, {});
   });

@@ -3,10 +3,11 @@
 
 /**
  * Tests for `resolveDescriptor` + `deriveFlagSets` + `arityOf`
- * (issues #106/#107 registry-only; #110 flag table, additive foundation).
+ * (issues #106/#107 registry-only; #110 flag table).
  *
- * Step 2 (additive): both the legacy `valueConsumingFlags` list and the new
- * `flags` table resolve (unioned). The cutover deletes the legacy channel.
+ * The `flags` table is the sole arity source: unknown keys on a
+ * descriptor (including a stale pre-#110 `valueConsumingFlags` key)
+ * are ignored and resolve as empty-strict.
  */
 
 import assert from "node:assert/strict";
@@ -32,29 +33,6 @@ describe("resolveDescriptor: registry > table > strict-default", () => {
     const resolved = resolveDescriptor("mycli", registry);
     assert.deepEqual([...resolved.valueConsumingFlags], ["--take"]);
     assert.deepEqual([...resolved.gluedShorts], []);
-  });
-
-  it("legacy valueConsumingFlags key present → whole-descriptor skip + WARN", () => {
-    __resetDescriptorWarningsForTests();
-    const warnings: string[] = [];
-    const orig = console.warn;
-    console.warn = (msg?: unknown) => {
-      warnings.push(String(msg));
-    };
-    try {
-      const registry = {
-        mycli: { valueConsumingFlags: ["--take"] },
-      } as unknown as Record<string, CLIDescriptor>;
-      const resolved = resolveDescriptor("mycli", registry);
-      assert.deepEqual([...resolved.valueConsumingFlags], []);
-      assert.deepEqual([...resolved.gluedShorts], []);
-      assert.equal(warnings.length, 1);
-      assert.match(warnings[0]!, /\[invalid-descriptor\]/);
-      assert.match(warnings[0]!, /valueConsumingFlags/);
-    } finally {
-      console.warn = orig;
-      __resetDescriptorWarningsForTests();
-    }
   });
 
   it("registry policy overrides the table fallback", () => {

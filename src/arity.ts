@@ -256,23 +256,9 @@ export function resolveDescriptor(
     throw new MissingDescriptorError(basename);
   }
 
-  // Flags: table derivation ONLY (sole source). Legacy `valueConsumingFlags`
-  // key present → whole-descriptor skip + WARN (stale plugin); the field is
-  // deleted and a plugin still shipping it is stale (fail-closed via absent).
-  const rawLegacy: unknown = (
-    registryEntry as { valueConsumingFlags?: unknown }
-  )?.valueConsumingFlags;
-  if (rawLegacy !== undefined) {
-    warnInvalidDescriptorOnce(
-      basename,
-      "has legacy valueConsumingFlags (was replaced by flags entries in #110)",
-    );
-    return {
-      positionPolicy: "globals-anywhere",
-      valueConsumingFlags: new Set<string>(),
-      gluedShorts: new Set<string>(),
-    };
-  }
+  // Flags: table derivation ONLY (sole source). Unknown keys on the
+  // registry entry (including a stale pre-#110 `valueConsumingFlags`
+  // key) are ignored — the `flags` table is the sole arity source.
   const derived = deriveFlagSets(registryEntry?.flags);
   const valueConsumingFlags = new Set<string>(derived.valueConsumingFlags);
   const gluedShorts = new Set<string>(derived.gluedShorts);
@@ -323,12 +309,7 @@ export function resolveDescriptor(
       }
     }
   }
-  // Legacy presence already returned strict-empty above; this guard is
-  // defense-in-depth for plain-JS post-check mutation (no second WARN).
-
   // Policy: registry (valid) > table > strict default.
-  // NOTE: legacy-key skip above returns strict-empty early (policy strict
-  // too — whole-descriptor skip, never partial carry).
   const rawRegistryPolicy = registryEntry?.positionPolicy;
   let positionPolicy: PositionPolicy;
   if (typeof rawRegistryPolicy === "string") {

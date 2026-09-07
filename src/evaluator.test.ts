@@ -38,13 +38,13 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+import { MissingDescriptorError } from "./arity.ts";
 import {
   buildEvaluator,
   EVALUATOR_BUILTIN_TRACKERS,
   type EvaluatorHost,
 } from "./evaluator.ts";
 import { evaluateWhen } from "./evaluator-internals/predicates.ts";
-import { MissingDescriptorError } from "./arity.ts";
 import {
   BLOCK_REASON_PREAMBLE,
   ENGINE_ERROR_PREAMBLE,
@@ -536,9 +536,7 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
         assert.ok(res && res.block === true);
         assert.equal(
           warnings.filter((w) =>
-            new RegExp(
-              `predicate threw for rule "${name}"@user`,
-            ).test(w),
+            new RegExp(`predicate threw for rule "${name}"@user`).test(w),
           ).length,
           1,
         );
@@ -594,10 +592,7 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
         // Loud-block passthrough wins over projection: rule-tagged
         // block naming the basename + remedy, never warn+skip.
         assert.ok(res && res.block === true);
-        assert.match(
-          res.reason!,
-          new RegExp(`\\[steering:${name}@user\\]`),
-        );
+        assert.match(res.reason!, new RegExp(`\\[steering:${name}@user\\]`));
         assert.match(res.reason!, /No CLI descriptor for basename "gh"/);
       }
       assert.equal(warnings.length, 0);
@@ -645,9 +640,7 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
     // requires-Pattern match + unless-Pattern non-match → fires.
     const fires = buildEvaluator(
       {
-        rules: [
-          { ...base, requires: "\\bmain\\b", unless: "\\bfeature\\b" },
-        ],
+        rules: [{ ...base, requires: "\\bmain\\b", unless: "\\bfeature\\b" }],
       },
       resolve(),
       makeHost(),

@@ -44,6 +44,31 @@ export interface FlagLookupOptions {
    * Only letters whose own `-X` alias is in the queried flag set apply.
    */
   gluedShorts?: readonly string[];
+
+  /**
+   * Flags that consume the following token (issue #106 seam for #107).
+   * Precedence: per-call opts > descriptor > empty strict default
+   * (no declaration anywhere → nothing consumes). #107 implements
+   * consumption against this exact field; this issue only declares
+   * the seam (no `positionals()` impl, no behavior change).
+   */
+  valueConsumingFlags?: readonly string[];
+}
+
+/**
+ * Shared arity helper backing `getFlagValue` / `getAllFlagValues` /
+ * `positionals()` (issue #106 seam, implemented by #107).
+ *
+ * Returns `true` iff `flag` is in `inline ?? descriptor ?? []` —
+ * inline REPLACES the descriptor list (no union); absent everywhere
+ * means non-consuming (strict always).
+ */
+export function isValueConsuming(
+  flag: string,
+  resolved: { inline?: readonly string[]; descriptor?: readonly string[] },
+): boolean {
+  const list = resolved.inline ?? resolved.descriptor ?? [];
+  return list.includes(flag);
 }
 
 /** Shared empty set so the no-glue fast path never allocates. */

@@ -18,7 +18,9 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import gitPlugin from "../plugins/git/index.ts";
 import type {
+  CLIDescriptor,
   Exemption,
   FlagLeaf,
   PredicateWord,
@@ -66,6 +68,9 @@ async function fires(
     basename?: string;
     onUnknownDefault?: "allow" | "block";
     ignoreExplicitModifiers?: boolean;
+    // Unit-level `evaluateWhen` calls never forward descriptors
+    // implicitly — callers pass the merged map explicitly (§13).
+    descriptors?: Record<string, CLIDescriptor>;
   },
 ): Promise<boolean> {
   const ctx = mockContext({
@@ -85,6 +90,7 @@ async function fires(
     "test",
     opts?.onUnknownDefault,
     opts?.ignoreExplicitModifiers,
+    opts?.descriptors,
   );
 }
 
@@ -107,6 +113,27 @@ function gitRule(when: TopLevelWhenClause): Rule {
     when,
   };
 }
+
+/**
+ * Descriptor map plumbed from the git plugin's own slot (§13:
+ * plugin-owned facts). Unit-level `fires` calls pass this explicitly
+ * wherever git resolution is expected — core seeds nothing.
+ */
+const GIT_DESCRIPTORS: Record<string, CLIDescriptor> = {
+  ...(gitPlugin.cliDescriptors as Record<string, CLIDescriptor>),
+};
+
+/**
+ * Synthetic plugin-registered descriptor for bare `gh` pins. Core
+ * seeds no `gh` (owned by pi-steering-github) — tests that need gh
+ * resolution declare it via the slot, like an external plugin would.
+ */
+const GH_DESCRIPTORS: Record<string, CLIDescriptor> = {
+  gh: {
+    positionPolicy: "globals-anywhere",
+    valueConsumingFlags: ["-R", "--repo", "--hostname"],
+  },
+};
 
 // ---------------------------------------------------------------------------
 // subcommand: walker-parity extraction (unit)
@@ -143,12 +170,24 @@ describe("argv leaves: subcommand extraction parity", () => {
     );
   });
 
-  it("WITHOUT the declaration, -c KEY=VAL reads KEY=VAL (fail-open skip, documented)", async () => {
-    // The bare form cannot know `-c` consumes: `KEY=VAL` is the first
-    // positional → mismatch → rule SKIPS. This is why the spread form
-    // exists for consuming-flag shapes.
+  it("WITHOUT the declaration, bare git resolves via the git plugin's declared descriptor (issue #106)", async () => {
+    // Pre-#106 the bare form could not know `-c` consumes: `KEY=VAL`
+    // was the first positional → mismatch → rule SKIPPED. Post-#106
+    // the git plugin's declared descriptor (`-C`, `-c`) resolves by
+    // basename (core seeds nothing — the map is passed explicitly),
+    // so bare `subcommand: "push"` matches `git -c KEY=VAL push`.
     assert.equal(
-      await fires({ subcommand: "push" }, [w("-c"), w("KEY=VAL"), w("push")]),
+      await fires({ subcommand: "push" }, [w("-c"), w("KEY=VAL"), w("push")], {
+        descriptors: GIT_DESCRIPTORS,
+      }),
+      true,
+    );
+    // Unknown basename → strict default (no descriptor, no table):
+    // `-c` consumes nothing, `KEY=VAL` is the subcommand → mismatch.
+    assert.equal(
+      await fires({ subcommand: "push" }, [w("-c"), w("KEY=VAL"), w("push")], {
+        basename: "unknown-basileus-xyz",
+      }),
       false,
     );
   });
@@ -480,9 +519,21 @@ describe("argv leaves: flag presence semantics", () => {
       ),
       false,
     );
-    // Undeclared: `--force` scans present.
+    // Bare (no inline) still skips via the plugin-registered gh
+    // descriptor (#106): `-R` is in the synthetic registry entry, so
+    // `--force` is its value.
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, args, { basename: "gh" }),
+      await fires({ flag: { anyOf: ["--force"] } }, args, {
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      }),
+      false,
+    );
+    // Unknown basename → strict default: undeclared never consumes.
+    assert.equal(
+      await fires({ flag: { anyOf: ["--force"] } }, args, {
+        basename: "unknown-basileus-xyz",
+      }),
       true,
     );
   });
@@ -1106,6 +1157,323 @@ describe("argv leaves: validator + surface", () => {
     assert.throws(
       () => validateWhenClauseShape({}, 'rule "x".when'),
       /subcommand:.*flag:|flag:.*subcommand:/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI descriptors: leaf integration (issue #106 step-4)
+// ---------------------------------------------------------------------------
+
+describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
+  it("git -C /x push resolves the git plugin's declared descriptor with NO inline declaration", async () => {
+    const h = loadHarness({
+      config: {
+        // Plugin-owned facts (§13): git resolution needs the git
+        // plugin declared — core seeds nothing.
+        plugins: [gitPlugin],
+        rules: [
+          gitRule({ subcommand: "push" }),
+          gitRule({ flag: { anyOf: ["--force"] } }),
+        ],
+      },
+    });
+    // Subcommand leaf via registry.
+    await expectBlocks(
+      h,
+      { command: "git -C /x push origin main" },
+      { rule: "no-push" },
+    );
+    await expectAllows(h, { command: "git -C /x pull" });
+  });
+
+  it("gh descriptor leaf-resolution (-R/--repo minimum, not git-only)", async () => {
+    const ghRule = (when: TopLevelWhenClause): Rule => ({
+      name: "no-pr",
+      tool: "bash",
+      field: "command",
+      pattern: "^gh\\b",
+      reason: "no pr",
+      when,
+    });
+    const h = loadHarness({
+      // Synthetic plugin-registered gh descriptor (core seeds no
+      // `gh` — owned by pi-steering-github). Mirrors GH_DESCRIPTORS
+      // at the unit layer.
+      config: {
+        plugins: [
+          {
+            name: "gh-facts",
+            cliDescriptors: {
+              gh: {
+                positionPolicy: "globals-anywhere",
+                valueConsumingFlags: ["-R", "--repo", "--hostname"],
+              },
+            },
+          },
+        ],
+        rules: [ghRule({ subcommand: "pr" })],
+      },
+    });
+    await expectBlocks(
+      h,
+      { command: "gh -R x/y pr merge 1" },
+      { rule: "no-pr" },
+    );
+    await expectBlocks(
+      h,
+      { command: "gh --repo x/y pr merge 1" },
+      { rule: "no-pr" },
+    );
+    await expectAllows(h, { command: "gh -R x/y issue list" });
+  });
+
+  it("unknown basename → strict default", async () => {
+    const h = loadHarness({
+      config: {
+        rules: [
+          {
+            name: "no-sub",
+            tool: "bash",
+            field: "command",
+            pattern: "^mycli\\b",
+            reason: "no sub",
+            when: { subcommand: "push" },
+          },
+        ],
+      },
+    });
+    // No descriptor, no table: `-C` consumes nothing, `/x` is the
+    // subcommand → mismatch → allow.
+    await expectAllows(h, { command: "mycli -C /x push" });
+    await expectBlocks(h, { command: "mycli push" }, { rule: "no-sub" });
+  });
+
+  it("invalid registry policy → skip + one-shot WARN ([invalid-descriptor])", async () => {
+    const { __resetDescriptorWarningsForTests } = await import(
+      "../cli-descriptors.ts"
+    );
+    __resetDescriptorWarningsForTests();
+    const warnings: string[] = [];
+    const orig = console.warn;
+    console.warn = (msg?: unknown, ...rest: unknown[]) => {
+      warnings.push(String(msg));
+    };
+    try {
+      const ctx = mockContext({
+        input: {
+          tool: "bash",
+          command: "git push",
+          basename: "git",
+          args: [
+            { text: "push", value: "push", rawText: "push" } as PredicateWord,
+          ],
+        },
+      });
+      const bad = { git: { positionPolicy: "bogus" } } as unknown as Record<
+        string,
+        { positionPolicy: "bogus" }
+      >;
+      // First call warns once.
+      const first = await evaluateWhen(
+        { subcommand: "push" },
+        { cwd: "/tmp/test" },
+        ctx,
+        {},
+        "t",
+        "t",
+        "block",
+        false,
+        bad as never,
+      );
+      assert.equal(first, false);
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0]!, /\[invalid-descriptor\]/);
+      // Second call: one-shot, no additional WARN.
+      const second = await evaluateWhen(
+        { subcommand: "push" },
+        { cwd: "/tmp/test" },
+        ctx,
+        {},
+        "t",
+        "t",
+        "block",
+        false,
+        bad as never,
+      );
+      assert.equal(second, false);
+      assert.equal(warnings.length, 1);
+    } finally {
+      console.warn = orig;
+      __resetDescriptorWarningsForTests();
+    }
+  });
+
+  it("invalid registry flags → treated absent + one-shot WARN ([invalid-descriptor])", async () => {
+    const { __resetDescriptorWarningsForTests } = await import(
+      "../cli-descriptors.ts"
+    );
+    __resetDescriptorWarningsForTests();
+    const warnings: string[] = [];
+    const orig = console.warn;
+    console.warn = (msg?: unknown, ...rest: unknown[]) => {
+      warnings.push(String(msg));
+    };
+    try {
+      const ctx = mockContext({
+        input: {
+          tool: "bash",
+          command: "git push",
+          basename: "git",
+          args: [
+            { text: "-C", value: "-C", rawText: "-C" } as PredicateWord,
+            { text: "/x", value: "/x", rawText: "/x" } as PredicateWord,
+            { text: "push", value: "push", rawText: "push" } as PredicateWord,
+          ],
+        },
+      });
+      const bad = {
+        git: { valueConsumingFlags: "--not-an-array" },
+      } as unknown as Record<string, { valueConsumingFlags: string }>;
+      const first = await evaluateWhen(
+        { subcommand: "push" },
+        { cwd: "/tmp/test" },
+        ctx,
+        {},
+        "t",
+        "t",
+        "block",
+        false,
+        bad as never,
+      );
+      // `-C` treated as non-consuming → `/x` is the subcommand → mismatch.
+      assert.equal(first, false);
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0]!, /\[invalid-descriptor\]/);
+      const second = await evaluateWhen(
+        { subcommand: "push" },
+        { cwd: "/tmp/test" },
+        ctx,
+        {},
+        "t",
+        "t",
+        "block",
+        false,
+        bad as never,
+      );
+      assert.equal(second, false);
+      assert.equal(warnings.length, 1);
+    } finally {
+      console.warn = orig;
+      __resetDescriptorWarningsForTests();
+    }
+  });
+
+  it("leaf/facade agreement on hasFlag PRESENCE ONLY (no value assertions)", async () => {
+    // `push --delete origin`: the flag leaf and the per-ref
+    // `commandFromInput` binding agree that `--delete` is present.
+    // MUST NOT assert getFlagValue/getAllFlagValues (exact-branch
+    // consumes unconditionally until #107).
+    const h = loadHarness({
+      config: {
+        rules: [gitRule({ flag: { anyOf: ["--delete"] } })],
+      },
+    });
+    await expectBlocks(
+      h,
+      { command: "git push --delete origin" },
+      { rule: "no-push" },
+    );
+    const ctx = mockContext({
+      input: {
+        tool: "bash",
+        command: "git push --delete origin",
+        basename: "git",
+        args: [
+          { text: "push", value: "push", rawText: "push" } as PredicateWord,
+          {
+            text: "--delete",
+            value: "--delete",
+            rawText: "--delete",
+          } as PredicateWord,
+          {
+            text: "origin",
+            value: "origin",
+            rawText: "origin",
+          } as PredicateWord,
+        ],
+      },
+    });
+    assert.equal(ctx.command.hasFlag("--delete"), true);
+  });
+
+  it("exemption parity: unknown never exempts (kept pin)", async () => {
+    const h = loadHarness({
+      config: {
+        rules: [
+          {
+            name: "no-git",
+            tool: "bash",
+            field: "command",
+            pattern: "^git\\b",
+            reason: "no git",
+          },
+        ],
+        exemptions: [{ rule: "no-git", when: { subcommand: "pull" } }],
+      },
+    });
+    // All-flags: extraction null → unknown → guard still fires.
+    await expectBlocks(h, { command: "git --version" }, { rule: "no-git" });
+  });
+
+  it("exemption definite-flip: subcommand push matches git -C /x push via the git plugin's descriptor", async () => {
+    const h = loadHarness({
+      config: {
+        // The exemption-rule build path threads descriptors too —
+        // gitPlugin here covers both rule and exemption leaves.
+        plugins: [gitPlugin],
+        rules: [
+          {
+            name: "no-push",
+            tool: "bash",
+            field: "command",
+            pattern: "^git\\b",
+            reason: "no push",
+          },
+        ],
+        exemptions: [{ rule: "no-push", when: { subcommand: "push" } }],
+      },
+    });
+    await expectAllows(h, { command: "git -C /x push origin main" });
+    await expectBlocks(h, { command: "git -C /x pull" }, { rule: "no-push" });
+  });
+
+  it("exemption not-block+descriptor parity: not:{subcommand:push} on git -C /x push MUST NOT exempt", async () => {
+    const h = loadHarness({
+      config: {
+        plugins: [gitPlugin],
+        rules: [
+          {
+            name: "no-push",
+            tool: "bash",
+            field: "command",
+            pattern: "^git\\b",
+            reason: "no push",
+            when: { subcommand: "push" },
+          },
+        ],
+        exemptions: [
+          { rule: "no-push", when: { not: { subcommand: "push" } } },
+        ],
+      },
+    });
+    // Inner push matches via descriptor → not(push) is false → no
+    // exemption → guard fires. Proves the evaluateWhen→evaluateNotBlock
+    // descriptor forward.
+    await expectBlocks(
+      h,
+      { command: "git -C /x push origin main" },
+      { rule: "no-push" },
     );
   });
 });

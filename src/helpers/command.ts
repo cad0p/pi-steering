@@ -102,13 +102,40 @@ export interface SteeringCommand {
  * arrays, so post-construction mutation of the caller's arrays cannot
  * leak into the facade.
  */
-export function commandFromInput(input: PredicateToolInput): SteeringCommand {
+/**
+ * Build a {@link SteeringCommand} bound to one tool input's argv +
+ * env-prefix words, with an optional descriptor-resolved consuming-flag
+ * list (issue #106 step-4 binding, behavior-inert until #107 wires
+ * `FlagLookupOptions.valueConsumingFlags` consumption).
+ *
+ * The engine binds per ref (`resolveDescriptor(basename).valueConsumingFlags`
+ * → here); the facade stays a pure view. `SteeringCommand` is
+ * untouched (backward-compatible).
+ */
+export function commandFromInput(
+  input: PredicateToolInput,
+  resolvedFlags?: readonly string[],
+): SteeringCommand {
   const args: readonly Word[] = [...(input?.args ?? [])];
   const envAssignments: readonly Word[] = [...(input?.envAssignments ?? [])];
+  // Descriptor default for the arity contract (per-call opts >
+  // descriptor > empty). Inert until #107 wires consumption in
+  // `flags.ts` — the helpers ignore `valueConsumingFlags` today, so
+  // this binding changes no verdicts (hasFlag presence-only agrees).
+  const descriptorDefault =
+    resolvedFlags !== undefined ? [...resolvedFlags] : undefined;
+  const withDefault = (
+    opts?: FlagLookupOptions,
+  ): FlagLookupOptions | undefined => {
+    if (descriptorDefault === undefined) return opts;
+    if (opts?.valueConsumingFlags !== undefined) return opts;
+    return { ...opts, valueConsumingFlags: descriptorDefault };
+  };
   return {
-    hasFlag: (flag, opts) => hasFlag(args, flag, opts),
-    getFlagValue: (flags, opts) => getFlagValue(args, flags, opts),
-    getAllFlagValues: (flags, opts) => getAllFlagValues(args, flags, opts),
+    hasFlag: (flag, opts) => hasFlag(args, flag, withDefault(opts)),
+    getFlagValue: (flags, opts) => getFlagValue(args, flags, withDefault(opts)),
+    getAllFlagValues: (flags, opts) =>
+      getAllFlagValues(args, flags, withDefault(opts)),
     hasEnvAssignment: (name) => hasEnvAssignment(envAssignments, name),
     isInfoOnly: (extraFlags) => isInfoOnly(args, extraFlags),
   };

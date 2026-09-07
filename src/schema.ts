@@ -25,7 +25,12 @@
  * only defines shapes. Evaluation is Phase 3's concern.
  */
 
-import type { EnvState, Tracker, Word } from "@cad0p/unbash-walker";
+import type {
+  EnvState,
+  PositionPolicy,
+  Tracker,
+  Word,
+} from "@cad0p/unbash-walker";
 import type { SteeringCommand } from "./helpers/command.ts";
 
 // ---------------------------------------------------------------------------
@@ -416,8 +421,9 @@ export interface SubcommandSpreadBase {
   /**
    * Flags that consume the following token (`-C`, `-c`, `-R`,
    * `--repo`, `--profile`, …) so values never read as subcommands.
-   * Per-binary, plugin-declared; the walker stays arity-ignorant.
-   * Default: none.
+   * Inline (when present) REPLACES the CLI-descriptor registry list;
+   * absent → registry by basename → strict empty set. The walker
+   * stays arity-ignorant.
    */
   valueConsumingFlags?: readonly string[];
 }
@@ -469,7 +475,9 @@ export interface FlagSpreadBase {
   bundleAware?: boolean;
   /**
    * Flags that consume the following token, skipped BY POSITION
-   * during the presence scan (never by content). Default: none.
+   * during the presence scan (never by content). Inline (when
+   * present) REPLACES the registry list; absent → registry by
+   * basename → strict empty set.
    */
   valueConsumingFlags?: readonly string[];
 }
@@ -490,6 +498,29 @@ export type FlagLeaf = FlagSpreadBase & {
  * `& PredicateModifiers`.
  */
 export type FlagLeafInner = FlagSpreadBase;
+
+/**
+ * Per-binary argv knowledge for one command basename (issue #106).
+ *
+ * A `CLIDescriptor` supplies `positionPolicy` + `valueConsumingFlags`
+ * to both ARGV leaves (`when.subcommand` / `when.flag`) with no
+ * inline declaration. Precedence: inline declaration > registry entry
+ * > strict default (flags: empty set — nothing consumes; policy:
+ * `"globals-anywhere"`). Per-field composition: inline
+ * `valueConsumingFlags`, when present, REPLACES the registry list (no
+ * union); registry `positionPolicy` always overrides the
+ * `DEFAULT_POSITION_POLICIES` fallback.
+ *
+ * Keyed by command basename (`"git"`, `"gh"`) in
+ * {@link Plugin.cliDescriptors} and the merged
+ * `ResolvedPluginState.cliDescriptors`.
+ */
+export interface CLIDescriptor {
+  /** Walker half (cf. `DEFAULT_POSITION_POLICIES`). */
+  positionPolicy?: PositionPolicy;
+  /** Pre-subcommand consumers (`-C`, `-c`, `-R`, …). */
+  valueConsumingFlags?: readonly string[];
+}
 
 /**
  * Built-in non-registry leaves attached to a {@link Rule.when}
@@ -2085,6 +2116,18 @@ export interface Plugin {
       | readonly import("@cad0p/unbash-walker").Modifier<unknown>[]
     >
   >;
+
+  /**
+   * Per-binary argv knowledge keyed by command basename (`"git"`,
+   * `"gh"`). Mirrors trackers/predicates: same first-wins collision
+   * / merge machinery, no new concepts. First-wins on collision;
+   * the core fallback map is currently empty (core seeds nothing —
+   * each plugin owns its binary's facts via this slot), so absent
+   * basenames stay absent. An absent descriptor resolves to the
+   * strict default and a resulting miss is definite (a data-knowledge
+   * axis), NOT an unknown-escape — no `onUnknown:` projection applies.
+   */
+  cliDescriptors?: Record<string, CLIDescriptor>;
 }
 
 // ---------------------------------------------------------------------------
@@ -2266,7 +2309,8 @@ export interface SteeringConfig {
  *     duplicate plugin-shipped trackers when those plugins surface
  *     together via the merge.
  *   - PLUGIN-MERGER (`predicate-collision`, `observer-collision`,
- *     `rule-collision`, `extension-orphan`, `reserved-tracker-name`,
+ *     `rule-collision`, `descriptor-collision`, `invalid-descriptor`,
+ *     `extension-orphan`, `reserved-tracker-name`,
  *     `reserved-predicate-key`, `invalid-name`) — produced while
  *     resolving plugin shapes into the runtime registry. The
  *     collision kinds in this group flag duplicates among
@@ -2413,7 +2457,23 @@ export type SteeringDiagnosticKind =
    * digits, underscores, dashes; must start with a letter or
    * digit. Rename the offending object in source.
    */
-  | "invalid-name";
+  | "invalid-name"
+  /**
+   * Two plugins both register a CLI descriptor under the same
+   * basename. The first-registered entry wins; the later plugin's
+   * entry is dropped. Also emitted when a plugin entry shadows a
+   * core default basename (plugin still wins — loudness without
+   * blocking; descriptors are additive knowledge, not
+   * state-dimension claims).
+   */
+  | "descriptor-collision"
+  /**
+   * A plugin's `cliDescriptors` entry is malformed (non-object
+   * descriptor, non-array `valueConsumingFlags`, invalid
+   * `positionPolicy`). The entry is skipped; resolution falls back
+   * to the strict default. Never throws.
+   */
+  | "invalid-descriptor";
 
 /**
  * Structured issue surfaced while loading a steering config.
@@ -2510,6 +2570,7 @@ export interface SteeringDiagnostic {
    *   - Cross-layer collisions and plugin-shipped diagnostics
    *     (`plugin-name-collision`, `tracker-name-collision`,
    *     `predicate-collision`, `observer-collision`, `rule-collision`,
+   *     `descriptor-collision`, `invalid-descriptor`,
    *     `extension-orphan`, `reserved-tracker-name`,
    *     `reserved-predicate-key`, `invalid-name`): unset by design.
    *     These diagnostics name the participants (layer paths or

@@ -51,6 +51,14 @@ import {
  * descriptor-resolved consuming-flag list, so consumption and
  * skipping cannot diverge. Absent binding → strict empty set
  * (undeclared flags never consume).
+ *
+ * Obscure binaries (no owning plugin): rule authors declare argv
+ * facts via an inline plugin literal — NO new top-level config field,
+ * NO leaf-inline escape hatch (a second channel would recreate the
+ * drift #106 killed):
+ * `plugins: [{ name: "my-facts", cliDescriptors: { mycli: {
+ * valueConsumingFlags: [...] } } }]` — or `{ mycli: {} }` for explicit
+ * strict. Absent basename → `MissingDescriptorError` (loud).
  */
 export interface SteeringCommand {
   /**
@@ -170,6 +178,11 @@ function wordValue(w: Word | undefined): string {
  *      → `["push","--delete","origin"]`).
  *   6. No descriptor for the basename → strict default (empty consuming
  *      set): rule 3 never fires, all separated next-tokens surface.
+ *
+ * `--` divergence (documented, no action): `positionals()` is
+ * `--`-aware while `when.flag`'s post-`--` limitation is UNCHANGED
+ * (a `--force` after `--` still scans present) — flag-side
+ * over-presence is the fail-closed direction.
  *
  * Total: never throws on weird input (missing/odd shapes degrade to
  * empty behavior, never escape).

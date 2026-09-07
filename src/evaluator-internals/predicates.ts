@@ -28,7 +28,6 @@
 
 import type { PositionPolicy, SubcommandRun, Word } from "@cad0p/unbash-walker";
 import {
-  bundleContains,
   DEFAULT_POSITION_POLICIES,
   locateSubcommandRun,
 } from "@cad0p/unbash-walker";
@@ -38,7 +37,6 @@ import { isPattern } from "../internal/pattern-utils.ts";
 import type {
   CLIDescriptor,
   CLIFlag,
-  FlagSpreadBase,
   Pattern,
   PredicateContext,
   PredicateFn,
@@ -176,7 +174,7 @@ export function validateWhenClauseShape(
     // `pattern` / `value` (e.g. `cwd: { pattern, onUnknown }`, or a
     // plugin predicate's `{ value, onUnknown }` spread) — or as a
     // sibling of the ARGV-spread keys (`subcommand: { depth,
-    // onUnknown }`, `flag: { anyOf / bundleAware, onUnknown }`).
+    // onUnknown }`, `flag: { anyOf, onUnknown }`).
     // Bare-keyed spreads evade a `pattern | value`-only trigger, so
     // every spread payload key arms the check. Reject those in strict
     // mode too.
@@ -247,7 +245,7 @@ export function validateWhenClauseShape(
  *   - the not-block top level (`when: { not: { cwd: /x/, onUnknown:
  *     ... } }` — the recursion below), and
  *   - leaf object forms carrying `pattern` / `value` / `anyOf` /
- *     `bundleAware` / `depth` keys
+ *     `depth` keys
  *     (`cwd: { pattern: /x/, onUnknown: ... }`, plugin spread forms
  *     `{ value: ..., onUnknown: ... }`, ARGV spreads
  *     `{ anyOf: [...], onUnknown: ... }` / `{ depth, onUnknown }`).
@@ -273,7 +271,7 @@ export function validateExemptionWhenClauseShape(
 
 /**
  * Does this leaf value carry a `{ pattern | value | anyOf |
- * bundleAware | depth, onUnknown }`
+ * depth, onUnknown }`
  * object form — i.e. a spread-form leaf that smuggles an `onUnknown`
  * modifier as a sibling of its payload key? Used by
  * {@link validateWhenClauseShape} in strict (`rejectOnUnknown`)
@@ -298,7 +296,6 @@ function leafObjectCarriesOnUnknown(value: unknown): boolean {
     ("pattern" in record ||
       "value" in record ||
       "anyOf" in record ||
-      "bundleAware" in record ||
       "depth" in record) &&
     "onUnknown" in record
   );
@@ -854,22 +851,20 @@ function isValidFlagEntry(entry: unknown): entry is CLIFlag {
 /**
  * Normalize a `when.flag` leaf, or `null` when malformed (caller
  * fail-skips → `false`). `flag:` has object form only — no bare
- * shorthand. Strict `=== true` on `bundleAware` mirrors the
- * engine's typo-defense (any other value collapses to `false`).
- * `anyOf` takes entries (`readonly CLIFlag[]`, OR over entries, each entry
- * ORs aliases — same forcing function; malformed entries fail-skip
- * silently, not WARN).
+ * shorthand. `anyOf` takes entries (`readonly CLIFlag[]`, OR over entries,
+ * each entry ORs aliases — same forcing function; malformed entries
+ * fail-skip silently, not WARN). Unknown keys (including the deleted
+ * pre-#115 bundle opt-in) are ignored, never validated — deleted means
+ * deleted, no stale-shape detection.
  */
 function normalizeFlagLeaf(value: unknown): {
   anyOf: readonly CLIFlag[];
-  bundleAware: boolean;
 } | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
-  const obj = value as Partial<FlagSpreadBase> & {
+  const obj = value as {
     anyOf?: unknown;
-    bundleAware?: unknown;
   };
   if (
     !Array.isArray(obj.anyOf) ||
@@ -881,38 +876,38 @@ function normalizeFlagLeaf(value: unknown): {
   const anyOf = obj.anyOf as readonly CLIFlag[];
   return {
     anyOf,
-    bundleAware: obj.bundleAware === true,
   };
 }
 
 /**
  * Presence scan over the ref's resolved words, shared by the
- * `subcommand`-adjacent flag matching contract (issue #90; #110 entries):
- * exact token matches, attached `--flag=value` forms (no declaration
- * needed — single token by construction), glued `-X<rest>` forms (iff X is
- * a derived glue letter AND `-X` is among the queried entry aliases),
+ * `subcommand`-adjacent flag matching contract (issue #90; #110 entries;
+ * #115 derived bundles): exact token matches, attached `--flag=value`
+ * forms (no declaration needed — single token by construction),
  * declared consuming-flag values skipped BY POSITION (`i += 2`, never by
- * content), and — with `bundleAware` — short bundles via `bundleContains`
- * (longs NEVER bundle-match; glued tokens skip bundling — the glue-blind
- * bundle follow-up). `--` itself is a flag-shaped token; post-`--`
- * positionals are unmodelled (walker limitation) and scan as ordinary
- * tokens.
+ * content), and short bundles — always on for single-char shorts, longs
+ * NEVER bundle-match. Bundling derives from the descriptor table via the
+ * lead-letter rule: the token's letters scan left to right; the first
+ * letter in the derived glue set glues the remainder (only the non-glued
+ * prefix is present); undeclared letters never glue (strict-always,
+ * fail-closed — the remedy is a table row). `--` itself is a flag-shaped
+ * token; post-`--` positionals are unmodelled (walker limitation) and
+ * scan as ordinary tokens.
  */
 function flagPresent(
   args: readonly Word[],
   anyOf: readonly CLIFlag[],
-  bundleAware: boolean,
   valueConsumingFlags: ReadonlySet<string>,
   gluedShorts: ReadonlySet<string> = new Set(),
 ): boolean {
   const spellings = new Set<string>();
   const longs = new Set<string>();
-  const shorts: string[] = [];
+  const shortLetters = new Set<string>();
   for (const entry of anyOf) {
     for (const alias of entry.aliases) {
       spellings.add(alias);
       if (alias.startsWith("--")) longs.add(alias);
-      else shorts.push(alias);
+      else if (alias.length === 2) shortLetters.add(alias[1]!);
     }
   }
   const consuming = valueConsumingFlags;
@@ -929,33 +924,33 @@ function flagPresent(
       if (longs.has(token.slice(0, token.indexOf("=")))) return true;
       continue;
     }
-    // Glued `-X<rest>`: iff X ∈ derived glue AND `-X` is queried.
-    // Presence-true here; glued tokens never fall through to bundling.
-    const isGluedToken =
-      token.length > 2 &&
-      token[0] === "-" &&
-      token[1] !== "-" &&
-      gluedShorts.has(token[1]!);
-    if (isGluedToken) {
-      if (spellings.has(`-${token[1]!}`)) return true;
-      continue;
-    }
     // Declared consuming flag: skip its value BY POSITION.
     if (consuming.has(token)) {
       i += 1;
       continue;
     }
-    // Short bundles (`-uf`) via the walker — longs never match here.
-    // Project the already-resolved token into a well-formed Word:
-    // `bundleContains` reads `value ?? text` itself (no `rawText`
-    // fallback) and would throw on an all-absent word, escaping the
-    // TypeError out of `evaluateFlag` (no try/catch here) into a
-    // fail-OPEN skip. The probe keeps classification on the same
-    // resolved form the rest of the scan uses (S1).
-    if (bundleAware && token.startsWith("-") && !token.startsWith("--")) {
-      const probe = { text: token, value: token } as Word;
-      for (const short of shorts) {
-        if (bundleContains(probe, short.slice(1))) return true;
+    // Short bundles (`-uf`), always on for single-char-short aliases
+    // (longs never match here). Glue derivation runs FIRST: the first
+    // letter in the derived glue set glues the remainder, so only the
+    // non-glued prefix is present (`-Rfoo` with `R` declared presents
+    // `R`, never `f`; `-xRfoo` presents `xR`). Undeclared letters never
+    // glue — over-presence fires fail-closed, fixed with a table row.
+    // The token is the same resolved form the rest of the scan uses
+    // (S1), so rawText-only and all-absent words never throw.
+    if (token.length > 1 && token[0] === "-" && token[1] !== "-") {
+      let body = token.slice(1);
+      const eq = body.indexOf("=");
+      if (eq !== -1) body = body.slice(0, eq);
+      let end = body.length;
+      for (let j = 0; j < body.length; j++) {
+        if (gluedShorts.has(body[j]!)) {
+          end = j + 1;
+          break;
+        }
+      }
+      const present = body.slice(0, end);
+      for (const letter of shortLetters) {
+        if (present.includes(letter)) return true;
       }
     }
   }
@@ -994,7 +989,6 @@ function evaluateFlag(
   return flagPresent(
     args,
     normalized.anyOf,
-    normalized.bundleAware,
     arity.valueConsumingFlags,
     arity.gluedShorts,
   );

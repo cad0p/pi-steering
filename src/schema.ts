@@ -452,26 +452,25 @@ export type SubcommandLeafInner =
 
 /**
  * Spread form shared by {@link FlagLeaf} (outer) and
- * {@link FlagLeafInner} (inner): `{ anyOf, bundleAware? }`.
+ * {@link FlagLeafInner} (inner): `{ anyOf }`.
  * `flag:` has no bare form.
  */
 export interface FlagSpreadBase {
   /**
    * Flag entries to scan for. OR over entries; each entry ORs aliases.
    * Longs (`--force`) match the exact token or the attached `--force=x`
-   * form; single-char shorts (`-f`) match the exact token, or inside
-   * bundles when `bundleAware` is set. Each entry must be a well-formed
-   * `CLIFlag` (`aliases` non-empty `--long` / `-x` spellings, `takesValue`
-   * boolean); malformed entries fail-skip → leaf `false` (rule skips, NOT
-   * unknown). Empty `anyOf` is likewise invalid → `false`.
+   * form; single-char shorts (`-f`) match the exact token, inside
+   * bundles (`-uf` always matches `-u` / `-f` — longs never
+   * bundle-match), or glued (`-Rfoo` matches `-R` iff the table derives
+   * glue for `R`). Bundle matching derives from the descriptor table via
+   * the lead-letter rule (first table-declared value-taking letter glues
+   * the remainder; undeclared letters never glue — fail-closed, add a
+   * table row). Each entry must be a well-formed `CLIFlag` (`aliases`
+   * non-empty `--long` / `-x` spellings, `takesValue` boolean); malformed
+   * entries fail-skip → leaf `false` (rule skips, NOT unknown). Empty
+   * `anyOf` is likewise invalid → `false`.
    */
   anyOf: readonly CLIFlag[];
-  /**
-   * Route short bundles through the walker's `bundleContains`
-   * (`-uf` matches `-u` / `-f`). Longs never bundle-match.
-   * Default `false`.
-   */
-  bundleAware?: boolean;
   /**
    * Arity resolves via the entries + descriptor table (issue #110):
    * consumption derives from the entries + registry-by-basename table.
@@ -584,7 +583,7 @@ export interface CLIDescriptor {
  *
  * The spread forms differ the same way (`subcommand:`'s
  * `{ pattern, depth, onUnknown? }` and `flag:`'s
- * `{ anyOf, bundleAware?, onUnknown? }` drop
+ * `{ anyOf, onUnknown? }` drop
  * `onUnknown?:` inside `not:`). Named leaf types below keep the
  * Outer/Inner declarations in lockstep: {@link SubcommandLeaf} /
  * {@link SubcommandLeafInner} and {@link FlagLeaf} /
@@ -770,10 +769,14 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
    * Constrain the rule to commands carrying any of the listed flag
    * spellings. Presence scan over the ref's resolved words:
    * longs match the exact token or the attached `--flag=value`
-   * form; single-char shorts (`-f`) match the exact token, or —
-   * with `bundleAware: true` — inside bundles via the walker's
-   * `bundleContains` (`git push -uf` matches `-u` / `-f`; longs
-   * NEVER bundle-match). Multi-char short spellings (e.g. `-ff`),
+   * form; single-char shorts (`-f`) match the exact token, inside
+   * bundles (always on — `git push -uf` matches `-u` / `-f`; longs
+   * NEVER bundle-match), or glued (`-Rfoo` matches `-R` iff the table
+   * derives glue for `R`). Bundle matching derives from the descriptor
+   * table via the lead-letter rule: the first table-declared
+   * value-taking letter glues the remainder (nothing after it is
+   * present); undeclared letters never glue (strict-always,
+   * fail-closed — the remedy is a table row). Multi-char short spellings (e.g. `-ff`),
    * empty `anyOf`, or non-string members are invalid and the leaf
    * evaluates to `false` (rule skips, NOT unknown).
    *

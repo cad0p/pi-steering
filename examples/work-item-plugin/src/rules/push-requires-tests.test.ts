@@ -49,6 +49,9 @@ import { pushRequiresTests } from "./push-requires-tests.ts";
 const testPlugin: Plugin = {
   name: "test",
   observers: [npmTestTracker, retestRequiredTracker],
+  // Explicit strict: these tests pin the observer→rule handoff, not
+  // argv arity (issue #107: absent descriptors are loud).
+  cliDescriptors: { git: {} },
 };
 
 describe("push-requires-tests", () => {

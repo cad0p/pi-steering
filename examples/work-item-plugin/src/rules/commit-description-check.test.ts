@@ -33,7 +33,12 @@ describe("commit-description-check", () => {
     const ctx = mockExtensionContext("/tmp/test", host.entries);
 
     const harness = loadHarness({
-      config: { rules: [commitDescriptionCheck] },
+      // Explicit strict: pins self-mark behavior, not argv arity
+      // (issue #107: absent descriptors are loud).
+      config: {
+        plugins: [{ name: "test-strict", cliDescriptors: { git: {} } }],
+        rules: [commitDescriptionCheck],
+      },
       host,
     });
 
@@ -100,7 +105,12 @@ describe("commit-description-check", () => {
 
   it("does NOT fire on a non-commit command", async () => {
     const harness = loadHarness({
-      config: { rules: [commitDescriptionCheck] },
+      // Explicit strict: pins non-commit allow, not argv arity
+      // (issue #107: absent descriptors are loud).
+      config: {
+        plugins: [{ name: "test-strict", cliDescriptors: { git: {} } }],
+        rules: [commitDescriptionCheck],
+      },
     });
     await expectAllows(harness, { command: "git status" });
   });

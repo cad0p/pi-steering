@@ -29,6 +29,9 @@ import { commitRequiresWorkItem } from "./commit-requires-work-item.ts";
 const testPlugin: Plugin = {
   name: "test",
   predicates: { workItemFormat },
+  // Explicit strict: these tests pin predicate behavior, not argv
+  // arity (issue #107: absent descriptors are loud).
+  cliDescriptors: { git: {} },
 };
 
 describe("commit-requires-work-item", () => {

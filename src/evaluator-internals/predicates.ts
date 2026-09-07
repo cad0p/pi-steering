@@ -32,10 +32,12 @@ import {
   DEFAULT_POSITION_POLICIES,
   locateSubcommandRun,
 } from "@cad0p/unbash-walker";
-import { resolveDescriptor } from "../cli-descriptors.ts";
+import type { ResolvedArity } from "../arity.ts";
+import { arityOf, EMPTY_ARITY, resolveDescriptor } from "../arity.ts";
 import { isPattern } from "../internal/pattern-utils.ts";
 import type {
   CLIDescriptor,
+  CLIFlag,
   FlagSpreadBase,
   Pattern,
   PredicateContext,
@@ -583,9 +585,9 @@ const VALID_POSITION_POLICIES: ReadonlySet<string> = new Set([
  *     `length === depth` (positional sequence). `depth` defaults to
  *     1; non-integer / negative depths are invalid.
  *
- * Arity is registry-only (issue #107): the spread carries no
- * `valueConsumingFlags` — `evaluateSubcommand` resolves via
- * `resolveDescriptor(basename, descriptors)`.
+ * Arity resolves via the table channel (issue #110): the spread carries no
+ * arity — `evaluateSubcommand` resolves via `arityOf(basename, descriptors,
+ * cache)` (derived sets from the `flags` table).
  */
 function normalizeSubcommandLeaf(value: unknown):
   | {
@@ -724,6 +726,7 @@ function evaluateSubcommand(
   ruleName: string,
   source: string,
   descriptors?: Record<string, CLIDescriptor>,
+  arityCache?: Map<string, ResolvedArity>,
 ): PredicateVerdict {
   // Non-bash tools carry no `args` → unknown → default block
   // (fail-closed, S1).
@@ -732,20 +735,19 @@ function evaluateSubcommand(
   if (normalized === "unknown") return "unknown";
   if (normalized === null) return false;
   const { patterns, depth, sequence } = normalized;
-  // Resolve per-binary argv knowledge (registry-only, issue #107):
-  // registry policy overrides the table fallback; absent throws
-  // `MissingDescriptorError` (loud, §12 — no silent fallback). Re-validates at resolution time
-  // (post-merge mutation by plain-JS callers) with one-shot
+  // Resolve per-binary argv knowledge via the hoisted `arityOf` (issue
+  // #110): registry policy overrides the table fallback; absent throws
+  // `MissingDescriptorError` (loud — no silent fallback). Re-validates at
+  // resolution time (post-merge mutation by plain-JS callers) with one-shot
   // [invalid-descriptor] WARNs. Nameless refs (bare `VAR=x`, basename
-  // `undefined`) skip resolution — silent strict, exactly the
-  // pre-loudness behavior (no binary, nothing to declare).
-  const resolved: {
-    positionPolicy: PositionPolicy;
-    valueConsumingFlags: readonly string[];
-  } =
-    basename !== undefined
-      ? resolveDescriptor(basename, descriptors)
-      : { positionPolicy: "globals-anywhere", valueConsumingFlags: [] };
+  // `undefined`) → EMPTY_ARITY — silent strict, exactly the pre-loudness
+  // behavior (no binary, nothing to declare).
+  const resolved: ResolvedArity =
+    arityCache !== undefined
+      ? arityOf(basename, descriptors, arityCache)
+      : basename !== undefined
+        ? resolveDescriptor(basename, descriptors)
+        : EMPTY_ARITY;
   // Invalid registry policy → skip the leaf (fail-SKIP, not unknown).
   // resolveDescriptor already one-shot WARNed with [invalid-descriptor];
   // returning false here keeps the invalid→absent→skip contract without
@@ -759,7 +761,8 @@ function evaluateSubcommand(
     return false;
   }
   const positionPolicy = resolved.positionPolicy;
-  const valueConsumingFlags = resolved.valueConsumingFlags;
+  // Transition: ResolvedArity carries sets; the walker still takes a list.
+  const valueConsumingFlags = [...resolved.valueConsumingFlags];
   // The resolved policy feeds the existing VALID guard below (S1):
   // descriptor re-validation already one-shot WARNed, so this stays
   // as defense-in-depth for table pollution.
@@ -815,12 +818,37 @@ function evaluateSubcommand(
 /**
  * Validate an `anyOf` spelling: longs (`--` + name) or single-char
  * shorts (`-` + letter). Multi-char shorts (`-ff`), bare `-` / `--`,
- * and non-dash spellings are invalid.
+ * non-dash spellings, and non-strings are invalid.
  */
-function isValidFlagSpelling(spelling: string): boolean {
+function isValidFlagSpelling(spelling: unknown): spelling is string {
+  if (typeof spelling !== "string") return false;
   if (spelling.startsWith("--")) return spelling.length > 2;
   if (spelling.startsWith("-")) return spelling.length === 2;
   return false;
+}
+
+/**
+ * Validate one `CLIFlag` entry (leaf-side, SILENT fail-skip → `false`, not
+ * WARN — leaf shape errors are rule-author bugs at the call site,
+ * descriptor errors are plugin facts; the distinction is load-bearing).
+ */
+function isValidFlagEntry(entry: unknown): entry is CLIFlag {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+    return false;
+  }
+  const { aliases, takesValue } = entry as {
+    aliases?: unknown;
+    takesValue?: unknown;
+  };
+  if (
+    !Array.isArray(aliases) ||
+    aliases.length === 0 ||
+    !aliases.every(isValidFlagSpelling) ||
+    typeof takesValue !== "boolean"
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -828,9 +856,12 @@ function isValidFlagSpelling(spelling: string): boolean {
  * fail-skips → `false`). `flag:` has object form only — no bare
  * shorthand. Strict `=== true` on `bundleAware` mirrors the
  * engine's typo-defense (any other value collapses to `false`).
+ * `anyOf` takes entries (`readonly CLIFlag[]`, OR over entries, each entry
+ * ORs aliases — same forcing function; malformed entries fail-skip
+ * silently, not WARN).
  */
 function normalizeFlagLeaf(value: unknown): {
-  anyOf: string[];
+  anyOf: readonly CLIFlag[];
   bundleAware: boolean;
 } | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -843,12 +874,11 @@ function normalizeFlagLeaf(value: unknown): {
   if (
     !Array.isArray(obj.anyOf) ||
     obj.anyOf.length === 0 ||
-    !obj.anyOf.every((v) => typeof v === "string")
+    !obj.anyOf.every(isValidFlagEntry)
   ) {
     return null;
   }
-  const anyOf = obj.anyOf as string[];
-  if (!anyOf.every(isValidFlagSpelling)) return null;
+  const anyOf = obj.anyOf as readonly CLIFlag[];
   return {
     anyOf,
     bundleAware: obj.bundleAware === true,
@@ -857,25 +887,35 @@ function normalizeFlagLeaf(value: unknown): {
 
 /**
  * Presence scan over the ref's resolved words, shared by the
- * `subcommand`-adjacent flag matching contract (issue #90): exact
- * token matches, attached `--flag=value` forms (no declaration
- * needed — single token by construction), declared consuming-flag
- * values skipped BY POSITION (`i += 2`, never by content), and —
- * with `bundleAware` — short bundles via `bundleContains` (longs
- * NEVER bundle-match). `--` itself is a flag-shaped token;
- * post-`--` positionals are unmodelled (walker limitation) and scan
- * as ordinary tokens.
+ * `subcommand`-adjacent flag matching contract (issue #90; #110 entries):
+ * exact token matches, attached `--flag=value` forms (no declaration
+ * needed — single token by construction), glued `-X<rest>` forms (iff X is
+ * a derived glue letter AND `-X` is among the queried entry aliases),
+ * declared consuming-flag values skipped BY POSITION (`i += 2`, never by
+ * content), and — with `bundleAware` — short bundles via `bundleContains`
+ * (longs NEVER bundle-match; glued tokens skip bundling — the glue-blind
+ * bundle follow-up). `--` itself is a flag-shaped token; post-`--`
+ * positionals are unmodelled (walker limitation) and scan as ordinary
+ * tokens.
  */
 function flagPresent(
   args: readonly Word[],
-  anyOf: readonly string[],
+  anyOf: readonly CLIFlag[],
   bundleAware: boolean,
-  valueConsumingFlags: readonly string[],
+  valueConsumingFlags: ReadonlySet<string>,
+  gluedShorts: ReadonlySet<string> = new Set(),
 ): boolean {
-  const spellings = new Set(anyOf);
-  const longs = new Set(anyOf.filter((s) => s.startsWith("--")));
-  const shorts = anyOf.filter((s) => !s.startsWith("--"));
-  const consuming = new Set(valueConsumingFlags);
+  const spellings = new Set<string>();
+  const longs = new Set<string>();
+  const shorts: string[] = [];
+  for (const entry of anyOf) {
+    for (const alias of entry.aliases) {
+      spellings.add(alias);
+      if (alias.startsWith("--")) longs.add(alias);
+      else shorts.push(alias);
+    }
+  }
+  const consuming = valueConsumingFlags;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === undefined) continue; // bounds-guard; unreachable while i < length
@@ -887,6 +927,17 @@ function flagPresent(
     // spellings; single token, consumes nothing further.
     if (token.startsWith("--") && token.includes("=")) {
       if (longs.has(token.slice(0, token.indexOf("=")))) return true;
+      continue;
+    }
+    // Glued `-X<rest>`: iff X ∈ derived glue AND `-X` is queried.
+    // Presence-true here; glued tokens never fall through to bundling.
+    const isGluedToken =
+      token.length > 2 &&
+      token[0] === "-" &&
+      token[1] !== "-" &&
+      gluedShorts.has(token[1]!);
+    if (isGluedToken) {
+      if (spellings.has(`-${token[1]!}`)) return true;
       continue;
     }
     // Declared consuming flag: skip its value BY POSITION.
@@ -924,26 +975,28 @@ function evaluateFlag(
   args: readonly PredicateWord[] | undefined,
   basename?: string,
   descriptors?: Record<string, CLIDescriptor>,
+  arityCache?: Map<string, ResolvedArity>,
 ): PredicateVerdict {
   // Non-bash tools carry no `args` → unknown → default block
   // (fail-closed, S1).
   if (!Array.isArray(args)) return "unknown";
   const normalized = normalizeFlagLeaf(value);
   if (normalized === null) return false;
-  // Resolve descriptor flags (registry-only, issue #107);
-  // re-validated at resolution time (no try/catch around flagPresent's
-  // `new Set(...)` — a non-iterable registry value would escape as
-  // rule-skip fail-open). Nameless refs skip resolution (silent
-  // strict, same carve-out as `evaluateSubcommand`).
-  const resolvedFlags: readonly string[] =
-    basename !== undefined
-      ? resolveDescriptor(basename, descriptors).valueConsumingFlags
-      : [];
+  // Resolve descriptor arity via the hoisted `arityOf` (registry-only,
+  // issue #110); re-validated at resolution time. Nameless refs →
+  // EMPTY_ARITY (silent strict, same carve-out as `evaluateSubcommand`).
+  const arity: ResolvedArity =
+    arityCache !== undefined
+      ? arityOf(basename, descriptors, arityCache)
+      : basename !== undefined
+        ? resolveDescriptor(basename, descriptors)
+        : EMPTY_ARITY;
   return flagPresent(
     args,
     normalized.anyOf,
     normalized.bundleAware,
-    resolvedFlags,
+    arity.valueConsumingFlags,
+    arity.gluedShorts,
   );
 }
 
@@ -1407,6 +1460,7 @@ async function evaluateNotBlock(
   onUnknownDefault: "allow" | "block" = "block",
   ignoreExplicitModifiers = false,
   descriptors?: Record<string, CLIDescriptor>,
+  arityCache?: Map<string, ResolvedArity>,
 ): Promise<boolean> {
   // Read block-level `onUnknown:` modifier. Default fail-CLOSED
   // (or the exemption-evaluation override via `onUnknownDefault`).
@@ -1448,6 +1502,7 @@ async function evaluateNotBlock(
           ruleName,
           source,
           descriptors,
+          arityCache,
         ),
       );
       continue;
@@ -1456,7 +1511,13 @@ async function evaluateNotBlock(
     // Built-in: flag — trinary only on missing `args` (non-bash).
     if (key === "flag") {
       verdicts.push(
-        evaluateFlag(value, ctx.input.args, ctx.input.basename, descriptors),
+        evaluateFlag(
+          value,
+          ctx.input.args,
+          ctx.input.basename,
+          descriptors,
+          arityCache,
+        ),
       );
       continue;
     }
@@ -1601,6 +1662,7 @@ export async function evaluateWhen(
   onUnknownDefault: "allow" | "block" = "block",
   ignoreExplicitModifiers = false,
   descriptors?: Record<string, CLIDescriptor>,
+  arityCache?: Map<string, ResolvedArity>,
 ): Promise<boolean> {
   if (!when) return true;
 
@@ -1638,6 +1700,7 @@ export async function evaluateWhen(
         ruleName,
         source,
         descriptors,
+        arityCache,
       );
       const onUnknown = readLeafOnUnknown(
         value,
@@ -1656,6 +1719,7 @@ export async function evaluateWhen(
         ctx.input.args,
         ctx.input.basename,
         descriptors,
+        arityCache,
       );
       const onUnknown = readLeafOnUnknown(
         value,
@@ -1686,6 +1750,7 @@ export async function evaluateWhen(
         onUnknownDefault,
         ignoreExplicitModifiers,
         descriptors,
+        arityCache,
       );
       if (!notFires) return false;
       continue;

@@ -33,6 +33,7 @@
  */
 
 import type { Plugin, Rule } from "../../schema.ts";
+import { RM_CLI_DESCRIPTOR } from "./descriptors.ts";
 import { noRmRfSlash } from "./rules/no-rm-rf-slash.ts";
 
 /**
@@ -53,6 +54,7 @@ export const rules = [noRmRfSlash] as const satisfies readonly Rule[];
 const rmPlugin = {
   name: "rm",
   rules,
+  cliDescriptors: { rm: RM_CLI_DESCRIPTOR },
 } as const satisfies Plugin;
 
 /**

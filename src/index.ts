@@ -131,8 +131,8 @@ export default function register(
 // break.
 // Walker option types for the subcommand surface (issues #90/#91):
 // `getSubcommandWords` is the CommandRef-based extraction entry point;
-// plugin authors declaring per-binary `valueConsumingFlags` do so via the
-// `Plugin.cliDescriptors` slot (registry-only since #107 — no leaf-inline
+// plugin authors declaring per-binary flag tables do so via the
+// `Plugin.cliDescriptors` slot (table channel since #110 — no leaf-inline
 // channel). The bare-words `locateSubcommandRun` (+
 // `SubcommandRun`) is re-exported here so custom predicates can run
 // the engine's own extraction over projected `PredicateWord[]`
@@ -180,7 +180,7 @@ export {
 // Core CLI-descriptor fallback map (issue #106): currently empty —
 // core seeds nothing. Per-binary facts live in their owning plugins
 // (the git const re-exports from `pi-steering/plugins/git`).
-export { CORE_CLI_DESCRIPTORS } from "./cli-descriptors.ts";
+export { CORE_CLI_DESCRIPTORS } from "./arity.ts";
 // JSON compat — convert v1 JSON configs to v2 TS configs.
 export { FromJSONError, fromJSON } from "./compat.ts";
 export type { DefineConfigInput } from "./define-config.ts";
@@ -203,15 +203,11 @@ export {
 } from "./helpers/block-reason-preamble.ts";
 export type { SteeringCommand } from "./helpers/command.ts";
 export { commandFromInput } from "./helpers/command.ts";
-export type { FlagLookupOptions } from "./helpers/flags.ts";
-// Command facade: context-provided flag-value view (issue #101).
-// Supersedes the P3 (#99) bare-helper root surface — the four bare
-// helpers (`hasFlag` / `getFlagValue` / `hasEnvAssignment` / `isInfoOnly`)
-// are deleted from the root one CalVer after introduction (all pins
-// owner-controlled; pre-1.0 breaking policy, no shim). Rule code reads
-// flags through `ctx.command` (engine-built per ref); out-of-handler /
-// test use goes through the `commandFromInput` factory. `INFO_FLAGS`
-// (data constant) + `FlagLookupOptions` (facade parameter type) stay.
+// Command facade: context-provided flag-value view (issue #101; #110
+// entry-only). Rule code reads flags through `ctx.command` (engine-built
+// per ref); out-of-handler / test use goes through the `commandFromInput`
+// factory. `INFO_FLAGS` (data constant) stays; `FlagLookupOptions` is
+// deleted (entry-only queries — a flag worth gating is worth a table row).
 export { INFO_FLAGS } from "./helpers/flags.ts";
 // Reason-text helper for custom predicates that read runtime
 // `ctx.cwd` (shell-exec or filesystem queries) rather than
@@ -234,6 +230,7 @@ export type {
   BuiltInWhenLeavesInner,
   BuiltInWhenLeavesOuter,
   CLIDescriptor,
+  CLIFlag,
   DefaultSpreadBase,
   EditRule,
   ExecOpts,

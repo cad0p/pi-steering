@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Word } from "@cad0p/unbash-walker";
-import type { PredicateToolInput } from "../schema.ts";
+import { resolveDescriptor } from "../arity.ts";
+import type { CLIFlag, PredicateToolInput } from "../schema.ts";
 import { commandFromInput, type SteeringCommand } from "./command.ts";
 import {
   getFlagValue,
@@ -25,17 +26,29 @@ function PW(value: string, text?: string) {
   return { ...w, rawText: text ?? value };
 }
 
-/** Build a bash-input facade over shorthand string args. */
+/** Entry helpers. */
+function C(...aliases: string[]): CLIFlag {
+  return { aliases, takesValue: true };
+}
+function B(...aliases: string[]): CLIFlag {
+  return { aliases, takesValue: false };
+}
+
+/** Build a bash-input facade bound via a synthetic table. */
 function bashCmd(
   args: ReturnType<typeof PW>[],
   envAssignments?: Word[],
-  resolvedFlags?: readonly string[],
+  table?: Record<string, CLIFlag>,
+  basename = "mycli",
 ): SteeringCommand {
+  const arity = resolveDescriptor(basename, {
+    [basename]: table === undefined ? {} : { flags: table },
+  });
   return commandFromInput(
     envAssignments === undefined
       ? { tool: "bash", args }
       : { tool: "bash", args, envAssignments },
-    resolvedFlags,
+    arity,
   );
 }
 
@@ -45,76 +58,79 @@ function S(...values: string[]): ReturnType<typeof PW>[] {
 
 describe("SteeringCommand.getAllFlagValues", () => {
   it("collects repeated flags in argv order across mixed aliases", () => {
-    const cmd = bashCmd(S("-m", "a", "--message", "b"), undefined, [
-      "-m",
-      "--message",
-    ]);
-    assert.deepEqual(cmd.getAllFlagValues(["-m", "--message"]), ["a", "b"]);
+    const cmd = bashCmd(S("-m", "a", "--message", "b"), undefined, {
+      m: C("-m", "--message"),
+    });
+    assert.deepEqual(cmd.getAllFlagValues(C("-m", "--message")), ["a", "b"]);
   });
 
   it('reads the attached form, including attached-empty as explicit ""', () => {
     const cmd = bashCmd(S("--subject=docs", "--subject="));
-    assert.deepEqual(cmd.getAllFlagValues("--subject"), ["docs", ""]);
+    assert.deepEqual(cmd.getAllFlagValues(B("--subject")), ["docs", ""]);
   });
 
   it("skips separated-empty (no push), unlike attached-empty", () => {
-    // Scalar returns null on `--flag ""`; the array twin SKIPS.
     const cmd = bashCmd(
       [PW("--subject"), PW("", '""'), PW("--subject"), PW("x")],
       undefined,
-      ["--subject"],
+      { subject: C("--subject") },
     );
-    assert.deepEqual(cmd.getAllFlagValues("--subject"), ["x"]);
+    assert.deepEqual(cmd.getAllFlagValues(C("--subject")), ["x"]);
   });
 
-  it("bound path never decomposes glued shorts (no per-call opts)", () => {
-    const cmd = bashCmd(S("-Rc/d"), undefined, ["-R"]);
-    // Blind default: the glued word matches nothing, contributes nothing.
-    assert.deepEqual(cmd.getAllFlagValues("-R"), []);
-    assert.equal(cmd.getFlagValue("-R"), null);
-    assert.equal(cmd.hasFlag("-R"), false);
+  it("bound glued pin FLIPS from #107: gh -Rfoo presence TRUE via derived glue", () => {
+    const cmd = bashCmd(S("-Rc/d"), undefined, {
+      repo: C("-R", "--repo"),
+    });
+    assert.deepEqual(cmd.getAllFlagValues(C("-R")), ["c/d"]);
+    assert.equal(cmd.getFlagValue(C("-R")), "c/d");
+    assert.equal(cmd.hasFlag(C("-R")), true);
   });
 
   it("does not decompose an undeclared bundle lead", () => {
     const cmd = bashCmd(S("-vf", "alpine"));
-    assert.deepEqual(cmd.getAllFlagValues("-f"), []);
+    assert.deepEqual(cmd.getAllFlagValues(B("-f")), []);
   });
 
   it("trailing valueless occurrence contributes nothing (scalar poisoned to null)", () => {
-    const cmd = bashCmd(S("-m", "a", "-m"), undefined, ["-m"]);
-    assert.deepEqual(cmd.getAllFlagValues("-m"), ["a"]);
-    assert.equal(cmd.getFlagValue("-m"), null);
+    const cmd = bashCmd(S("-m", "a", "-m"), undefined, {
+      m: C("-m"),
+    });
+    assert.deepEqual(cmd.getAllFlagValues(C("-m")), ["a"]);
+    assert.equal(cmd.getFlagValue(C("-m")), null);
   });
 
   it("trailing empty-next-token contributes nothing (scalar poisoned to null)", () => {
     const cmd = bashCmd(
       [PW("-m"), PW("a"), PW("-m"), PW("", '""')],
       undefined,
-      ["-m"],
+      {
+        m: C("-m"),
+      },
     );
-    assert.deepEqual(cmd.getAllFlagValues("-m"), ["a"]);
-    assert.equal(cmd.getFlagValue("-m"), null);
+    assert.deepEqual(cmd.getAllFlagValues(C("-m")), ["a"]);
+    assert.equal(cmd.getFlagValue(C("-m")), null);
   });
 
   it("trailing valueless after attached-empty preserves the explicit empty", () => {
     const cmd = bashCmd(S("--m=", "--m"));
-    assert.deepEqual(cmd.getAllFlagValues("--m"), [""]);
-    assert.equal(cmd.getFlagValue("--m"), null);
+    assert.deepEqual(cmd.getAllFlagValues(B("--m")), [""]);
+    assert.equal(cmd.getFlagValue(B("--m")), null);
   });
 
   it("is quote-aware via .value-first reads", () => {
     const cmd = bashCmd(
       [PW("-m"), PW("conventional: subject", "'conventional: subject'")],
       undefined,
-      ["-m"],
+      { m: C("-m") },
     );
-    assert.deepEqual(cmd.getAllFlagValues("-m"), ["conventional: subject"]);
+    assert.deepEqual(cmd.getAllFlagValues(C("-m")), ["conventional: subject"]);
   });
 
   it("returns [] on no match and on undefined args", () => {
-    assert.deepEqual(bashCmd(S("status")).getAllFlagValues("-m"), []);
+    assert.deepEqual(bashCmd(S("status")).getAllFlagValues(B("-m")), []);
     assert.deepEqual(
-      commandFromInput({ tool: "bash" }).getAllFlagValues("-m"),
+      commandFromInput({ tool: "bash" }).getAllFlagValues(B("-m")),
       [],
     );
   });
@@ -122,44 +138,66 @@ describe("SteeringCommand.getAllFlagValues", () => {
   it("last-element invariant holds for well-formed non-trailing-broken inputs", () => {
     const cases: {
       args: ReturnType<typeof PW>[];
-      flags: string[];
+      table: Record<string, CLIFlag>;
+      query: CLIFlag;
     }[] = [
-      { args: S("-m", "a", "-m", "b"), flags: ["-m"] },
+      { args: S("-m", "a", "-m", "b"), table: { m: C("-m") }, query: C("-m") },
       {
         args: S("-m", "a", "--message", "b"),
-        flags: ["-m", "--message"],
+        table: { m: C("-m", "--message") },
+        query: C("-m", "--message"),
       },
-      { args: S("--subject=x"), flags: ["--subject"] },
-      { args: S("--subject=", "--subject=y"), flags: ["--subject"] },
-      { args: S("status"), flags: ["-m"] },
+      {
+        args: S("--subject=x"),
+        table: { s: B("--subject") },
+        query: B("--subject"),
+      },
+      {
+        args: S("--subject=", "--subject=y"),
+        table: { s: B("--subject") },
+        query: B("--subject"),
+      },
+      { args: S("status"), table: { m: C("-m") }, query: C("-m") },
     ];
-    for (const { args, flags } of cases) {
-      const cmd = bashCmd(args, undefined, flags);
-      const all = cmd.getAllFlagValues(flags);
+    for (const { args, table, query } of cases) {
+      const cmd = bashCmd(args, undefined, table);
+      const all = cmd.getAllFlagValues(query);
       assert.equal(
-        cmd.getFlagValue(flags),
+        cmd.getFlagValue(query),
         all.length > 0 ? all[all.length - 1] : null,
       );
     }
-    // Bound path has no glue: glued words stay opaque on both sides.
-    const glued = bashCmd(S("-Rc/d", "-Re/f"), undefined, ["-R"]);
-    assert.deepEqual(glued.getAllFlagValues("-R"), []);
-    assert.equal(glued.getFlagValue("-R"), null);
+    // Bound glued words resolve on both sides now.
+    const glued = bashCmd(S("-Rc/d", "-Re/f"), undefined, {
+      repo: C("-R", "--repo"),
+    });
+    assert.deepEqual(glued.getAllFlagValues(C("-R")), ["c/d", "e/f"]);
+    assert.equal(glued.getFlagValue(C("-R")), "e/f");
+  });
+
+  it("commandFromInput(input) omitted-arity ⇒ explicit-strict pin", () => {
+    const cmd = commandFromInput({
+      tool: "bash",
+      args: S("-R", "c/d"),
+    });
+    assert.equal(cmd.getFlagValue(C("-R", "--repo")), null);
+    assert.deepEqual(cmd.getAllFlagValues(C("-R")), []);
+    assert.equal(cmd.hasFlag(B("-R")), true);
   });
 });
 
-describe("SteeringCommand bound methods take NO opts (issue #107)", () => {
-  it("excess-arg calls fail tsc (@ts-expect-error pins)", () => {
-    const cmd = bashCmd(S("-R", "c/d"), undefined, ["-R"]);
-    // @ts-expect-error — bound facade accepts no options bag (registry-only arity)
-    void cmd.hasFlag("-R", { gluedShorts: ["R"] });
-    // @ts-expect-error — bound facade accepts no options bag (registry-only arity)
+describe("SteeringCommand bound methods take entries only", () => {
+  it("string + opts calls fail tsc (@ts-expect-error pins)", () => {
+    const cmd = bashCmd(S("-R", "c/d"), undefined, { repo: C("-R") });
+    // @ts-expect-error — bound facade takes entries only, never bare strings
+    void cmd.hasFlag("-R");
+    // @ts-expect-error — bound facade takes entries only, never opts
     void cmd.getFlagValue("-R", { valueConsumingFlags: ["-R"] });
-    // @ts-expect-error — bound facade accepts no options bag (registry-only arity)
+    // @ts-expect-error — bound facade takes entries only, never opts
     void cmd.getAllFlagValues("-R", { valueConsumingFlags: ["-R"] });
   });
 
-  it("binds the descriptor-resolved list; undeclared flags are valueless", () => {
+  it("binds the descriptor-resolved table; unlisted flags are valueless", () => {
     const cmd = commandFromInput(
       {
         tool: "bash",
@@ -167,12 +205,28 @@ describe("SteeringCommand bound methods take NO opts (issue #107)", () => {
         basename: "git",
         args: [PW("push"), PW("--delete"), PW("origin")],
       } as PredicateToolInput,
-      ["-C", "-c"],
+      resolveDescriptor("git", {
+        git: { flags: { c: C("-C"), cfg: C("-c") } },
+      }),
     );
-    assert.equal(cmd.hasFlag("--delete"), true);
-    assert.equal(cmd.getFlagValue("--delete"), null);
-    assert.deepEqual(cmd.getAllFlagValues("--delete"), []);
+    assert.equal(cmd.hasFlag(B("--delete")), true);
+    assert.equal(cmd.getFlagValue(B("--delete")), null);
+    assert.deepEqual(cmd.getAllFlagValues(B("--delete")), []);
     assert.deepEqual(cmd.positionals(), ["push", "--delete", "origin"]);
+  });
+
+  it("bound-adapter invariant: entries select spellings only", () => {
+    // Hand-literal takesValue:true for an UNLISTED spelling consumes
+    // nothing on the bound path (scalar null + token kept positional).
+    const cmd = bashCmd(S("--evil", "val", "pos"), undefined, {});
+    assert.equal(cmd.getFlagValue(C("--evil")), null);
+    assert.deepEqual(cmd.getAllFlagValues(C("--evil")), []);
+    assert.deepEqual(cmd.positionals(), ["--evil", "val", "pos"]);
+    // Passed-entry takesValue:false for a LISTED consumer still consumes.
+    const listed = bashCmd(S("--body", "TEXT"), undefined, {
+      body: C("--body"),
+    });
+    assert.equal(listed.getFlagValue(B("--body")), "TEXT");
   });
 });
 
@@ -184,12 +238,11 @@ describe("SteeringCommand.positionals (issue #107)", () => {
 
   it("skips declared-consuming flags + values via the bound descriptor", () => {
     const gh = (args: ReturnType<typeof PW>[]) =>
-      commandFromInput({ tool: "bash", args }, ["--body"]);
+      bashCmd(args, undefined, { body: C("--body") });
     assert.deepEqual(gh(S("pr", "merge", "--body", "TEXT")).positionals(), [
       "pr",
       "merge",
     ]);
-    // Undeclared `--frobnicate` consumes nothing: TEXT stays positional.
     assert.deepEqual(
       gh(S("pr", "merge", "--frobnicate", "TEXT")).positionals(),
       ["pr", "merge", "--frobnicate", "TEXT"],
@@ -197,12 +250,9 @@ describe("SteeringCommand.positionals (issue #107)", () => {
   });
 
   it("push --delete origin keeps both (registry-only pin)", () => {
-    // §6 rule 4 vs §7 pin: clean `--long` / `-x` flag-words that are
-    // not declared-consuming surface as themselves; only consuming
-    // values, attached forms, and opaque bundles skip.
     const cmd = bashCmd(S("push", "--delete", "origin"));
-    assert.equal(cmd.getFlagValue("--delete"), null);
-    assert.deepEqual(cmd.getAllFlagValues("--delete"), []);
+    assert.equal(cmd.getFlagValue(B("--delete")), null);
+    assert.deepEqual(cmd.getAllFlagValues(B("--delete")), []);
     assert.deepEqual(cmd.positionals(), ["push", "--delete", "origin"]);
   });
 
@@ -216,8 +266,6 @@ describe("SteeringCommand.positionals (issue #107)", () => {
       "<pod>",
       "<cmd>",
     ]);
-    // Post-`--` `--force` surfaces here (documented divergence:
-    // `when.flag` still scans it as present).
     assert.deepEqual(bashCmd(S("push", "--", "--force")).positionals(), [
       "push",
       "--force",
@@ -227,9 +275,9 @@ describe("SteeringCommand.positionals (issue #107)", () => {
   it("attached forms never surface", () => {
     assert.deepEqual(bashCmd(S("--subject=x")).positionals(), []);
     assert.deepEqual(
-      bashCmd(S("pr", "merge", "--subject=x"), undefined, [
-        "--subject",
-      ]).positionals(),
+      bashCmd(S("pr", "merge", "--subject=x"), undefined, {
+        subject: C("--subject"),
+      }).positionals(),
       ["pr", "merge"],
     );
   });
@@ -241,16 +289,16 @@ describe("SteeringCommand.positionals (issue #107)", () => {
   });
 
   it("is quote-aware via .value-first reads", () => {
-    // A quoted value token classifies by its resolved value.
     assert.deepEqual(
       bashCmd([PW("see --help", '"see --help"')]).positionals(),
       ["see --help"],
     );
-    // Quoted flag spelling still exact-matches for consumption.
     const declared = bashCmd(
       [PW("--body", '"--body"'), PW("TEXT")],
       undefined,
-      ["--body"],
+      {
+        body: C("--body"),
+      },
     );
     assert.deepEqual(declared.positionals(), []);
   });
@@ -276,7 +324,7 @@ describe("SteeringCommand.positionals (issue #107)", () => {
 
   it("trailing declared-consuming is skipped", () => {
     assert.deepEqual(
-      bashCmd(S("--body"), undefined, ["--body"]).positionals(),
+      bashCmd(S("--body"), undefined, { body: C("--body") }).positionals(),
       [],
     );
   });
@@ -297,13 +345,11 @@ describe("SteeringCommand delegation", () => {
   it("hasFlag / getFlagValue / hasEnvAssignment / isInfoOnly match the bare mechanism", () => {
     const args = [PW("--profile"), PW("dev"), PW("--profile=prod")];
     const env = [W("AWS_PROFILE=dev")];
-    const cmd = bashCmd(args, env, ["--profile"]);
-    const opts = { valueConsumingFlags: ["--profile"] };
-    assert.equal(cmd.hasFlag("--profile"), hasFlag(args, "--profile"));
-    assert.equal(
-      cmd.getFlagValue("--profile"),
-      getFlagValue(args, "--profile", opts),
-    );
+    const table = { profile: C("--profile") };
+    const cmd = bashCmd(args, env, table);
+    const views = [{ aliases: ["--profile"], takesValue: true }];
+    assert.equal(cmd.hasFlag(B("--profile")), hasFlag(args, views));
+    assert.equal(cmd.getFlagValue(C("--profile")), getFlagValue(args, views));
     assert.equal(
       cmd.hasEnvAssignment("AWS_PROFILE"),
       hasEnvAssignment(env, "AWS_PROFILE"),
@@ -326,9 +372,9 @@ describe("SteeringCommand delegation", () => {
 
   it("write-tool input normalizes to the empty facade", () => {
     const cmd = commandFromInput({ tool: "write", path: "x", content: "y" });
-    assert.equal(cmd.hasFlag("--help"), false);
-    assert.equal(cmd.getFlagValue("--help"), null);
-    assert.deepEqual(cmd.getAllFlagValues("--help"), []);
+    assert.equal(cmd.hasFlag(B("--help")), false);
+    assert.equal(cmd.getFlagValue(B("--help")), null);
+    assert.deepEqual(cmd.getAllFlagValues(B("--help")), []);
     assert.deepEqual(cmd.positionals(), []);
     assert.equal(cmd.hasEnvAssignment("A"), false);
     assert.equal(cmd.isInfoOnly(), false);
@@ -339,9 +385,9 @@ describe("commandFromInput totality + COPY", () => {
   it("is total over undefined / null input (no throw, empty facade)", () => {
     for (const bad of [undefined, null] as unknown as PredicateToolInput[]) {
       const cmd = commandFromInput(bad);
-      assert.equal(cmd.hasFlag("-m"), false);
-      assert.equal(cmd.getFlagValue("-m"), null);
-      assert.deepEqual(cmd.getAllFlagValues("-m"), []);
+      assert.equal(cmd.hasFlag(B("-m")), false);
+      assert.equal(cmd.getFlagValue(B("-m")), null);
+      assert.deepEqual(cmd.getAllFlagValues(B("-m")), []);
       assert.deepEqual(cmd.positionals(), []);
       assert.equal(cmd.hasEnvAssignment("A"), false);
       assert.equal(cmd.isInfoOnly(), false);
@@ -351,13 +397,14 @@ describe("commandFromInput totality + COPY", () => {
   it("snapshots (COPYs) the caller's arrays — later mutation cannot leak", () => {
     const args = [PW("-m"), PW("a")];
     const env = [W("A=1")];
-    const cmd = commandFromInput({ tool: "bash", args, envAssignments: env }, [
-      "-m",
-    ]);
+    const cmd = commandFromInput(
+      { tool: "bash", args, envAssignments: env },
+      resolveDescriptor("mycli", { mycli: { flags: { m: C("-m") } } }),
+    );
     args.push(PW("-m"), PW("b"));
     env.push(W("B=2"));
-    assert.deepEqual(cmd.getAllFlagValues("-m"), ["a"]);
-    assert.equal(cmd.getFlagValue("-m"), "a");
+    assert.deepEqual(cmd.getAllFlagValues(C("-m")), ["a"]);
+    assert.equal(cmd.getFlagValue(C("-m")), "a");
     assert.equal(cmd.hasEnvAssignment("B"), false);
     assert.equal(cmd.hasEnvAssignment("A"), true);
   });

@@ -61,10 +61,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import {
+  arityOf,
   MissingDescriptorError,
   missingDescriptorRemedy,
-  resolveDescriptor,
-} from "./cli-descriptors.ts";
+} from "./arity.ts";
 import {
   createAppendEntry,
   createExecCache,
@@ -657,6 +657,13 @@ interface SharedEvalContext {
    * `evaluateWhen` for both ARGV leaves.
    */
   readonly descriptors: Record<string, import("./schema.ts").CLIDescriptor>;
+  /**
+   * Per-tool_call arity cache (issue #110). Created ONCE per tool_call in
+   * `evaluateEventInner`, dies with the call; O(distinct basenames).
+   * `runPredicateChain` (per rule×candidate) and `evaluateBashRule`'s
+   * per-ref loop only THREAD it, never create.
+   */
+  readonly arityCache: Map<string, import("./arity.ts").ResolvedArity>;
 }
 
 /**
@@ -750,19 +757,20 @@ async function runPredicateChain(
     // Pattern-miss is the common case; exit before allocating ctx.
     if (!matchesPattern(rule.pattern, cand.target)) return null;
 
-    // Per-ref facade binding (registry-only, issue #107): resolve the
-    // descriptor for this ref's basename once, bind its flags into
-    // the facade view (same list the ARGV leaves resolve).
-    const resolvedFlags =
-      cand.input.basename !== undefined
-        ? resolveDescriptor(cand.input.basename, shared.descriptors)
-            .valueConsumingFlags
-        : undefined;
+    // Per-ref facade binding via the hoisted `arityOf` (issue #110): resolve
+    // the descriptor for this ref's basename once per tool_call (cached),
+    // bind its arity into the facade view (same arity the ARGV leaves
+    // resolve). Nameless refs → EMPTY_ARITY via arityOf, never throw.
+    const arity = arityOf(
+      cand.input.basename,
+      shared.descriptors,
+      shared.arityCache,
+    );
     const ctx: PredicateContext = {
       cwd: cand.cwd,
       tool: cand.tool,
       input: cand.input,
-      command: commandFromInput(cand.input, resolvedFlags),
+      command: commandFromInput(cand.input, arity),
       agentLoopIndex: shared.agentLoopIndex,
       exec: shared.exec,
       appendEntry: shared.appendEntry,
@@ -790,6 +798,7 @@ async function runPredicateChain(
       "block",
       false,
       shared.descriptors,
+      shared.arityCache,
     );
     if (!whenOk) return null;
 
@@ -977,6 +986,7 @@ export async function evaluateExemptionClause(
       "allow",
       true, // ignoreExplicitModifiers — strict fail-closed (S1)
       shared.descriptors,
+      shared.arityCache,
     );
   } catch (err) {
     console.warn(
@@ -1090,6 +1100,10 @@ async function evaluateEventInner(
     ruleSources,
     exemptions,
     descriptors,
+    // Per-tool_call arity hoist (issue #110): created ONCE here, dies with
+    // the call; O(distinct basenames). runPredicateChain / evaluateBashRule
+    // only thread it, never create.
+    arityCache: new Map(),
   };
 
   // Bash state is lazy: non-bash rules don't pay for parse / walk.

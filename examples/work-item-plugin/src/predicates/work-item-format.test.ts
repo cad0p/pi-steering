@@ -43,6 +43,9 @@ describe("workItemFormat", () => {
           basename: "git",
           args: [W("commit"), W("-m"), W("feat: [PROJ-42] subject")],
         },
+        // Explicit-strict git facts (#110 binding symmetry:
+        // mocks throw like prod on omitted descriptors + named basename).
+        descriptors: { git: {} },
       },
     );
     assert.equal(fires, true);
@@ -59,6 +62,9 @@ describe("workItemFormat", () => {
           basename: "git",
           args: [W("commit"), W("-m"), W("feat: subject only")],
         },
+        // Explicit-strict git facts (#110 binding symmetry:
+        // mocks throw like prod on omitted descriptors + named basename).
+        descriptors: { git: {} },
       },
     );
     assert.equal(fires, false);
@@ -75,6 +81,9 @@ describe("workItemFormat", () => {
           basename: "git",
           args: [W("commit"), W("--message"), W("[PROJ-1] fix")],
         },
+        // Explicit-strict git facts (#110 binding symmetry:
+        // mocks throw like prod on omitted descriptors + named basename).
+        descriptors: { git: {} },
       },
     );
     assert.equal(fires, true);
@@ -99,6 +108,9 @@ describe("workItemFormat", () => {
             W("longer subject with spaces and [PROJ-7] mid-sentence"),
           ],
         },
+        // Explicit-strict git facts (#110 binding symmetry:
+        // mocks throw like prod on omitted descriptors + named basename).
+        descriptors: { git: {} },
       },
     );
     assert.equal(fires, true);
@@ -118,6 +130,9 @@ describe("workItemFormat", () => {
           basename: "git",
           args: [W("commit")],
         },
+        // Explicit-strict git facts (#110 binding symmetry:
+        // mocks throw like prod on omitted descriptors + named basename).
+        descriptors: { git: {} },
       },
     );
     // No `-m`, and `"git commit"` has no PROJ token — does not fire.
@@ -153,6 +168,9 @@ describe("workItemFormat", () => {
           command: 'git commit -m "[PROJ-1] x"',
           args: [W("commit"), W("-m"), W("[PROJ-1] x")],
         },
+        // Explicit-strict git facts (#110 binding symmetry:
+        // mocks throw like prod on omitted descriptors + named basename).
+        descriptors: { git: {} },
       },
     );
     assert.equal(fires, false);

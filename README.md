@@ -344,7 +344,7 @@ Built-ins:
 - **`missing`** — fires while an entry of `event` is missing in `in` scope. `"agent_loop"` filters by `_agentLoopIndex === ctx.agentLoopIndex` (one user prompt + its tool calls); `"session"` scans the whole session JSONL; `"tool_call"` considers only speculative entries synthesized for THIS tool_call's `&&`-chain. Optional `since` acts as an invalidation sentinel — see "Temporal ordering with `missing.since`" below. Optional `notIn` subtracts a narrower scope from `in` (e.g. `{ in: "agent_loop", notIn: "tool_call" }` means "recorded in a prior tool_call in this loop", blocking the same-tool_call speculative bypass). `notIn` is set subtraction, distinct from the clause-level `not` (boolean negation). Synthesizes speculative entries across `&&` bash chains — see "`&&`-chain speculative allow" below.
 - **`not`** — boolean NOT over an inner predicate block. One level only (no `not: not: ...` recursion). Inside `not:`, leaf-level `onUnknown:` is forbidden; the block-level `onUnknown:` modifier projects walker-unknown verdicts (default `"block"` = fail-CLOSED, rule fires).
 - **`subcommand`** — rule fires only when the command's extracted subcommand matches. Bare `string` = EXACT equality (`"push"` ≠ `"pushback"`, deliberately not `cwd:`'s regex-source semantics); `RegExp` = test; bare array = OR at depth 1; spread `{ pattern, depth?, onUnknown? }` covers multi-word runs (`{ pattern: ["s3", "ls"], depth: 2 }` — array length must equal `depth`). Consuming-flag arity resolves ONLY via the CLI-descriptor registry by basename (`Plugin.cliDescriptors` — e.g. bare `subcommand: "push"` already extracts `push` from `git -C /x push` via the git plugin's declared descriptor, so the plugin must be declared for the match). No descriptor for the ref's basename → the engine throws `MissingDescriptorError` and blocks with an actionable reason (declare the descriptor, or `{ "<basename>": {} }` for explicit strict) — absent descriptors are loud, never silent. `null` extraction (all-flags, trailing consuming flag, after-only shapes like `go -v build`, non-bash tools) → `"unknown"` → `onUnknown:` (default `"block"`, fail-closed).
-- **`flag`** — rule fires when any listed spelling is present: `{ anyOf: ["--force"], bundleAware?, onUnknown? }`. Longs match the exact token or `--flag=value`; single-char shorts match exactly, or inside bundles (`-uf`) with `bundleAware: true` (longs never bundle-match). Consuming-flag values are skipped by position, never by content (registry-declared consuming flags; absent basename → `MissingDescriptorError` block, same loudness as `subcommand`). Non-bash tools → `"unknown"` → default `"block"`; otherwise presence is definite.
+- **`flag`** — rule fires when any listed entry is present: `{ anyOf: [gitFlags.noPager], bundleAware?, onUnknown? }` (`gitFlags` = `GIT_CLI_DESCRIPTOR.flags` from `@cad0p/pi-steering/plugins/git` — entries, OR over entries, each entry ORs aliases; a flag worth gating is worth a table row, so import the owning plugin's table, never hand-build literals in rules). Longs match the exact token or `--flag=value`; single-char shorts match exactly, inside bundles (`-uf`) with `bundleAware: true` (longs never bundle-match), or glued (`-Rfoo` iff the entry takes a value and the table derives glue). Consuming-flag values are skipped by position, never by content (table-derived arity; absent basename → `MissingDescriptorError` block, same loudness as `subcommand`). Non-bash tools → `"unknown"` → default `"block"`; otherwise presence is definite.
 - **`condition`** — escape hatch for one-off logic. Prefer plugin predicates when the logic is reusable. Throws (sync or rejected promise) are caught and treated as `"unknown"` → default `"block"` policy fires the rule fail-CLOSED. Authors needing fail-OPEN wrap inside `not: { condition: fn, onUnknown: "allow" }` OR catch the throw inside the callback body.
 
 Plugin-registered predicate leaves come from the `PiSteeringPredicates` registry, populated by each plugin's `declare global` block:
@@ -664,8 +664,11 @@ Production plugins in this repo:
 
 ```ts
 // In a predicate / condition / reason fn with ctx:
-ctx.command.hasFlag("--profile");
-ctx.command.getAllFlagValues(["-m", "--message"]); // ["a", "b"], argv order
+import { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
+
+const { flags: git } = GIT_CLI_DESCRIPTOR;
+ctx.command.hasFlag(git.noPager);
+ctx.command.getAllFlagValues(git.config); // ["a=b", "c=d"], argv order
 ctx.command.positionals(); // ["push", "origin", ":branch"], subcommand INCLUDED
 ```
 
@@ -675,7 +678,7 @@ Out-of-handler / test use goes through the factory (imported from the package ro
 import { commandFromInput } from "@cad0p/pi-steering";
 ```
 
-Bound arity is registry-only with no per-call opts (#107): the engine binds each ref's `resolveDescriptor(basename).valueConsumingFlags` into `ctx.command`, so `getFlagValue` / `getAllFlagValues` / `positionals()` share one consumption source and cannot diverge. Undeclared flags never consume (strict always); attached `--flag=value` forms always apply. `positionals()` is `--`-aware (everything after a bare `--` surfaces verbatim) while `when.flag` still scans post-`--` tokens as present (walker limitation, unchanged). No descriptor for the ref's basename → `MissingDescriptorError` block (loud); obscure binaries with no owning plugin declare via an inline plugin literal `plugins: [{ name: "my-facts", cliDescriptors: { mycli: { valueConsumingFlags: [...] } } }]` — or `{ mycli: {} }` for explicit strict.
+Bound arity is table-bound with no per-call opts (#110): the engine binds each ref's `arityOf(basename, descriptors, cache)` into `ctx.command`, so `getFlagValue` / `getAllFlagValues` / `positionals()` share one consumption source and cannot diverge. Unlisted flags never consume (strict always); attached `--flag=value` forms always apply; glued `-X<rest>` applies iff X derives from the table. `positionals()` is `--`-aware (everything after a bare `--` surfaces verbatim) while `when.flag` still scans post-`--` tokens as present (walker limitation, unchanged). No descriptor for the ref's basename → `MissingDescriptorError` block (loud); obscure binaries with no owning plugin declare via an inline plugin literal `plugins: [{ name: "my-facts", cliDescriptors: { mycli: { flags: { repo: { aliases: ["-R"], takesValue: true } } } } }]` — or `{ mycli: {} }` for explicit strict.
 
 - [`pi-steering-commit-format`](https://github.com/cad0p/pi-steering-commit-format) — commit-message format predicates. Own repo + package since the monorepo split (2026-08-10). Ships the `commitFormat` predicate plus a `commitFormatFactory` for composing custom format checkers; bundled formats include Conventional Commits 1.0.0 (Angular preset type allowlist) and bracketed JIRA-style references.
 
@@ -700,7 +703,7 @@ Publishing conventions:
 
 - **Package name**: `pi-steering-<domain>` (unscoped). Mirrors `@cad0p/pi-steering` core and `pi-steering-flags`. Scoped names (`@org/pi-steering-<x>`) are fine for internal packages.
 - **Peer range**: pin to a major once `@cad0p/pi-steering` is v1+ (`"pi-steering": "^1"`). During the v0.x window, match the release train closely (`"pi-steering": "^0.1.0"`).
-- **Pre-1.0 breaking policy (expires at v1.0)**: during the v0.x window, breaking changes ship without deprecation shims — no compat re-exports, no dual surfaces, no semver base releases (CalVer prereleases only). Every shim is a stability promise that narrows future design, and pre-1.0 pins are owner-controlled or train-pinned. Precedents: #72 (zero default rails, no alias), #76 P3 (no compat re-export), #101 (bare helpers deleted a week after shipping). Treat every minor as potentially breaking. At v1.0 this flips to semver-stable with deprecation periods.
+- **Pre-1.0 breaking policy (expires at v1.0)**: during the v0.x window, breaking changes ship without deprecation shims — no compat re-exports, no dual surfaces, no semver base releases (CalVer prereleases only). Every shim is a stability promise that narrows future design, and pre-1.0 pins are owner-controlled or train-pinned. Precedents: #72 (zero default rails, no alias), #76 P3 (no compat re-export), #101 (bare helpers deleted a week after shipping), #110 (legacy `valueConsumingFlags` guard removed outright rather than diagnosed). No stale-shape detection either: a deleted schema key is ignored, never diagnosed — pin your `@cad0p/pi-steering` dep, read the changelog, and let `tsc` surface staleness (stale string queries / removed imports are compile errors). Treat every minor as potentially breaking. At v1.0 this flips to semver-stable with deprecation periods.
 - **License**: MIT by default, matching the core. Amazon-internal / proprietary plugins use their own license; the core has no opinion on this.
 
 ### Dependency rule
@@ -711,10 +714,14 @@ The same rule applies to flag reads — use the context-provided command view, n
 
 ```ts
 // In a predicate / condition with ctx:
-ctx.command.hasFlag("--profile"); // bound to the already-parsed args
+import { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
+
+ctx.command.hasFlag(GIT_CLI_DESCRIPTOR.flags.noPager); // bound to the already-parsed args
 ```
 
-(`hasFlag` / `getFlagValue` / `getAllFlagValues` / `positionals` / `hasEnvAssignment` / `isInfoOnly` live on `ctx.command` since #101, which replaced the P3 (#99) bare-helper root exports; `INFO_FLAGS` + the `FlagLookupOptions` type stay on the root. Out-of-handler use goes through the root-exported `commandFromInput` factory + `SteeringCommand` type. The flags plugin keeps only the POLICY predicates `requiresFlag` / `allowlistedFlagsOnly`.)
+Entries always come from the owning plugin's table — never hand-build literals in rules. A typo'd `"--delet"` string was a silent fail-open skip; a typo'd `flags.delet` property is a compile error.
+
+(`hasFlag` / `getFlagValue` / `getAllFlagValues` / `positionals` / `hasEnvAssignment` / `isInfoOnly` live on `ctx.command` since #101, which replaced the P3 (#99) bare-helper root exports; entry-only since #110 (`CLIFlag` on the root, `FlagLookupOptions` deleted). Out-of-handler use goes through the root-exported `commandFromInput` factory + `SteeringCommand` type. The flags plugin keeps only the POLICY predicates `requiresFlag` / `allowlistedFlagsOnly`.)
 
 ### Overriding a built-in rule
 

@@ -49,7 +49,7 @@ import type {
   ToolCallEvent,
   ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
-import { resolveDescriptor } from "../cli-descriptors.ts";
+import { arityOf } from "../arity.ts";
 import {
   buildEvaluator,
   EVALUATOR_BUILTIN_TRACKERS,
@@ -561,11 +561,12 @@ export interface MockContextOptions {
   readonly toolCallEvents?: Readonly<Record<string, readonly SyntheticEntry[]>>;
 
   /**
-   * CLI descriptors for the facade binding symmetry (issue #107).
+   * CLI descriptors for the facade binding symmetry (issue #110).
    * When provided, `command` binds via
-   * `resolveDescriptor(input.basename).valueConsumingFlags` exactly
-   * as the engine does per ref. Omitted → strict default (no
-   * descriptor).
+   * `arityOf(input.basename, descriptors, cache)` exactly as the engine
+   * does per ref. Omitted descriptors + defined basename → THROWS
+   * `MissingDescriptorError` (binding symmetry — mocks don't silently
+   * strict where prod loudly blocks). Nameless → silent strict.
    */
   readonly descriptors?: Readonly<
     Record<string, import("../schema.ts").CLIDescriptor>
@@ -621,21 +622,24 @@ export function mockContext(
   // simulation would disagree with the real engine.
   const bufferingHost = bufferingAppendHost(buffer);
 
-  const mockResolvedFlags =
-    input.basename !== undefined && options.descriptors !== undefined
-      ? resolveDescriptor(
-          input.basename,
-          options.descriptors as Record<
-            string,
-            import("../schema.ts").CLIDescriptor
-          >,
-        ).valueConsumingFlags
-      : undefined;
+  // Binding symmetry (issue #110): mirror the engine — per-call arityCache,
+  // arityOf(input.basename, options.descriptors, cache) → commandFromInput.
+  // Omitted options.descriptors + defined basename → THROW
+  // MissingDescriptorError exactly as the engine does (a mock that silently
+  // stricts where prod loudly blocks is a lie). Nameless → EMPTY_ARITY.
+  const mockArityCache = new Map();
+  const mockArity = arityOf(
+    input.basename,
+    options.descriptors as
+      | Record<string, import("../schema.ts").CLIDescriptor>
+      | undefined,
+    mockArityCache,
+  );
   const ctx: PredicateContext = {
     cwd,
     tool,
     input,
-    command: commandFromInput(input, mockResolvedFlags),
+    command: commandFromInput(input, mockArity),
     agentLoopIndex,
     exec: buildExec(options.exec, "mockContext"),
     appendEntry: createAppendEntry(bufferingHost, agentLoopIndex),

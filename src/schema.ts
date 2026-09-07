@@ -457,16 +457,15 @@ export type SubcommandLeafInner =
  */
 export interface FlagSpreadBase {
   /**
-   * Flag spellings to scan for. Longs (`--force`) match the exact
-   * token or the attached `--force=x` form; single-char shorts
-   * (`-f`) match the exact token, or inside bundles when
-   * `bundleAware` is set. Every member must be a long (`--` +
-   * name) or a single-char short (`-` + letter); anything else
-   * (multi-char shorts like `-ff`, bare `-` / `--`, non-dash
-   * spellings) is invalid → leaf `false` (rule skips, NOT unknown).
-   * Empty `anyOf` is likewise invalid → `false`.
+   * Flag entries to scan for. OR over entries; each entry ORs aliases.
+   * Longs (`--force`) match the exact token or the attached `--force=x`
+   * form; single-char shorts (`-f`) match the exact token, or inside
+   * bundles when `bundleAware` is set. Each entry must be a well-formed
+   * `CLIFlag` (`aliases` non-empty `--long` / `-x` spellings, `takesValue`
+   * boolean); malformed entries fail-skip → leaf `false` (rule skips, NOT
+   * unknown). Empty `anyOf` is likewise invalid → `false`.
    */
-  anyOf: string[];
+  anyOf: readonly CLIFlag[];
   /**
    * Route short bundles through the walker's `bundleContains`
    * (`-uf` matches `-u` / `-f`). Longs never bundle-match.
@@ -474,11 +473,10 @@ export interface FlagSpreadBase {
    */
   bundleAware?: boolean;
   /**
-   * Arity resolves ONLY via the CLI-descriptor registry by basename
-   * (issue #107): flags that consume the following token, skipped BY
-   * POSITION during the presence scan (never by content). No descriptor
-   * → the engine throws `MissingDescriptorError` before evaluation
-   * (loud block); `{<bin>: {}}` present-empty is explicit strict.
+   * Arity resolves via the entries + descriptor table (issue #110):
+   * consumption derives from the entries + registry-by-basename table.
+   * No descriptor → the engine throws `MissingDescriptorError` before
+   * evaluation (loud block); `{<bin>: {}}` present-empty is explicit strict.
    */
 }
 
@@ -500,16 +498,34 @@ export type FlagLeaf = FlagSpreadBase & {
 export type FlagLeafInner = FlagSpreadBase;
 
 /**
- * Per-binary argv knowledge for one command basename (issue #106).
+ * Canonical per-flag fact (issue #110). Key in the table is the canonical
+ * name (e.g. `repo`); matching is ALWAYS over `aliases`, never the key.
+ */
+export interface CLIFlag {
+  /** Spellings, e.g. ["-R", "--repo"]. Non-empty; each "--long" or "-x". */
+  readonly aliases: readonly string[];
+  /**
+   * Separate (-R x, --repo x) + attached (--repo=x) + glued (-Rx, shorts
+   * only) consumption. Longs never glue; attached needs no declaration.
+   */
+  readonly takesValue: boolean;
+}
+
+/**
+ * Per-binary argv knowledge for one command basename (issues #106/#110).
  *
- * A `CLIDescriptor` supplies `positionPolicy` + `valueConsumingFlags`
- * to both ARGV leaves (`when.subcommand` / `when.flag`) and to the
- * bound `SteeringCommand` facade — the ONLY arity channel (issue
- * #107, registry-only: no inline declaration). Resolution: registry entry
- * (present-empty `{<bin>: {}}` = explicit strict: flags `[]`, policy table
- * fallback) else throw `MissingDescriptorError` (loud block on the rule
- * path, non-match on the exemption path). Registry `positionPolicy` always
- * overrides the table fallback.
+ * A `CLIDescriptor` supplies `positionPolicy` + flag arity to both ARGV
+ * leaves (`when.subcommand` / `when.flag`) and to the bound
+ * `SteeringCommand` facade — the ONLY arity channel (issue #107,
+ * registry-only: no inline declaration). Resolution: registry entry
+ * (present-empty `{<bin>: {}}` = explicit strict: nothing consumes, policy
+ * table fallback) else throw `MissingDescriptorError` (loud block on the
+ * rule path, non-match on the exemption path). Registry `positionPolicy`
+ * always overrides the table fallback.
+ *
+ * Flag arity lives in the `flags` table (issue #110):
+ * `flags?: Record<canonical-name, CLIFlag>`. Glue DERIVES (`takesValue` +
+ * single-char-short alias ⇒ glues; longs never glue).
  *
  * Keyed by command basename (`"git"`, `"gh"`) in
  * {@link Plugin.cliDescriptors} and the merged
@@ -518,8 +534,8 @@ export type FlagLeafInner = FlagSpreadBase;
 export interface CLIDescriptor {
   /** Walker half (cf. `DEFAULT_POSITION_POLICIES`). */
   positionPolicy?: PositionPolicy;
-  /** Pre-subcommand consumers (`-C`, `-c`, `-R`, …). */
-  valueConsumingFlags?: readonly string[];
+  /** Per-binary flag facts, keyed by canonical name (e.g. `repo`). */
+  flags?: Readonly<Record<string, CLIFlag>>;
 }
 
 /**
@@ -2477,7 +2493,7 @@ export type SteeringDiagnosticKind =
   | "descriptor-collision"
   /**
    * A plugin's `cliDescriptors` entry is malformed (non-object
-   * descriptor, non-array `valueConsumingFlags`, invalid
+   * descriptor, malformed `flags` table, invalid
    * `positionPolicy`). The entry is skipped at merge time (never throws
    * there); later lookups for that basename then throw
    * `MissingDescriptorError` (absent).

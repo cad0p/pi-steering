@@ -91,7 +91,10 @@ describe("resolvePlugins: single plugin surface", () => {
       cliDescriptors: {
         git: {
           positionPolicy: "globals-before-only",
-          valueConsumingFlags: ["-C", "-c"],
+          flags: {
+            C: { aliases: ["-C"], takesValue: true },
+            config: { aliases: ["-c"], takesValue: true },
+          },
         },
       },
     };
@@ -103,7 +106,10 @@ describe("resolvePlugins: single plugin surface", () => {
     // Plugin-declared git fill (core seeds nothing — §13 amendment).
     assert.deepEqual(state.cliDescriptors["git"], {
       positionPolicy: "globals-before-only",
-      valueConsumingFlags: ["-C", "-c"],
+      flags: {
+        C: { aliases: ["-C"], takesValue: true },
+        config: { aliases: ["-c"], takesValue: true },
+      },
     });
     // No extensions → composed tracker is identity-equal when no extras
     // were layered on.
@@ -1085,15 +1091,15 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
   });
 });
 
-describe("resolvePlugins: CLI descriptors (issue #106)", () => {
+describe("resolvePlugins: CLI descriptors (issue #106; #110 table)", () => {
   it("first-wins + descriptor-collision WARN (plugin↔plugin)", () => {
     const kept = {
       positionPolicy: "globals-anywhere" as const,
-      valueConsumingFlags: ["--kept"],
+      flags: { kept: { aliases: ["--kept"], takesValue: true } },
     };
     const dropped = {
       positionPolicy: "globals-anywhere" as const,
-      valueConsumingFlags: ["--dropped"],
+      flags: { dropped: { aliases: ["--dropped"], takesValue: true } },
     };
     const p1: Plugin = { name: "first", cliDescriptors: { mycli: kept } };
     const p2: Plugin = { name: "second", cliDescriptors: { mycli: dropped } };
@@ -1124,14 +1130,14 @@ describe("resolvePlugins: CLI descriptors (issue #106)", () => {
       cliDescriptors: {
         git: {
           positionPolicy: "globals-anywhere",
-          valueConsumingFlags: ["--custom"],
+          flags: { custom: { aliases: ["--custom"], takesValue: true } },
         },
       },
     };
     const state = resolvePlugins([p], {});
     assert.deepEqual(state.cliDescriptors["git"], {
       positionPolicy: "globals-anywhere",
-      valueConsumingFlags: ["--custom"],
+      flags: { custom: { aliases: ["--custom"], takesValue: true } },
     });
     assert.equal(
       state.diagnostics.some((d) => d.kind === "descriptor-collision"),
@@ -1145,7 +1151,7 @@ describe("resolvePlugins: CLI descriptors (issue #106)", () => {
       cliDescriptors: {
         mycli: {
           positionPolicy: "globals-anywhere",
-          valueConsumingFlags: ["--x"],
+          flags: { x: { aliases: ["--x"], takesValue: true } },
         },
       },
     };
@@ -1164,8 +1170,8 @@ describe("resolvePlugins: CLI descriptors (issue #106)", () => {
     const badFlags = {
       name: "bad-flags",
       cliDescriptors: {
-        // Non-array flags.
-        mycli: { valueConsumingFlags: "--not-an-array" },
+        // Non-object flags table.
+        mycli: { flags: "--not-a-table" },
       },
     } as unknown as Plugin;
     const badPolicy = {
@@ -1182,5 +1188,105 @@ describe("resolvePlugins: CLI descriptors (issue #106)", () => {
     for (const hit of hits) assert.equal(hit.type, "warning");
     // Core seeds nothing — skipped entries leave the map empty.
     assert.deepEqual(state.cliDescriptors, {});
+  });
+
+  it("flags table passes through (additive #110)", () => {
+    const p: Plugin = {
+      name: "facts",
+      cliDescriptors: {
+        mycli: {
+          flags: {
+            repo: { aliases: ["-R", "--repo"], takesValue: true },
+            verbose: { aliases: ["-v"], takesValue: false },
+          },
+        },
+      },
+    };
+    const state = resolvePlugins([p], {});
+    assert.deepEqual(state.cliDescriptors["mycli"], {
+      flags: {
+        repo: { aliases: ["-R", "--repo"], takesValue: true },
+        verbose: { aliases: ["-v"], takesValue: false },
+      },
+    });
+  });
+
+  it("malformed flags table → whole-descriptor skip + WARN", () => {
+    const bad = {
+      name: "bad-table",
+      cliDescriptors: { mycli: { flags: ["-R"] } },
+    } as unknown as Plugin;
+    const state = resolvePlugins([bad], {});
+    assert.equal("mycli" in state.cliDescriptors, false);
+    assert.ok(state.diagnostics.some((d) => d.kind === "invalid-descriptor"));
+  });
+
+  it("malformed entry → skip + WARN naming basename+key, rest merges", () => {
+    const p = {
+      name: "facts",
+      cliDescriptors: {
+        mycli: {
+          flags: {
+            good: { aliases: ["-R"], takesValue: true },
+            badEmpty: { aliases: [], takesValue: true },
+            badShape: { aliases: ["-xy"], takesValue: true },
+            badType: { aliases: ["-v"], takesValue: "yes" },
+          },
+        },
+      },
+    } as unknown as Plugin;
+    const state = resolvePlugins([p], {});
+    assert.deepEqual(state.cliDescriptors["mycli"], {
+      flags: {
+        good: { aliases: ["-R"], takesValue: true },
+      },
+    });
+    const hits = state.diagnostics.filter(
+      (d) => d.kind === "invalid-descriptor",
+    );
+    assert.equal(hits.length, 3);
+    for (const hit of hits) {
+      assert.match(hit.message, /mycli/);
+    }
+  });
+
+  it("dup-spelling across entries in ONE table → WARN + first-entry-wins", () => {
+    const p: Plugin = {
+      name: "facts",
+      cliDescriptors: {
+        mycli: {
+          flags: {
+            first: { aliases: ["-R", "--repo"], takesValue: true },
+            second: { aliases: ["--repo", "--other"], takesValue: false },
+          },
+        },
+      },
+    };
+    const state = resolvePlugins([p], {});
+    // Colliding --repo stays with first; non-colliding --other merges.
+    assert.deepEqual(state.cliDescriptors["mycli"], {
+      flags: {
+        first: { aliases: ["-R", "--repo"], takesValue: true },
+        second: { aliases: ["--other"], takesValue: false },
+      },
+    });
+    const hit = state.diagnostics.find(
+      (d) => d.kind === "invalid-descriptor" && d.message.includes("--repo"),
+    );
+    assert.ok(hit, "expected dup-spelling WARN");
+  });
+
+  it("missing/empty flags → silent valid empty (no WARN)", () => {
+    const p: Plugin = {
+      name: "facts",
+      cliDescriptors: { mycli: {}, mycli2: { flags: {} } },
+    };
+    const state = resolvePlugins([p], {});
+    assert.deepEqual(state.cliDescriptors["mycli"], {});
+    assert.deepEqual(state.cliDescriptors["mycli2"], { flags: {} });
+    assert.equal(
+      state.diagnostics.some((d) => d.kind === "invalid-descriptor"),
+      false,
+    );
   });
 });

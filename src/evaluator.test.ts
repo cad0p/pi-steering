@@ -104,7 +104,7 @@ function editEvent(
  * Basenames these suites drive without owning plugins (issue #107:
  * absent descriptors are loud). Pinned explicit-strict here so each
  * suite exercises its own feature — argv-descriptor loudness itself is
- * pinned in the `cli-descriptors` / `argv-leaves` suites, not here.
+ * pinned in the `arity` / `argv-leaves` suites, not here.
  * Gaps stay loud: resolution names the missing basename, so a new
  * command surfaces as a failure pointing at this list.
  */
@@ -7514,5 +7514,71 @@ describe("buildEvaluator: speculative allow with plugin env tracker (issue #54)"
       res && res.block === true,
       "raw-form producer can't match resolved text → no speculative entry → BLOCK",
     );
+  });
+});
+
+describe("arityOf hoisting (issue #110)", () => {
+  it("per-tool_call shared derivation: multi-ref && chain resolves glue on both refs", async () => {
+    const { loadHarness, expectBlocks } = await import("./testing/index.ts");
+    const h = loadHarness({
+      config: {
+        plugins: [
+          {
+            name: "gh-facts",
+            cliDescriptors: {
+              gh: {
+                flags: {
+                  repo: { aliases: ["-R", "--repo"], takesValue: true },
+                },
+              },
+            },
+          },
+        ],
+        rules: [
+          {
+            name: "no-gh-r",
+            tool: "bash",
+            field: "command",
+            pattern: "^gh\\b",
+            reason: "no gh R",
+            when: {
+              flag: {
+                anyOf: [{ aliases: ["-R"], takesValue: true }],
+              },
+            },
+          },
+        ],
+      },
+    });
+    // Both refs carry glued -R values; hoisted arityOf resolves each
+    // ref through the per-tool_call cache (O(distinct basenames)).
+    await expectBlocks(
+      h,
+      { command: "gh -Rfoo pr list && gh -Rbar pr list" },
+      { rule: "no-gh-r" },
+    );
+  });
+
+  it("absent→throw rule-tagged block preserved through entries", async () => {
+    const { loadHarness, expectBlocks } = await import("./testing/index.ts");
+    const h = loadHarness({
+      config: {
+        rules: [
+          {
+            name: "no-foo",
+            tool: "bash",
+            field: "command",
+            pattern: "^foo\\b",
+            reason: "no foo",
+            when: {
+              flag: {
+                anyOf: [{ aliases: ["--bar"], takesValue: false }],
+              },
+            },
+          },
+        ],
+      },
+    });
+    await expectBlocks(h, { command: "foo --bar" }, { rule: "no-foo" });
   });
 });

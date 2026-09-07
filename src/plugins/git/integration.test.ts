@@ -538,7 +538,12 @@ describe("git plugin: isClean spread form drives through readLeafOnUnknown", () 
     // Stub `git status --porcelain` to report a dirty tree.
     const { evaluator } = buildRuntime(
       {
-        plugins: [gitPlugin],
+        plugins: [
+          gitPlugin,
+          // Explicit strict: these suites pin isClean behavior, not
+          // npm argv arity (issue #107 loudness).
+          { name: "npm-facts", cliDescriptors: { npm: {} } },
+        ],
         rules: [
           {
             name: "deploy-requires-clean",
@@ -584,7 +589,12 @@ describe("git plugin: isClean spread form drives through readLeafOnUnknown", () 
     // `onUnknown: "allow"` projects unknown → false, the rule skips.
     const { evaluator } = buildRuntime(
       {
-        plugins: [gitPlugin],
+        plugins: [
+          gitPlugin,
+          // Explicit strict: these suites pin isClean behavior, not
+          // npm argv arity (issue #107 loudness).
+          { name: "npm-facts", cliDescriptors: { npm: {} } },
+        ],
         rules: [
           {
             name: "deploy-requires-clean",
@@ -653,7 +663,12 @@ describe("git plugin: README equivalence — isClean: false vs not: { isClean: t
   it("`when: { isClean: false }` does NOT fire on git failure (handler returns false → leaf false → rule skips)", async () => {
     const { evaluator } = buildRuntime(
       {
-        plugins: [gitPlugin],
+        plugins: [
+          gitPlugin,
+          // Explicit strict: these suites pin isClean behavior, not
+          // npm argv arity (issue #107 loudness).
+          { name: "npm-facts", cliDescriptors: { npm: {} } },
+        ],
         rules: [
           {
             name: "deploy-requires-clean-positive",
@@ -682,7 +697,12 @@ describe("git plugin: README equivalence — isClean: false vs not: { isClean: t
   it("`when: { not: { isClean: true } }` FIRES on git failure (handler returns false → Kleene-AND-false-absorbs → not-flip = true)", async () => {
     const { evaluator } = buildRuntime(
       {
-        plugins: [gitPlugin],
+        plugins: [
+          gitPlugin,
+          // Explicit strict: these suites pin isClean behavior, not
+          // npm argv arity (issue #107 loudness).
+          { name: "npm-facts", cliDescriptors: { npm: {} } },
+        ],
         rules: [
           {
             name: "deploy-requires-clean-not",

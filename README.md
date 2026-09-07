@@ -311,7 +311,7 @@ type TopLevelWhenClause<Writes extends string = string> = {
   cwd?: Pattern | Pattern[]
       | { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };
   subcommand?: SubcommandLeaf;   // bare string = EXACT match, NOT regex
-  flag?: FlagLeaf;               // { anyOf, bundleAware?, valueConsumingFlags?, onUnknown? }
+  flag?: FlagLeaf;               // { anyOf, bundleAware?, onUnknown? }
   missing?: {
     event: Writes;
     in: "agent_loop" | "session" | "tool_call";
@@ -343,8 +343,8 @@ Built-ins:
 - **`cwd`** — rule fires only when the command's effective cwd matches. For bash, this is the per-ref cwd from the walker (so `cd ~/personal && git commit` evaluates against `~/personal`). Dynamic targets — `cd "$WS_DIR/pkg"`, `cd ~/proj` — resolve through the walker's env tracker (seeded from `process.env.{HOME, USER, PWD}` plus any bare assignments, `export`s, or `unset`s in the same chain). Intractable targets (`cd $(pwd)`, `cd $UNDEFINED`) surface as the `"unknown"` sentinel; apply `onUnknown: "allow" | "block"` (default `"block"`, fail-closed) to choose. For write/edit, it's the session cwd.
 - **`missing`** — fires while an entry of `event` is missing in `in` scope. `"agent_loop"` filters by `_agentLoopIndex === ctx.agentLoopIndex` (one user prompt + its tool calls); `"session"` scans the whole session JSONL; `"tool_call"` considers only speculative entries synthesized for THIS tool_call's `&&`-chain. Optional `since` acts as an invalidation sentinel — see "Temporal ordering with `missing.since`" below. Optional `notIn` subtracts a narrower scope from `in` (e.g. `{ in: "agent_loop", notIn: "tool_call" }` means "recorded in a prior tool_call in this loop", blocking the same-tool_call speculative bypass). `notIn` is set subtraction, distinct from the clause-level `not` (boolean negation). Synthesizes speculative entries across `&&` bash chains — see "`&&`-chain speculative allow" below.
 - **`not`** — boolean NOT over an inner predicate block. One level only (no `not: not: ...` recursion). Inside `not:`, leaf-level `onUnknown:` is forbidden; the block-level `onUnknown:` modifier projects walker-unknown verdicts (default `"block"` = fail-CLOSED, rule fires).
-- **`subcommand`** — rule fires only when the command's extracted subcommand matches. Bare `string` = EXACT equality (`"push"` ≠ `"pushback"`, deliberately not `cwd:`'s regex-source semantics); `RegExp` = test; bare array = OR at depth 1; spread `{ pattern, depth?, valueConsumingFlags?, onUnknown? }` covers multi-word runs (`{ pattern: ["s3", "ls"], depth: 2 }` — array length must equal `depth`). `valueConsumingFlags` declares flags that consume the next token (inline REPLACES the CLI-descriptor registry entry; absent → registry by basename — e.g. bare `subcommand: "push"` already extracts `push` from `git -C /x push` via the git plugin's declared descriptor, so the plugin must be declared for the match). `null` extraction (all-flags, trailing consuming flag, after-only shapes like `go -v build`, non-bash tools) → `"unknown"` → `onUnknown:` (default `"block"`, fail-closed).
-- **`flag`** — rule fires when any listed spelling is present: `{ anyOf: ["--force"], bundleAware?, valueConsumingFlags?, onUnknown? }`. Longs match the exact token or `--flag=value`; single-char shorts match exactly, or inside bundles (`-uf`) with `bundleAware: true` (longs never bundle-match). Consuming-flag values are skipped by position, never by content (inline REPLACES the registry list; absent → registry by basename, else strict empty set). Non-bash tools → `"unknown"` → default `"block"`; otherwise presence is definite.
+- **`subcommand`** — rule fires only when the command's extracted subcommand matches. Bare `string` = EXACT equality (`"push"` ≠ `"pushback"`, deliberately not `cwd:`'s regex-source semantics); `RegExp` = test; bare array = OR at depth 1; spread `{ pattern, depth?, onUnknown? }` covers multi-word runs (`{ pattern: ["s3", "ls"], depth: 2 }` — array length must equal `depth`). Consuming-flag arity resolves ONLY via the CLI-descriptor registry by basename (`Plugin.cliDescriptors` — e.g. bare `subcommand: "push"` already extracts `push` from `git -C /x push` via the git plugin's declared descriptor, so the plugin must be declared for the match). No descriptor for the ref's basename → the engine throws `MissingDescriptorError` and blocks with an actionable reason (declare the descriptor, or `{ "<basename>": {} }` for explicit strict) — absent descriptors are loud, never silent. `null` extraction (all-flags, trailing consuming flag, after-only shapes like `go -v build`, non-bash tools) → `"unknown"` → `onUnknown:` (default `"block"`, fail-closed).
+- **`flag`** — rule fires when any listed spelling is present: `{ anyOf: ["--force"], bundleAware?, onUnknown? }`. Longs match the exact token or `--flag=value`; single-char shorts match exactly, or inside bundles (`-uf`) with `bundleAware: true` (longs never bundle-match). Consuming-flag values are skipped by position, never by content (registry-declared consuming flags; absent basename → `MissingDescriptorError` block, same loudness as `subcommand`). Non-bash tools → `"unknown"` → default `"block"`; otherwise presence is definite.
 - **`condition`** — escape hatch for one-off logic. Prefer plugin predicates when the logic is reusable. Throws (sync or rejected promise) are caught and treated as `"unknown"` → default `"block"` policy fires the rule fail-CLOSED. Authors needing fail-OPEN wrap inside `not: { condition: fn, onUnknown: "allow" }` OR catch the throw inside the callback body.
 
 Plugin-registered predicate leaves come from the `PiSteeringPredicates` registry, populated by each plugin's `declare global` block:
@@ -666,6 +666,7 @@ Production plugins in this repo:
 // In a predicate / condition / reason fn with ctx:
 ctx.command.hasFlag("--profile");
 ctx.command.getAllFlagValues(["-m", "--message"]); // ["a", "b"], argv order
+ctx.command.positionals(); // ["push", "origin", ":branch"], subcommand INCLUDED
 ```
 
 Out-of-handler / test use goes through the factory (imported from the package root):
@@ -673,6 +674,8 @@ Out-of-handler / test use goes through the factory (imported from the package ro
 ```ts
 import { commandFromInput } from "@cad0p/pi-steering";
 ```
+
+Bound arity is registry-only with no per-call opts (#107): the engine binds each ref's `resolveDescriptor(basename).valueConsumingFlags` into `ctx.command`, so `getFlagValue` / `getAllFlagValues` / `positionals()` share one consumption source and cannot diverge. Undeclared flags never consume (strict always); attached `--flag=value` forms always apply. `positionals()` is `--`-aware (everything after a bare `--` surfaces verbatim) while `when.flag` still scans post-`--` tokens as present (walker limitation, unchanged). No descriptor for the ref's basename → `MissingDescriptorError` block (loud); obscure binaries with no owning plugin declare via an inline plugin literal `plugins: [{ name: "my-facts", cliDescriptors: { mycli: { valueConsumingFlags: [...] } } }]` — or `{ mycli: {} }` for explicit strict.
 
 - [`pi-steering-commit-format`](https://github.com/cad0p/pi-steering-commit-format) — commit-message format predicates. Own repo + package since the monorepo split (2026-08-10). Ships the `commitFormat` predicate plus a `commitFormatFactory` for composing custom format checkers; bundled formats include Conventional Commits 1.0.0 (Angular preset type allowlist) and bracketed JIRA-style references.
 
@@ -711,7 +714,7 @@ The same rule applies to flag reads — use the context-provided command view, n
 ctx.command.hasFlag("--profile"); // bound to the already-parsed args
 ```
 
-(`hasFlag` / `getFlagValue` / `getAllFlagValues` / `hasEnvAssignment` / `isInfoOnly` live on `ctx.command` since #101, which replaced the P3 (#99) bare-helper root exports; `INFO_FLAGS` + the `FlagLookupOptions` type stay on the root. Out-of-handler use goes through the root-exported `commandFromInput` factory + `SteeringCommand` type. The flags plugin keeps only the POLICY predicates `requiresFlag` / `allowlistedFlagsOnly`.)
+(`hasFlag` / `getFlagValue` / `getAllFlagValues` / `positionals` / `hasEnvAssignment` / `isInfoOnly` live on `ctx.command` since #101, which replaced the P3 (#99) bare-helper root exports; `INFO_FLAGS` + the `FlagLookupOptions` type stay on the root. Out-of-handler use goes through the root-exported `commandFromInput` factory + `SteeringCommand` type. The flags plugin keeps only the POLICY predicates `requiresFlag` / `allowlistedFlagsOnly`.)
 
 ### Overriding a built-in rule
 

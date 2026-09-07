@@ -14,6 +14,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Observer } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import {
   createRecordingHost,
   expectAllows,
@@ -21,6 +22,7 @@ import {
   loadHarness,
   mockExtensionContext,
 } from "@cad0p/pi-steering/testing";
+import { featureBranchHost } from "./__test-helpers__.ts";
 import workItemPlugin, {
   DESCRIPTION_REVIEWED_EVENT,
   TEST_PASSED_EVENT,
@@ -54,7 +56,10 @@ describe("work-item-plugin (end-to-end)", () => {
 
   it("blocks a commit without a work-item tag", async () => {
     const harness = loadHarness({
-      config: { plugins: [workItemPlugin] },
+      config: {
+        plugins: [workItemPlugin, gitPlugin],
+      },
+      host: featureBranchHost(),
     });
     await expectBlocks(
       harness,
@@ -65,7 +70,7 @@ describe("work-item-plugin (end-to-end)", () => {
 
   it("blocks git push when tests haven't passed this loop", async () => {
     const harness = loadHarness({
-      config: { plugins: [workItemPlugin] },
+      config: { plugins: [workItemPlugin, gitPlugin] },
     });
     await expectBlocks(
       harness,
@@ -78,10 +83,12 @@ describe("work-item-plugin (end-to-end)", () => {
     // This test is intentionally the FULL happy-path: block on
     // first commit (description-check fires), self-mark, then
     // allow the second commit that carries a [PROJ-N] tag.
-    const host = createRecordingHost();
+    const host = featureBranchHost();
     const ctx = mockExtensionContext("/tmp/test", host.entries);
     const harness = loadHarness({
-      config: { plugins: [workItemPlugin] },
+      config: {
+        plugins: [workItemPlugin, gitPlugin],
+      },
       host,
     });
 
@@ -124,7 +131,9 @@ describe("work-item-plugin (end-to-end)", () => {
     const host = createRecordingHost();
     const ctx = mockExtensionContext("/tmp/test", host.entries);
     const harness = loadHarness({
-      config: { plugins: [workItemPlugin] },
+      config: {
+        plugins: [workItemPlugin, gitPlugin],
+      },
       host,
     });
 

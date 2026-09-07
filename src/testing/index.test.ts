@@ -84,6 +84,25 @@ function makeExtCtx(cwd = "/repo"): ExtensionContext {
   } as ExtensionContext;
 }
 
+/**
+ * Explicit-strict descriptors for the synthetic binaries these suites
+ * drive (issue #107: absent descriptors are loud). Suites exercising
+ * harness mechanics — not argv arity — pin this so their verdicts come
+ * from their own feature. Suites WITH owning plugins (gitPlugin,
+ * petting-zoo, …) must NOT also take it (descriptor-collision).
+ */
+const TEST_STRICT_FACTS = {
+  name: "test-explicit-strict",
+  cliDescriptors: {
+    x: {},
+    y: {},
+    z: {},
+    anything: {},
+    git: {},
+    npm: {},
+  },
+};
+
 // ---------------------------------------------------------------------------
 // loadHarness
 // ---------------------------------------------------------------------------
@@ -271,7 +290,10 @@ describe("loadHarness", () => {
         },
       },
     };
-    const h = loadHarness({ config: { rules: [rule] }, host });
+    const h = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [rule] },
+      host,
+    });
     const res = await h.evaluate(
       {
         type: "tool_call",
@@ -316,7 +338,9 @@ describe("loadHarness", () => {
         },
       },
     };
-    const h = loadHarness({ config: { rules: [rule] } });
+    const h = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [rule] },
+    });
     const warnings: string[] = [];
     const originalWarn = console.warn;
     console.warn = (...args: unknown[]) => {
@@ -798,8 +822,12 @@ describe("mockContext", () => {
       input: {
         tool: "bash",
         command: "git commit -m a -m b",
+        basename: "testcli",
         args: [arg("-m"), arg("a"), arg("-m"), arg("b")],
       },
+      // Strict-always arity: the facade consumes `-m` only via the
+      // descriptor binding (same channel the engine uses per ref).
+      descriptors: { testcli: { valueConsumingFlags: ["-m"] } },
     });
     assert.deepEqual(ctx.command.getAllFlagValues("-m"), ["a", "b"]);
     assert.equal(ctx.command.getFlagValue("-m"), "b");
@@ -1081,7 +1109,19 @@ describe("ctx.command harness integration", () => {
         condition: (ctx) => ctx.command.getAllFlagValues(["-m"]).length === 2,
       },
     };
-    const h = loadHarness({ config: { rules: [rule] } });
+    const h = loadHarness({
+      config: {
+        // Synthetic plugin-registered `-m` fact (issue #107
+        // strict-always: the facade consumes only via descriptors).
+        plugins: [
+          {
+            name: "test-facts",
+            cliDescriptors: { git: { valueConsumingFlags: ["-m"] } },
+          },
+        ],
+        rules: [rule],
+      },
+    });
     const hit = await h.evaluate(
       {
         type: "tool_call",
@@ -1445,7 +1485,9 @@ describe("expectBlocks / expectAllows / expectRuleFires", () => {
   };
 
   it("expectBlocks returns result on block", async () => {
-    const harness = loadHarness({ config: { rules: [blockAllRule] } });
+    const harness = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [blockAllRule] },
+    });
     const result = await expectBlocks(harness, { command: "anything" });
     assert.ok(result);
     assert.equal(result.block, true);
@@ -1460,7 +1502,9 @@ describe("expectBlocks / expectAllows / expectRuleFires", () => {
   });
 
   it("expectBlocks { rule } asserts rule name match", async () => {
-    const harness = loadHarness({ config: { rules: [blockAllRule] } });
+    const harness = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [blockAllRule] },
+    });
     await expectBlocks(harness, { command: "x" }, { rule: "block-all" });
     await assert.rejects(
       () => expectBlocks(harness, { command: "x" }, { rule: "other-rule" }),
@@ -1475,7 +1519,9 @@ describe("expectBlocks / expectAllows / expectRuleFires", () => {
     // (rule-authored) portion — both the string-equality branch
     // (below) and the RegExp branch (a `^`-anchored pattern that
     // would fail against the raw preamble-prefixed reason).
-    const harness = loadHarness({ config: { rules: [blockAllRule] } });
+    const harness = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [blockAllRule] },
+    });
     const result = await expectBlocks(
       harness,
       { command: "x" },
@@ -1494,7 +1540,9 @@ describe("expectBlocks / expectAllows / expectRuleFires", () => {
   });
 
   it("expectBlocks { reason: RegExp } asserts reason match", async () => {
-    const harness = loadHarness({ config: { rules: [blockAllRule] } });
+    const harness = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [blockAllRule] },
+    });
     await expectBlocks(harness, { command: "x" }, { reason: /test block/ });
     await assert.rejects(
       () => expectBlocks(harness, { command: "x" }, { reason: /wrong reason/ }),
@@ -1508,7 +1556,9 @@ describe("expectBlocks / expectAllows / expectRuleFires", () => {
   });
 
   it("expectAllows throws on block", async () => {
-    const harness = loadHarness({ config: { rules: [blockAllRule] } });
+    const harness = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [blockAllRule] },
+    });
     await assert.rejects(
       () => expectAllows(harness, { command: "x" }),
       /expected allow, got block/,
@@ -1516,7 +1566,9 @@ describe("expectBlocks / expectAllows / expectRuleFires", () => {
   });
 
   it("expectRuleFires delegates to expectBlocks { rule }", async () => {
-    const harness = loadHarness({ config: { rules: [blockAllRule] } });
+    const harness = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [blockAllRule] },
+    });
     await expectRuleFires(harness, { command: "x" }, "block-all");
     await assert.rejects(
       () => expectRuleFires(harness, { command: "x" }, "nope"),
@@ -1554,7 +1606,9 @@ describe("runMatrix / formatMatrix", () => {
   };
 
   it("tallies pass / fail counts", async () => {
-    const harness = loadHarness({ config: { rules: [blockAllRule] } });
+    const harness = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [blockAllRule] },
+    });
     const result = await runMatrix(harness, [
       { name: "a", event: { command: "x" }, expect: "block" },
       {
@@ -1593,7 +1647,9 @@ describe("runMatrix / formatMatrix", () => {
       reason: "r2",
       noOverride: true,
     };
-    const harness = loadHarness({ config: { rules: [r1, r2] } });
+    const harness = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [r1, r2] },
+    });
     const result = await runMatrix(harness, [
       {
         name: "wrong-rule",
@@ -1621,7 +1677,9 @@ describe("runMatrix / formatMatrix", () => {
   });
 
   it("formatMatrix renders a readable report", async () => {
-    const harness = loadHarness({ config: { rules: [blockAllRule] } });
+    const harness = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [blockAllRule] },
+    });
     const result = await runMatrix(harness, [
       { name: "case-a", event: { command: "x" }, expect: "block" },
       { name: "case-b", event: { command: "y" }, expect: "allow" },
@@ -1795,7 +1853,11 @@ describe("mockExtensionContext", () => {
     const host = createRecordingHost();
     const ctx = mockExtensionContext("/repo", host.entries);
     const harness = loadHarness({
-      config: { rules: [rule], observers: [observer] },
+      config: {
+        plugins: [TEST_STRICT_FACTS],
+        rules: [rule],
+        observers: [observer],
+      },
       host,
     });
 

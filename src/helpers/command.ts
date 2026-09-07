@@ -10,10 +10,11 @@
  * rule code never threads bare `Word[]` arrays by hand. `mockContext`
  * builds the same view, so unit-tested predicates see it too.
  *
- * Each method delegates to the mechanism in `./flags.ts` with identical
+ * Each flag method delegates to the mechanism in `./flags.ts` with identical
  * precedence/edge semantics (`matchFlagAt` exact → attached → glued;
- * quote-aware `.value`-first reads). The facade adds no parsing of its
- * own.
+ * quote-aware `.value`-first reads). `positionals()` adds the bound
+ * positional view over the same snapshot with the same bound consuming
+ * list — consumption and skipping cannot diverge.
  *
  * Deliberate non-goals:
  *
@@ -30,13 +31,13 @@
 
 import type { Word } from "@cad0p/unbash-walker";
 import type { PredicateToolInput } from "../schema.ts";
-import type { FlagLookupOptions } from "./flags.ts";
 import {
   getAllFlagValues,
   getFlagValue,
   hasEnvAssignment,
   hasFlag,
   isInfoOnly,
+  isValueConsuming,
 } from "./flags.ts";
 
 /**
@@ -44,35 +45,59 @@ import {
  *
  * Built once per command ref by the engine (`ctx.command`) or on
  * demand via {@link commandFromInput} for out-of-handler / test use.
+ *
+ * Registry-only arity (issue #107): the bound methods take NO opts —
+ * the `commandFromInput(input, resolvedFlags)` binding carries the
+ * descriptor-resolved consuming-flag list, so consumption and
+ * skipping cannot diverge. The engine resolves via the registry before
+ * binding and throws `MissingDescriptorError` for undeclared basenames;
+ * an omitted list (direct/test use) means explicit-strict empty.
+ *
+ * Obscure binaries (no owning plugin): rule authors declare argv
+ * facts via an inline plugin literal — NO new top-level config field,
+ * NO leaf-inline escape hatch (a second channel would recreate the
+ * drift #106 killed):
+ * `plugins: [{ name: "my-facts", cliDescriptors: { mycli: {
+ * valueConsumingFlags: [...] } } }]` — or `{ mycli: {} }` for explicit
+ * strict. Absent basename → `MissingDescriptorError` (loud).
  */
 export interface SteeringCommand {
   /**
    * `true` if the command carries any listed flag (bare token,
-   * attached `flag=value` token, or opt-in glued `-X<value>` form).
-   * Delegates to `hasFlag` with the bound argv words.
+   * attached `flag=value` token). Delegates to `hasFlag` with the
+   * bound argv words (presence-only: no arity input, no opts).
    */
-  hasFlag(flag: string | readonly string[], opts?: FlagLookupOptions): boolean;
+  hasFlag(flag: string | readonly string[]): boolean;
 
   /**
    * Value of the LAST occurrence of any listed flag alias, or `null`
    * if absent or present-but-valueless. Delegates to `getFlagValue`
-   * (last-wins) with the bound argv words.
+   * (last-wins) with the bound argv words + bound consuming list.
    */
-  getFlagValue(
-    flags: string | readonly string[],
-    opts?: FlagLookupOptions,
-  ): string | null;
+  getFlagValue(flags: string | readonly string[]): string | null;
 
   /**
    * Values of EVERY occurrence of any listed flag alias, in argv
    * order, or `[]` if absent or present-but-valueless. Delegates to
-   * `getAllFlagValues` with the bound argv words. Consumers apply
-   * their own join policy (e.g. git's `"\n\n"` for repeated `-m`).
+   * `getAllFlagValues` with the bound argv words + bound consuming
+   * list. Consumers apply their own join policy (e.g. git's `"\n\n"`
+   * for repeated `-m`).
    */
-  getAllFlagValues(
-    flags: string | readonly string[],
-    opts?: FlagLookupOptions,
-  ): string[];
+  getAllFlagValues(flags: string | readonly string[]): string[];
+
+  /**
+   * Resolved positional operands left→right, INCLUDING the subcommand
+   * run (`git push origin :branch` → `["push","origin",":branch"]`).
+   * Skips: the `--` token itself (everything after it surfaces
+   * verbatim), attached `--flag=value` tokens, declared consuming
+   * flags + their values (BY POSITION), and opaque single-dash
+   * multi-char units (bundles like `-fdx`, glued `-X<rest>` — never
+   * decomposed without per-call glue knowledge). Clean `--long` /
+   * `-x` flag-words that are not declared-consuming surface as
+   * themselves (registry-only arity pin: `push --delete origin` keeps
+   * both `--delete` and `origin`). Total: never throws.
+   */
+  positionals(): string[];
 
   /**
    * `true` if the command's shell env-prefix carries an assignment
@@ -92,25 +117,15 @@ export interface SteeringCommand {
 
 /**
  * Build a {@link SteeringCommand} bound to one tool input's argv +
- * env-prefix words.
- *
- * Total: never throws on weird input — `input?.args ?? []` /
- * `input?.envAssignments ?? []` normalize missing keys (and a missing
- * input itself) to the empty behavior (`hasFlag false`,
- * `getFlagValue null`, `getAllFlagValues []`, `hasEnvAssignment
- * false`, `isInfoOnly false`). The constructor snapshots (COPYs) both
- * arrays, so post-construction mutation of the caller's arrays cannot
- * leak into the facade.
- */
-/**
- * Build a {@link SteeringCommand} bound to one tool input's argv +
- * env-prefix words, with an optional descriptor-resolved consuming-flag
- * list (issue #106 step-4 binding, behavior-inert until #107 wires
- * `FlagLookupOptions.valueConsumingFlags` consumption).
+ * env-prefix words, with the descriptor-resolved consuming-flag list
+ * (issue #107 registry-only binding).
  *
  * The engine binds per ref (`resolveDescriptor(basename).valueConsumingFlags`
- * → here); the facade stays a pure view. `SteeringCommand` is
- * untouched (backward-compatible).
+ * → here); the facade stays a pure view. Total: never throws on weird
+ * input — `input?.args ?? []` / `input?.envAssignments ?? []` normalize
+ * missing keys (and a missing input itself) to the empty behavior. The
+ * constructor snapshots (COPYs) both arrays, so post-construction
+ * mutation of the caller's arrays cannot leak into the facade.
  */
 export function commandFromInput(
   input: PredicateToolInput,
@@ -118,25 +133,93 @@ export function commandFromInput(
 ): SteeringCommand {
   const args: readonly Word[] = [...(input?.args ?? [])];
   const envAssignments: readonly Word[] = [...(input?.envAssignments ?? [])];
-  // Descriptor default for the arity contract (per-call opts >
-  // descriptor > empty). Inert until #107 wires consumption in
-  // `flags.ts` — the helpers ignore `valueConsumingFlags` today, so
-  // this binding changes no verdicts (hasFlag presence-only agrees).
-  const descriptorDefault =
-    resolvedFlags !== undefined ? [...resolvedFlags] : undefined;
-  const withDefault = (
-    opts?: FlagLookupOptions,
-  ): FlagLookupOptions | undefined => {
-    if (descriptorDefault === undefined) return opts;
-    if (opts?.valueConsumingFlags !== undefined) return opts;
-    return { ...opts, valueConsumingFlags: descriptorDefault };
-  };
+  // Registry-only arity: the list arrives registry-resolved (the engine
+  // throws MissingDescriptorError before binding an undeclared basename);
+  // an omitted list is explicit-strict empty (direct/test use). One list
+  // backs getFlagValue / getAllFlagValues / positionals() — consumption
+  // and skipping cannot diverge.
+  const consuming: readonly string[] =
+    resolvedFlags !== undefined ? [...resolvedFlags] : [];
+  const opts = { valueConsumingFlags: consuming };
   return {
-    hasFlag: (flag, opts) => hasFlag(args, flag, withDefault(opts)),
-    getFlagValue: (flags, opts) => getFlagValue(args, flags, withDefault(opts)),
-    getAllFlagValues: (flags, opts) =>
-      getAllFlagValues(args, flags, withDefault(opts)),
+    hasFlag: (flag) => hasFlag(args, flag),
+    getFlagValue: (flags) => getFlagValue(args, flags, opts),
+    getAllFlagValues: (flags) => getAllFlagValues(args, flags, opts),
+    positionals: () => positionalsOf(args, consuming),
     hasEnvAssignment: (name) => hasEnvAssignment(envAssignments, name),
     isInfoOnly: (extraFlags) => isInfoOnly(args, extraFlags),
   };
+}
+
+/**
+ * Read a word's resolved value with a fallback to its text form —
+ * same `.value`-first contract as the flag helpers, so quote-awareness
+ * falls out (a quoted `"see --help"` value token is one non-flag
+ * word → positional; a quoted flag spelling is still exact-matched).
+ */
+function wordValue(w: Word | undefined): string {
+  if (w === undefined) return "";
+  return w.value ?? w.text ?? "";
+}
+
+/**
+ * Pure positional view over bound argv words (issue #107 §6).
+ *
+ * Single left→right scan over resolved strings:
+ *   1. Bare `--`: everything after it is positional (verbatim). The
+ *      `--` token itself never surfaces.
+ *   2. Attached `--flag=value` tokens (any dash-led token containing
+ *      `=`) never surface — single tokens, always apply.
+ *   3. Exact token equal to a DECLARED consuming flag → skip token +
+ *      next token (trailing with no next → skip token only).
+ *   4. Opaque single-dash multi-char units (bundles like `-fdx`, glued
+ *      `-X<rest>` — indistinguishable with no per-call glue knowledge)
+ *      → skipped as ONE unit, never decomposed into letters.
+ *   5. Everything else surfaces IN ORDER — INCLUDING the subcommand
+ *      run and clean `--long` / `-x` / `-` flag-words that are not
+ *      declared-consuming (registry-only pin: `push --delete origin`
+ *      → `["push","--delete","origin"]`).
+ *   6. No descriptor lookup here: the engine throws
+ *      `MissingDescriptorError` before binding an undeclared basename
+ *      (`{<bin>:{}}` binds `[]` = explicit strict).
+ *
+ * `--` divergence (documented, no action): `positionals()` is
+ * `--`-aware while `when.flag`'s post-`--` limitation is UNCHANGED
+ * (a `--force` after `--` still scans present) — flag-side
+ * over-presence is the fail-closed direction.
+ *
+ * Total over input shapes: missing/odd shapes degrade to empty behavior,
+ * never escape. (Absent-descriptor loudness lives at the engine binding
+ * site, not in this pure scan.)
+ */
+function positionalsOf(
+  args: readonly Word[],
+  consuming: readonly string[],
+): string[] {
+  const out: string[] = [];
+  let afterDashDash = false;
+  for (let i = 0; i < args.length; i++) {
+    const token = wordValue(args[i]);
+    if (!afterDashDash && token === "--") {
+      afterDashDash = true;
+      continue;
+    }
+    if (afterDashDash) {
+      out.push(token);
+      continue;
+    }
+    // Attached forms carry their value on the token: skip one word.
+    if (token.startsWith("-") && token.includes("=")) continue;
+    // Declared consuming flags skip their value BY POSITION.
+    if (isValueConsuming(token, consuming)) {
+      i += 1;
+      continue;
+    }
+    // Opaque bundles/glued: skip whole, never decompose.
+    if (token.startsWith("-") && !token.startsWith("--") && token.length > 2) {
+      continue;
+    }
+    out.push(token);
+  }
+  return out;
 }

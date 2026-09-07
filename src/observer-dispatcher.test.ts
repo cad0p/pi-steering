@@ -1160,6 +1160,9 @@ describe("buildObserverDispatcher: plugin env tracker parity (issue #54)", () =>
         {
           name: "env-owner",
           trackers: { env: pluginEnvTracker("plugin-only") },
+          // Explicit strict: this suite pins the dispatch-parity
+          // latch, not argv arity (issue #107 loudness).
+          cliDescriptors: { rm: {} },
         },
       ],
       {},

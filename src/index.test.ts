@@ -488,9 +488,11 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
   });
 
   it("when.cwd gates whether the rule fires", async () => {
-    writeSteeringConfig(
+    writeSteeringConfigWithPlugins(
       tmpHome,
+      "",
       `{
+				plugins: [{ name: "test-strict", cliDescriptors: { echo: {} } }],
 				rules: [
 					{
 						name: "no-echo-in-special",
@@ -701,9 +703,11 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
     // Rule uses when.condition to assert agentLoopIndex threading.
     // The condition appends an audit entry the test consults to
     // confirm the agentLoopIndex the evaluator saw.
-    writeSteeringConfig(
+    writeSteeringConfigWithPlugins(
       tmpHome,
+      "",
       `{
+				plugins: [{ name: "test-strict", cliDescriptors: { echo: {} } }],
 				rules: [
 					{
 						name: "capture-turn",
@@ -750,9 +754,11 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
     // smoke test) must see a well-defined — not undefined / NaN /
     // -1 — agentLoopIndex. A later init-bug landing on undefined
     // would pass all other tests but fail this one.
-    writeSteeringConfig(
+    writeSteeringConfigWithPlugins(
       tmpHome,
+      "",
       `{
+				plugins: [{ name: "test-strict", cliDescriptors: { echo: {} } }],
 				rules: [
 					{
 						name: "capture-pre-agent-start",
@@ -789,9 +795,11 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
     // The predicate captures the agentLoopIndex it sees; the
     // observer's auto-tagged write records the loop index the
     // dispatcher saw. Both must agree, end-to-end via register().
-    writeSteeringConfig(
+    writeSteeringConfigWithPlugins(
       tmpHome,
+      "",
       `{
+				plugins: [{ name: "test-strict", cliDescriptors: { echo: {} } }],
 				rules: [
 					{
 						name: "capture-predicate",

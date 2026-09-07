@@ -24,6 +24,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Plugin } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import {
   createRecordingHost,
   expectAllows,
@@ -39,6 +40,7 @@ import {
   RETEST_REQUIRED_EVENT,
   retestRequiredTracker,
 } from "../observers/retest-required-tracker.ts";
+
 import { pushRequiresTests } from "./push-requires-tests.ts";
 
 /**
@@ -55,7 +57,7 @@ describe("push-requires-tests", () => {
   it("blocks git push when no TEST_PASSED entry exists", async () => {
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
     });
@@ -69,7 +71,7 @@ describe("push-requires-tests", () => {
   it("does NOT fire on unrelated commands", async () => {
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
     });
@@ -87,7 +89,7 @@ describe("push-requires-tests", () => {
 
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
       host,
@@ -137,7 +139,7 @@ describe("push-requires-tests", () => {
 
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
       host,
@@ -200,7 +202,7 @@ describe("push-requires-tests", () => {
     // circuits and `git push` never runs.
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
     });
@@ -215,7 +217,7 @@ describe("push-requires-tests", () => {
     // cite; the rule fires normally.
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
     });
@@ -232,7 +234,7 @@ describe("push-requires-tests", () => {
     // allow would be unsafe.
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
     });

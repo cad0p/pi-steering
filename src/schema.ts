@@ -404,10 +404,10 @@ export type SubcommandPattern = string | RegExp;
 
 /**
  * Spread form shared by {@link SubcommandLeaf} (outer) and
- * {@link SubcommandLeafInner} (inner): `{ pattern, depth?,
- * valueConsumingFlags? }`. In spread form an array `pattern` MUST
- * have `length === depth` (positional sequence); bare arrays (no
- * spread) are OR-of-matches at the default depth 1 instead.
+ * {@link SubcommandLeafInner} (inner): `{ pattern, depth? }`. In spread
+ * form an array `pattern` MUST have `length === depth` (positional
+ * sequence); bare arrays (no spread) are OR-of-matches at the default
+ * depth 1 instead.
  */
 export interface SubcommandSpreadBase {
   /** Single pattern or positional sequence (`length === depth`). */
@@ -419,13 +419,13 @@ export interface SubcommandSpreadBase {
    */
   depth?: number;
   /**
-   * Flags that consume the following token (`-C`, `-c`, `-R`,
-   * `--repo`, `--profile`, …) so values never read as subcommands.
-   * Inline (when present) REPLACES the CLI-descriptor registry list;
-   * absent → registry by basename → strict empty set. The walker
-   * stays arity-ignorant.
+   * Arity resolves ONLY via the CLI-descriptor registry by basename
+   * (issue #107): flags that consume the following token (`-C`, `-c`,
+   * `-R`, `--repo`, `--profile`, …) so values never read as
+   * subcommands. No descriptor → the engine throws `MissingDescriptorError`
+   * before evaluation (loud block naming the missing facts); `{<bin>: {}}`
+   * present-empty is explicit strict. The walker stays arity-ignorant.
    */
-  valueConsumingFlags?: readonly string[];
 }
 
 /**
@@ -452,8 +452,8 @@ export type SubcommandLeafInner =
 
 /**
  * Spread form shared by {@link FlagLeaf} (outer) and
- * {@link FlagLeafInner} (inner): `{ anyOf, bundleAware?,
- * valueConsumingFlags? }`. `flag:` has no bare form.
+ * {@link FlagLeafInner} (inner): `{ anyOf, bundleAware? }`.
+ * `flag:` has no bare form.
  */
 export interface FlagSpreadBase {
   /**
@@ -474,12 +474,12 @@ export interface FlagSpreadBase {
    */
   bundleAware?: boolean;
   /**
-   * Flags that consume the following token, skipped BY POSITION
-   * during the presence scan (never by content). Inline (when
-   * present) REPLACES the registry list; absent → registry by
-   * basename → strict empty set.
+   * Arity resolves ONLY via the CLI-descriptor registry by basename
+   * (issue #107): flags that consume the following token, skipped BY
+   * POSITION during the presence scan (never by content). No descriptor
+   * → the engine throws `MissingDescriptorError` before evaluation
+   * (loud block); `{<bin>: {}}` present-empty is explicit strict.
    */
-  valueConsumingFlags?: readonly string[];
 }
 
 /**
@@ -503,13 +503,13 @@ export type FlagLeafInner = FlagSpreadBase;
  * Per-binary argv knowledge for one command basename (issue #106).
  *
  * A `CLIDescriptor` supplies `positionPolicy` + `valueConsumingFlags`
- * to both ARGV leaves (`when.subcommand` / `when.flag`) with no
- * inline declaration. Precedence: inline declaration > registry entry
- * > strict default (flags: empty set — nothing consumes; policy:
- * `"globals-anywhere"`). Per-field composition: inline
- * `valueConsumingFlags`, when present, REPLACES the registry list (no
- * union); registry `positionPolicy` always overrides the
- * `DEFAULT_POSITION_POLICIES` fallback.
+ * to both ARGV leaves (`when.subcommand` / `when.flag`) and to the
+ * bound `SteeringCommand` facade — the ONLY arity channel (issue
+ * #107, registry-only: no inline declaration). Resolution: registry entry
+ * (present-empty `{<bin>: {}}` = explicit strict: flags `[]`, policy table
+ * fallback) else throw `MissingDescriptorError` (loud block on the rule
+ * path, non-match on the exemption path). Registry `positionPolicy` always
+ * overrides the table fallback.
  *
  * Keyed by command basename (`"git"`, `"gh"`) in
  * {@link Plugin.cliDescriptors} and the merged
@@ -567,8 +567,8 @@ export interface CLIDescriptor {
  * ## ARGV leaves (`subcommand:` / `flag:`)
  *
  * The spread forms differ the same way (`subcommand:`'s
- * `{ pattern, depth, valueConsumingFlags, onUnknown? }` and `flag:`'s
- * `{ anyOf, bundleAware?, valueConsumingFlags?, onUnknown? }` drop
+ * `{ pattern, depth, onUnknown? }` and `flag:`'s
+ * `{ anyOf, bundleAware?, onUnknown? }` drop
  * `onUnknown?:` inside `not:`). Named leaf types below keep the
  * Outer/Inner declarations in lockstep: {@link SubcommandLeaf} /
  * {@link SubcommandLeafInner} and {@link FlagLeaf} /
@@ -712,8 +712,8 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
    * {@link Pattern}-typed leaves like `cwd:`. `RegExp` = test
    * against the extracted word. Bare array = OR-of-matches at the
    * default depth 1 (any member matching the first subcommand word
-   * fires). Spread form `{ pattern, depth?, valueConsumingFlags?,
-   * onUnknown? }` covers multi-word runs (`aws s3 ls`, `kubectl get
+   * fires). Spread form `{ pattern, depth?, onUnknown? }` covers
+   * multi-word runs (`aws s3 ls`, `kubectl get
    * pods`): the array length MUST equal `depth` (positional
    * sequence — `["s3", "ls"]` at `depth: 2`); a non-array pattern
    * with `depth > 1`, a length≠depth array, an empty array, or
@@ -721,14 +721,17 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
    * to `false` (rule skips, `cwd`-style fail-skip). `depth: 0`
    * extracts nothing → `"unknown"` → default `"block"` (fail-closed).
    *
-   * `valueConsumingFlags` declares flags that consume the following
-   * token (`git -C DIR`, `-c <key>=<value>`) so values never read as
-   * subcommands: `git -c KEY=VAL push` extracts `push` (without the
-   * declaration it would read `KEY=VAL` and the rule would silently
-   * SKIP — fail-open for guard rules). The walker stays
-   * arity-ignorant; per-binary lists are plugin-declared. Attached
-   * `--flag=value` forms consume without declaration (single token
-   * by construction). Default: none.
+   * Consuming-flag arity resolves ONLY via the CLI-descriptor registry
+   * by basename (issue #107): `git -C DIR` / `-c <key>=<value>` skip
+   * via the git plugin's declared descriptor, so `git -c KEY=VAL push`
+   * extracts `push` (without a registered descriptor it would read
+   * `KEY=VAL` and the rule would silently SKIP — fail-open for guard
+   * rules; prefer import-plugin + `disabledRules` over going without).
+   * The walker stays arity-ignorant; per-binary lists are
+   * plugin-declared. Attached `--flag=value` forms consume without
+   * declaration (single token by construction). No descriptor → the engine
+   * throws `MissingDescriptorError` before evaluation (loud block;
+   * `{<bin>: {}}` present-empty is explicit strict).
    *
    * Position policy resolves from the walker's
    * `DEFAULT_POSITION_POLICIES` table keyed on the ref basename
@@ -758,9 +761,12 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
    * empty `anyOf`, or non-string members are invalid and the leaf
    * evaluates to `false` (rule skips, NOT unknown).
    *
-   * Values of declared `valueConsumingFlags` are skipped BY POSITION
+   * Values of registry-declared consuming flags are skipped BY POSITION
    * (`i += 2`), never by content: `gh -R --force pr` with `-R`
-   * declared does NOT report `--force` present. `--` itself is a
+   * declared (via a plugin `cliDescriptors` entry for `gh`) does NOT
+   * report `--force` present. No descriptor → the engine throws
+   * `MissingDescriptorError` before evaluation (loud block). `--`
+   * itself is a
    * flag-shaped token; post-`--` positionals are unmodelled (walker
    * limitation) — a `--force` after `--` still scans as present.
    *
@@ -2123,9 +2129,11 @@ export interface Plugin {
    * / merge machinery, no new concepts. First-wins on collision;
    * the core fallback map is currently empty (core seeds nothing —
    * each plugin owns its binary's facts via this slot), so absent
-   * basenames stay absent. An absent descriptor resolves to the
-   * strict default and a resulting miss is definite (a data-knowledge
-   * axis), NOT an unknown-escape — no `onUnknown:` projection applies.
+   * basenames stay absent. An absent descriptor throws
+   * `MissingDescriptorError` at resolution (loud block on the rule path,
+   * non-match on the exemption path — a fail-CLOSED config hole),
+   * NOT an unknown-escape — no `onUnknown:` projection applies.
+   * Present-empty (`{<bin>: {}}`) is explicit strict.
    */
   cliDescriptors?: Record<string, CLIDescriptor>;
 }
@@ -2470,8 +2478,9 @@ export type SteeringDiagnosticKind =
   /**
    * A plugin's `cliDescriptors` entry is malformed (non-object
    * descriptor, non-array `valueConsumingFlags`, invalid
-   * `positionPolicy`). The entry is skipped; resolution falls back
-   * to the strict default. Never throws.
+   * `positionPolicy`). The entry is skipped at merge time (never throws
+   * there); later lookups for that basename then throw
+   * `MissingDescriptorError` (absent).
    */
   | "invalid-descriptor";
 

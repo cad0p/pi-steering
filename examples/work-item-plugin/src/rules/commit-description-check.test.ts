@@ -11,12 +11,13 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import {
-  createRecordingHost,
   expectAllows,
   loadHarness,
   mockExtensionContext,
 } from "@cad0p/pi-steering/testing";
+import { featureBranchHost } from "../__test-helpers__.ts";
 import {
   commitDescriptionCheck,
   DESCRIPTION_REVIEWED_EVENT,
@@ -29,11 +30,14 @@ describe("commit-description-check", () => {
     // so later evaluate() calls see the self-mark the previous call
     // wrote. Same plumbing the real pi runtime wires, minus the
     // child-process bits.
-    const host = createRecordingHost();
+    const host = featureBranchHost();
     const ctx = mockExtensionContext("/tmp/test", host.entries);
 
     const harness = loadHarness({
-      config: { rules: [commitDescriptionCheck] },
+      config: {
+        plugins: [gitPlugin],
+        rules: [commitDescriptionCheck],
+      },
       host,
     });
 
@@ -100,7 +104,10 @@ describe("commit-description-check", () => {
 
   it("does NOT fire on a non-commit command", async () => {
     const harness = loadHarness({
-      config: { rules: [commitDescriptionCheck] },
+      config: {
+        plugins: [gitPlugin],
+        rules: [commitDescriptionCheck],
+      },
     });
     await expectAllows(harness, { command: "git status" });
   });

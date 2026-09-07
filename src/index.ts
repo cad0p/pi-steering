@@ -131,8 +131,9 @@ export default function register(
 // break.
 // Walker option types for the subcommand surface (issues #90/#91):
 // `getSubcommandWords` is the CommandRef-based extraction entry point;
-// plugin authors declaring per-binary `valueConsumingFlags` reuse the
-// same options shape. The bare-words `locateSubcommandRun` (+
+// plugin authors declaring per-binary `valueConsumingFlags` do so via the
+// `Plugin.cliDescriptors` slot (registry-only since #107 — no leaf-inline
+// channel). The bare-words `locateSubcommandRun` (+
 // `SubcommandRun`) is re-exported here so custom predicates can run
 // the engine's own extraction over projected `PredicateWord[]`
 // (see `projectSubcommandWords` in `evaluator-internals/predicates.ts`

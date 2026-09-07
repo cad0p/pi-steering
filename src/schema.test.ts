@@ -91,7 +91,6 @@ describe("schema: shape smoke tests", () => {
       subcommand: {
         pattern: ["s3", "ls"],
         depth: 2,
-        valueConsumingFlags: ["--profile"],
         onUnknown: "block",
       },
     };

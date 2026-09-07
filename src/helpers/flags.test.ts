@@ -11,11 +11,13 @@ import type {
 import type { PredicateWord } from "../schema.ts";
 import type { FlagLookupOptions } from "./flags.ts";
 import {
+  getAllFlagValues,
   getFlagValue,
   hasEnvAssignment,
   hasFlag,
   INFO_FLAGS,
   isInfoOnly,
+  isValueConsuming,
 } from "./flags.ts";
 
 /** Minimal Word for tests — tests don't exercise the walker, just the helpers. */
@@ -26,6 +28,16 @@ function W(value: string): Word {
 /** PredicateWord for facade inputs — the minimal word plus its raw source token. */
 function PW(value: string): PredicateWord {
   return { ...W(value), rawText: value };
+}
+
+/**
+ * Standalone arity declaration (issue #107 strict-always): exact-token
+ * occurrences consume their next token ONLY for listed flags.
+ */
+function consuming(flags: string | readonly string[]): FlagLookupOptions {
+  return {
+    valueConsumingFlags: typeof flags === "string" ? [flags] : [...flags],
+  };
 }
 
 describe("hasFlag", () => {
@@ -68,7 +80,14 @@ describe("hasFlag", () => {
 
 describe("getFlagValue", () => {
   it("returns value for separated form", () => {
-    assert.equal(getFlagValue([W("--profile"), W("dev")], "--profile"), "dev");
+    assert.equal(
+      getFlagValue(
+        [W("--profile"), W("dev")],
+        "--profile",
+        consuming("--profile"),
+      ),
+      "dev",
+    );
   });
 
   it("returns value for attached form", () => {
@@ -94,6 +113,7 @@ describe("getFlagValue", () => {
       getFlagValue(
         [W("-t"), W("see #13"), W("--subject"), W("closes #12")],
         ["-t", "--subject"],
+        consuming(["-t", "--subject"]),
       ),
       "closes #12",
     );
@@ -104,6 +124,7 @@ describe("getFlagValue", () => {
       getFlagValue(
         [W("--subject"), W("closes #12"), W("-t"), W("see #13")],
         ["-t", "--subject"],
+        consuming(["-t", "--subject"]),
       ),
       "see #13",
     );
@@ -116,24 +137,31 @@ describe("getFlagValue", () => {
       getFlagValue(
         [W("--profile"), W("a"), W("--profile"), W("b")],
         "--profile",
+        consuming("--profile"),
       ),
       "b",
     );
   });
 
   it("finds an attached form during the reverse scan", () => {
+    // Undeclared `-t` is skipped (strict-always), so the earlier
+    // attached `--subject=` wins — attached always applies.
     assert.equal(
       getFlagValue(
         [W("--subject=closes #12"), W("-t"), W("x")],
         ["-t", "--subject"],
       ),
-      "x",
+      "closes #12",
     );
   });
 
   it("mixed attached/separated across occurrences: separated-last wins", () => {
     assert.equal(
-      getFlagValue([W("--subject=a"), W("--subject"), W("b")], "--subject"),
+      getFlagValue(
+        [W("--subject=a"), W("--subject"), W("b")],
+        "--subject",
+        consuming("--subject"),
+      ),
       "b",
     );
   });
@@ -158,8 +186,14 @@ describe("getFlagValue", () => {
 
   it("single-string flags arg is equivalent to the array form", () => {
     const args = [W("--profile"), W("dev")];
-    assert.equal(getFlagValue(args, "--profile"), "dev");
-    assert.equal(getFlagValue(args, ["--profile"]), "dev");
+    assert.equal(
+      getFlagValue(args, "--profile", consuming("--profile")),
+      "dev",
+    );
+    assert.equal(
+      getFlagValue(args, ["--profile"], consuming("--profile")),
+      "dev",
+    );
   });
 
   it("trailing flag is fail-closed: null, no fallback", () => {
@@ -167,12 +201,20 @@ describe("getFlagValue", () => {
     // The winning occurrence is the trailing valueless --subject;
     // NO fallback to the earlier overridden --profile dev.
     assert.equal(
-      getFlagValue([W("--profile"), W("dev"), W("--subject")], "--subject"),
+      getFlagValue(
+        [W("--profile"), W("dev"), W("--subject")],
+        "--subject",
+        consuming("--subject"),
+      ),
       null,
     );
     // Repeated flag with a trailing valueless last: NO fallback either.
     assert.equal(
-      getFlagValue([W("--subject"), W("dev"), W("--subject")], "--subject"),
+      getFlagValue(
+        [W("--subject"), W("dev"), W("--subject")],
+        "--subject",
+        consuming("--subject"),
+      ),
       null,
     );
   });
@@ -193,20 +235,35 @@ describe("getFlagValue", () => {
     // Documented behavior: callers who want strict validation
     // should post-check the return.
     assert.equal(
-      getFlagValue([W("--profile"), W("--other-flag")], "--profile"),
+      getFlagValue(
+        [W("--profile"), W("--other-flag")],
+        "--profile",
+        consuming("--profile"),
+      ),
       "--other-flag",
     );
   });
 
   it("next-token blind consumption holds for array-form flags too", () => {
     assert.equal(
-      getFlagValue([W("--profile"), W("--other")], ["--profile"]),
+      getFlagValue(
+        [W("--profile"), W("--other")],
+        ["--profile"],
+        consuming("--profile"),
+      ),
       "--other",
     );
   });
 
   it("separated form with empty next value returns null", () => {
-    assert.equal(getFlagValue([W("--subject"), W("")], "--subject"), null);
+    assert.equal(
+      getFlagValue(
+        [W("--subject"), W("")],
+        "--subject",
+        consuming("--subject"),
+      ),
+      null,
+    );
   });
 
   it("does not confuse prefix collisions (--profile-unrelated vs --profile)", () => {
@@ -214,6 +271,7 @@ describe("getFlagValue", () => {
       getFlagValue(
         [W("--profile-unrelated"), W("--profile"), W("dev")],
         "--profile",
+        consuming("--profile"),
       ),
       "dev",
     );
@@ -230,7 +288,11 @@ describe("getFlagValue", () => {
       end: 13,
     } as Word;
     assert.equal(
-      getFlagValue([W("--subject"), quoted], "--subject"),
+      getFlagValue(
+        [W("--subject"), quoted],
+        "--subject",
+        consuming("--subject"),
+      ),
       "closes #12",
     );
   });
@@ -251,7 +313,11 @@ describe("getFlagValue", () => {
 
   it("adjacent duplicate bare flags: next token resolves the winner", () => {
     assert.equal(
-      getFlagValue([W("--subject"), W("--subject"), W("x")], "--subject"),
+      getFlagValue(
+        [W("--subject"), W("--subject"), W("x")],
+        "--subject",
+        consuming("--subject"),
+      ),
       "x",
     );
   });
@@ -261,7 +327,75 @@ describe("getFlagValue", () => {
     // valueless, so last-wins returns null — no fallback to the first
     // occurrence's next token.
     const args = [W("--subject"), W("--subject")];
-    assert.equal(getFlagValue(args, "--subject"), null);
+    assert.equal(getFlagValue(args, "--subject", consuming("--subject")), null);
+  });
+});
+
+describe("strict-always arity (issue #107)", () => {
+  it("exact-branch consumes next ONLY when declared", () => {
+    const args = [W("--profile"), W("dev")];
+    assert.equal(
+      getFlagValue(args, "--profile", consuming("--profile")),
+      "dev",
+    );
+    assert.deepEqual(
+      getAllFlagValues(args, "--profile", consuming("--profile")),
+      ["dev"],
+    );
+    // Undeclared: present-but-valueless, next token scans alone.
+    assert.equal(getFlagValue(args, "--profile"), null);
+    assert.deepEqual(getAllFlagValues(args, "--profile"), []);
+  });
+
+  it("undeclared --frobnicate TEXT → scalar null, array []", () => {
+    const args = [W("pr"), W("merge"), W("--frobnicate"), W("TEXT")];
+    assert.equal(getFlagValue(args, "--frobnicate"), null);
+    assert.deepEqual(getAllFlagValues(args, "--frobnicate"), []);
+    // Presence still scans: the flag IS there, just valueless.
+    assert.equal(hasFlag(args, "--frobnicate"), true);
+  });
+
+  it("attached --f=v applies even when undeclared", () => {
+    assert.equal(getFlagValue([W("--frobnicate=v")], "--frobnicate"), "v");
+    assert.deepEqual(getAllFlagValues([W("--frobnicate=v")], "--frobnicate"), [
+      "v",
+    ]);
+    assert.equal(getFlagValue([W("--frobnicate=")], "--frobnicate"), "");
+  });
+
+  it("isValueConsuming(flag, descriptor?): absent → false", () => {
+    assert.equal(isValueConsuming("--body", ["--body"]), true);
+    assert.equal(isValueConsuming("--body", []), false);
+    assert.equal(isValueConsuming("--body"), false);
+    assert.equal(isValueConsuming("--body", undefined), false);
+    assert.equal(isValueConsuming("--x", ["--body"]), false);
+  });
+
+  it("alias-set pin: ANY queried alias declared ⇒ exact consumes", () => {
+    // Descriptor lists `--subject`; the `-t` token still consumes
+    // when the queried SET is declared (aliases OR at each position).
+    const args = [W("-t"), W("see #13")];
+    const opts = consuming("--subject");
+    assert.equal(getFlagValue(args, ["-t", "--subject"], opts), "see #13");
+    assert.deepEqual(getAllFlagValues(args, ["-t", "--subject"], opts), [
+      "see #13",
+    ]);
+    // Checking only the matched spelling would break this set.
+    assert.equal(getFlagValue(args, ["-t", "--subject"]), null);
+  });
+
+  it("push --delete origin: boolean flag never eats origin", () => {
+    const args = [W("push"), W("--delete"), W("origin")];
+    assert.equal(getFlagValue(args, "--delete"), null);
+    assert.deepEqual(getAllFlagValues(args, "--delete"), []);
+    assert.equal(hasFlag(args, "--delete"), true);
+  });
+
+  it("trailing declared-consuming with no next token → scalar null, array []", () => {
+    const args = [W("--body"), W("x"), W("--body")];
+    const opts = consuming("--body");
+    assert.equal(getFlagValue(args, "--body", opts), null);
+    assert.deepEqual(getAllFlagValues(args, "--body", opts), ["x"]);
   });
 });
 
@@ -379,7 +513,10 @@ describe("glued short flags (issue #11)", () => {
   });
 
   describe("glue-enabled resolution", () => {
-    const glue = { gluedShorts: ["R"] };
+    const glue = {
+      gluedShorts: ["R"],
+      valueConsumingFlags: ["-R", "--repo"],
+    };
 
     it("resolves the glued form -Rx/y", () => {
       assert.equal(
@@ -502,7 +639,10 @@ describe("glued short flags (issue #11)", () => {
   });
 
   describe("eligibility guards", () => {
-    const glue = { gluedShorts: ["R"] };
+    const glue = {
+      gluedShorts: ["R"],
+      valueConsumingFlags: ["-R", "--repo"],
+    };
     const flags = ["-R", "--repo"];
 
     it("--repo=cad0p/x still attached-resolves", () => {
@@ -670,19 +810,25 @@ describe("command facade: package-root surface pin (#101)", () => {
 
   it("root commandFromInput getFlagValue is last-wins", async () => {
     const root = await import("../index.ts");
-    const cmd = root.commandFromInput({
-      tool: "bash",
-      args: [PW("--profile"), PW("a"), PW("--profile"), PW("b")],
-    });
+    const cmd = root.commandFromInput(
+      {
+        tool: "bash",
+        args: [PW("--profile"), PW("a"), PW("--profile"), PW("b")],
+      },
+      ["--profile"],
+    );
     assert.equal(cmd.getFlagValue("--profile"), "b");
   });
 
   it("root commandFromInput getAllFlagValues keeps argv order", async () => {
     const root = await import("../index.ts");
-    const cmd = root.commandFromInput({
-      tool: "bash",
-      args: [PW("-m"), PW("a"), PW("--message"), PW("b")],
-    });
+    const cmd = root.commandFromInput(
+      {
+        tool: "bash",
+        args: [PW("-m"), PW("a"), PW("--message"), PW("b")],
+      },
+      ["-m", "--message"],
+    );
     assert.deepEqual(cmd.getAllFlagValues(["-m", "--message"]), ["a", "b"]);
   });
 

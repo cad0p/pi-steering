@@ -51,6 +51,7 @@ import {
 import type { ResolvedPluginState } from "./plugin-merger.ts";
 import { resolvePlugins } from "./plugin-merger.ts";
 import type {
+  CLIDescriptor,
   Observer,
   Plugin,
   PredicateContext,
@@ -99,9 +100,65 @@ function editEvent(
   };
 }
 
+/**
+ * Basenames these suites drive without owning plugins (issue #107:
+ * absent descriptors are loud). Pinned explicit-strict here so each
+ * suite exercises its own feature — argv-descriptor loudness itself is
+ * pinned in the `cli-descriptors` / `argv-leaves` suites, not here.
+ * Gaps stay loud: resolution names the missing basename, so a new
+ * command surfaces as a failure pointing at this list.
+ */
+const TEST_STRICT_BASENAMES = [
+  "git",
+  "cd",
+  "cr",
+  "rm",
+  "echo",
+  "sync",
+  "alpha",
+  "bravo",
+  "sh",
+  "bash",
+  "ls",
+  "lint",
+  "diff",
+  "foo",
+  "run-me",
+  "sudo",
+  "aws",
+  "npm",
+  "anything",
+  "mycli",
+  "gh",
+  "go",
+  "kubectl",
+  "docker",
+  "cowsay",
+  "x",
+  "y",
+  "z",
+  "true",
+  "cat",
+  "pwd",
+  "cmd",
+  "finalize",
+];
+
 /** Resolve plugins with `{}` config so the merger surface is exercised too. */
 function resolve(plugins: Plugin[] = []): ResolvedPluginState {
-  return resolvePlugins(plugins, {});
+  // Explicit-strict for uncovered basenames (no descriptor-collision:
+  // an explicitly passed entry always wins by first registration).
+  const covered = new Set(
+    plugins.flatMap((p) => Object.keys(p.cliDescriptors ?? {})),
+  );
+  const strict: Record<string, CLIDescriptor> = {};
+  for (const b of TEST_STRICT_BASENAMES) {
+    if (!covered.has(b)) strict[b] = {};
+  }
+  return resolvePlugins(
+    [...plugins, { name: "test-explicit-strict", cliDescriptors: strict }],
+    {},
+  );
 }
 
 /**
@@ -2770,7 +2827,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
   ) {
     return buildEvaluator(
       { rules: [makeRule(when, name)] },
-      resolvePlugins([plugin], {}),
+      resolve([plugin]),
       makeHost(),
     );
   }
@@ -3111,7 +3168,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     };
     const ev = buildEvaluator(
       { rules: [rule] },
-      resolvePlugins([trinaryPlugin(() => "unknown")], {}),
+      resolve([trinaryPlugin(() => "unknown")]),
       makeHost(),
     );
     const r = await ev.evaluate(bashEvent("git push"), makeCtx("/repo"), 0);
@@ -3134,7 +3191,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     };
     const ev = buildEvaluator(
       { rules: [rule] },
-      resolvePlugins([trinaryPlugin(() => "unknown")], {}),
+      resolve([trinaryPlugin(() => "unknown")]),
       makeHost(),
     );
     const r = await ev.evaluate(bashEvent("git push"), makeCtx("/repo"), 0);
@@ -3156,14 +3213,11 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     };
     const ev = buildEvaluator(
       { rules: [rule] },
-      resolvePlugins(
-        [
-          trinaryPlugin(() => {
-            throw new Error("plugin handler bug");
-          }),
-        ],
-        {},
-      ),
+      resolve([
+        trinaryPlugin(() => {
+          throw new Error("plugin handler bug");
+        }),
+      ]),
       makeHost(),
     );
     const r = await ev.evaluate(bashEvent("git push"), makeCtx("/repo"), 0);
@@ -3184,14 +3238,11 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     };
     const ev = buildEvaluator(
       { rules: [rule] },
-      resolvePlugins(
-        [
-          trinaryPlugin(() => {
-            throw new Error("plugin handler bug");
-          }),
-        ],
-        {},
-      ),
+      resolve([
+        trinaryPlugin(() => {
+          throw new Error("plugin handler bug");
+        }),
+      ]),
       makeHost(),
     );
     const r = await ev.evaluate(bashEvent("git push"), makeCtx("/repo"), 0);
@@ -3213,7 +3264,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     try {
       const ev = buildEvaluator(
         { rules: [rule] },
-        resolvePlugins([trinaryPlugin(() => null as unknown as boolean)], {}),
+        resolve([trinaryPlugin(() => null as unknown as boolean)]),
         makeHost(),
       );
       const r = await ev.evaluate(bashEvent("git push"), makeCtx("/repo"), 0);
@@ -3243,10 +3294,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     try {
       const ev = buildEvaluator(
         { rules: [rule] },
-        resolvePlugins(
-          [trinaryPlugin(() => undefined as unknown as boolean)],
-          {},
-        ),
+        resolve([trinaryPlugin(() => undefined as unknown as boolean)]),
         makeHost(),
       );
       const r = await ev.evaluate(bashEvent("git push"), makeCtx("/repo"), 0);
@@ -7382,7 +7430,15 @@ describe("buildEvaluator: speculative allow with plugin env tracker (issue #54)"
   }
 
   const resolvedWithPlugin = resolvePlugins(
-    [{ name: "env-owner", trackers: { env: pluginEnvTracker() } }],
+    [
+      {
+        name: "env-owner",
+        trackers: { env: pluginEnvTracker() },
+        // Explicit strict: this suite pins the walk-registry path,
+        // not argv arity (issue #107 loudness).
+        cliDescriptors: { echo: {}, finalize: {} },
+      },
+    ],
     {},
     EVALUATOR_BUILTIN_TRACKERS,
   );

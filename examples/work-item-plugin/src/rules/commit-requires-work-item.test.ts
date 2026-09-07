@@ -12,11 +12,13 @@
 
 import { describe, it } from "node:test";
 import type { Plugin } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import {
   expectAllows,
   expectBlocks,
   loadHarness,
 } from "@cad0p/pi-steering/testing";
+import { featureBranchHost } from "../__test-helpers__.ts";
 import { workItemFormat } from "../predicates/work-item-format.ts";
 import { commitRequiresWorkItem } from "./commit-requires-work-item.ts";
 
@@ -34,9 +36,10 @@ const testPlugin: Plugin = {
 describe("commit-requires-work-item", () => {
   const harness = loadHarness({
     config: {
-      plugins: [testPlugin],
+      plugins: [testPlugin, gitPlugin],
       rules: [commitRequiresWorkItem],
     },
+    host: featureBranchHost(),
   });
 
   it("blocks a commit missing the work-item tag", async () => {

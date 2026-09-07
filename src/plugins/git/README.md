@@ -354,12 +354,14 @@ filter.
 
 ### CLI descriptors — keep the plugin declared for git argv knowledge
 
-Bare `subcommand: "push"` matches `git -C /x push` with NO inline
-`valueConsumingFlags` because this plugin declares the `git`
+Bare `subcommand: "push"` matches `git -C /x push` because this plugin declares the `git`
 basename's argv facts (`-C` / `-c` consume the next token; globals
 come before the subcommand) via its `cliDescriptors` slot
-(`./descriptors.ts`, re-exported as `GIT_CLI_DESCRIPTOR`). Core seeds
-nothing — every binary's descriptor is plugin-owned.
+(`./descriptors.ts`, re-exported as `GIT_CLI_DESCRIPTOR`). Arity is
+registry-only since #107 (no leaf-inline channel), and absent
+descriptors are loud: without this plugin, any `git` rule blocks with
+`MissingDescriptorError`. Core seeds nothing — every binary's
+descriptor is plugin-owned.
 
 Preferred opt-out: to author git rules without the shipped rails,
 import the plugin and drop rails via `disabledRules` — descriptors,

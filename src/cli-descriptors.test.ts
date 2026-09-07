@@ -2,15 +2,14 @@
 // Part of pi-steering.
 
 /**
- * Tests for `resolveDescriptor` precedence (issue #106 step-4).
+ * Tests for `resolveDescriptor` (issues #106/#107, registry-only).
  *
- * Pins the firm per-field composition:
- *   - inline `valueConsumingFlags`, when present, REPLACES the
- *     registry list (no union).
+ * Pins the firm resolution:
+ *   - registry `valueConsumingFlags` (validated) else strict empty set.
  *   - registry `positionPolicy` always overrides the
  *     `DEFAULT_POSITION_POLICIES` table fallback.
- *   - registry-absent + table-miss → strict `globals-anywhere` /
- *     empty set (table stays the fallback when registry absent).
+ *   - registry-absent → throws `MissingDescriptorError` (no silent
+ *     fallback; present-empty `{<bin>: {}}` is explicit strict).
  */
 
 import assert from "node:assert/strict";
@@ -18,31 +17,19 @@ import { describe, it } from "node:test";
 import {
   __resetDescriptorWarningsForTests,
   CORE_CLI_DESCRIPTORS,
+  MissingDescriptorError,
   resolveDescriptor,
 } from "./cli-descriptors.ts";
 import { GIT_CLI_DESCRIPTOR } from "./plugins/git/descriptors.ts";
 import type { CLIDescriptor } from "./schema.ts";
 
-describe("resolveDescriptor: precedence inline > registry > strict-default", () => {
-  it("inline flags REPLACE the registry list (no union)", () => {
-    __resetDescriptorWarningsForTests();
-    const registry = {
-      git: { valueConsumingFlags: ["-C", "-c", "--extra"] },
-    };
-    const resolved = resolveDescriptor(
-      "git",
-      { valueConsumingFlags: ["--only"] },
-      registry,
-    );
-    assert.deepEqual(resolved.valueConsumingFlags, ["--only"]);
-  });
-
-  it("registry flags win when inline absent", () => {
+describe("resolveDescriptor: registry > table > strict-default", () => {
+  it("registry flags resolve (no inline channel)", () => {
     __resetDescriptorWarningsForTests();
     const registry = {
       mycli: { valueConsumingFlags: ["--take"] },
     };
-    const resolved = resolveDescriptor("mycli", undefined, registry);
+    const resolved = resolveDescriptor("mycli", registry);
     assert.deepEqual(resolved.valueConsumingFlags, ["--take"]);
   });
 
@@ -52,33 +39,39 @@ describe("resolveDescriptor: precedence inline > registry > strict-default", () 
     const registry = {
       git: { positionPolicy: "globals-anywhere" as const },
     };
-    const resolved = resolveDescriptor("git", undefined, registry);
+    const resolved = resolveDescriptor("git", registry);
     assert.equal(resolved.positionPolicy, "globals-anywhere");
   });
 
-  it("registry-absent + table-miss → strict globals-anywhere / empty set", () => {
+  it("absent basename → throws MissingDescriptorError (loud, never silent strict)", () => {
     __resetDescriptorWarningsForTests();
-    const resolved = resolveDescriptor("unknown-basileus-xyz", undefined, {});
-    assert.equal(resolved.positionPolicy, "globals-anywhere");
-    assert.deepEqual(resolved.valueConsumingFlags, []);
-  });
-
-  it("per-field composition is UNCONDITIONAL (flags replace, policy overrides)", () => {
-    __resetDescriptorWarningsForTests();
-    const registry = {
-      git: {
-        positionPolicy: "globals-anywhere" as const,
-        valueConsumingFlags: ["--reg"],
+    assert.throws(
+      () => resolveDescriptor("unknown-basileus-xyz", {}),
+      (err: unknown) => {
+        assert.ok(err instanceof MissingDescriptorError);
+        assert.equal(err.basename, "unknown-basileus-xyz");
+        assert.match(err.message, /unknown-basileus-xyz/);
+        assert.match(err.message, /cliDescriptors/);
+        assert.match(err.message, /\{ "unknown-basileus-xyz": \{\} \}/);
+        return true;
       },
-    };
-    const resolved = resolveDescriptor(
-      "git",
-      { valueConsumingFlags: ["--inline"] },
-      registry,
     );
-    // Inline flags replace; registry policy still overrides table.
-    assert.deepEqual(resolved.valueConsumingFlags, ["--inline"]);
+    // Missing map entirely throws too.
+    assert.throws(
+      () => resolveDescriptor("npm", undefined),
+      MissingDescriptorError,
+    );
+  });
+
+  it("present-but-empty descriptor ({ npm: {} }) = explicit strict (silent)", () => {
+    __resetDescriptorWarningsForTests();
+    const resolved = resolveDescriptor("npm", { npm: {} });
+    assert.deepEqual(resolved.valueConsumingFlags, []);
+    // Policy still falls back to the walker table, then strict.
     assert.equal(resolved.positionPolicy, "globals-anywhere");
+    const gitStrict = resolveDescriptor("git", { git: {} });
+    assert.deepEqual(gitStrict.valueConsumingFlags, []);
+    assert.equal(gitStrict.positionPolicy, "globals-before-only");
   });
 
   it("git plugin descriptor is pinned (plugin-owned, core seeds nothing)", () => {
@@ -95,55 +88,5 @@ describe("resolveDescriptor: precedence inline > registry > strict-default", () 
     void _assignable;
     // Core seeds nothing.
     assert.deepEqual(CORE_CLI_DESCRIPTORS, {});
-  });
-});
-
-describe("isValueConsuming: arity-helper contract (issue #106 step-5, #107 implements)", () => {
-  it("returns true iff flag is in inline ?? descriptor ?? []", async () => {
-    const { isValueConsuming } = await import("./helpers/flags.ts");
-    // Inline present → descriptor ignored (REPLACE, no union).
-    assert.equal(
-      isValueConsuming("--a", { inline: ["--a"], descriptor: ["--b"] }),
-      true,
-    );
-    assert.equal(
-      isValueConsuming("--b", { inline: ["--a"], descriptor: ["--b"] }),
-      false,
-    );
-    // Inline absent → descriptor.
-    assert.equal(isValueConsuming("--b", { descriptor: ["--b"] }), true);
-    assert.equal(isValueConsuming("--x", { descriptor: ["--b"] }), false);
-    // Neither → false (strict: nothing consumes).
-    assert.equal(isValueConsuming("--x", {}), false);
-    // Empty inline REPLACES non-empty descriptor.
-    assert.equal(
-      isValueConsuming("--b", { inline: [], descriptor: ["--b"] }),
-      false,
-    );
-  });
-
-  it("FlagLookupOptions.valueConsumingFlags seam exists (no behavior change)", async () => {
-    const { commandFromInput } = await import("./helpers/command.ts");
-    // Per-ref binding is accepted and inert: presence-only agrees,
-    // value-level behavior unchanged until #107.
-    const cmd = commandFromInput(
-      {
-        tool: "bash",
-        command: "git push --delete origin",
-        basename: "git",
-        args: [
-          { text: "push", value: "push", rawText: "push" },
-          { text: "--delete", value: "--delete", rawText: "--delete" },
-          { text: "origin", value: "origin", rawText: "origin" },
-        ],
-      } as never,
-      ["-C", "-c"],
-    );
-    assert.equal(cmd.hasFlag("--delete"), true);
-    // Per-call opts win over the bound descriptor (contract, inert today).
-    assert.equal(
-      cmd.hasFlag("--delete", { valueConsumingFlags: ["--other"] }),
-      true,
-    );
   });
 });

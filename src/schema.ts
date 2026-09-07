@@ -500,16 +500,36 @@ export type FlagLeaf = FlagSpreadBase & {
 export type FlagLeafInner = FlagSpreadBase;
 
 /**
- * Per-binary argv knowledge for one command basename (issue #106).
+ * Canonical per-flag fact (issue #110). Key in the table is the canonical
+ * name (e.g. `repo`); matching is ALWAYS over `aliases`, never the key.
+ */
+export interface CLIFlag {
+  /** Spellings, e.g. ["-R", "--repo"]. Non-empty; each "--long" or "-x". */
+  readonly aliases: readonly string[];
+  /**
+   * Separate (-R x, --repo x) + attached (--repo=x) + glued (-Rx, shorts
+   * only) consumption. Longs never glue; attached needs no declaration.
+   */
+  readonly takesValue: boolean;
+}
+
+/**
+ * Per-binary argv knowledge for one command basename (issues #106/#110).
  *
- * A `CLIDescriptor` supplies `positionPolicy` + `valueConsumingFlags`
- * to both ARGV leaves (`when.subcommand` / `when.flag`) and to the
- * bound `SteeringCommand` facade — the ONLY arity channel (issue
- * #107, registry-only: no inline declaration). Resolution: registry entry
- * (present-empty `{<bin>: {}}` = explicit strict: flags `[]`, policy table
- * fallback) else throw `MissingDescriptorError` (loud block on the rule
- * path, non-match on the exemption path). Registry `positionPolicy` always
- * overrides the table fallback.
+ * A `CLIDescriptor` supplies `positionPolicy` + flag arity to both ARGV
+ * leaves (`when.subcommand` / `when.flag`) and to the bound
+ * `SteeringCommand` facade — the ONLY arity channel (issue #107,
+ * registry-only: no inline declaration). Resolution: registry entry
+ * (present-empty `{<bin>: {}}` = explicit strict: nothing consumes, policy
+ * table fallback) else throw `MissingDescriptorError` (loud block on the
+ * rule path, non-match on the exemption path). Registry `positionPolicy`
+ * always overrides the table fallback.
+ *
+ * Flag arity lives in the `flags` table (issue #110):
+ * `flags?: Record<canonical-name, CLIFlag>`. Glue DERIVES (`takesValue` +
+ * single-char-short alias ⇒ glues; longs never glue). During the #110
+ * migration `valueConsumingFlags` is still accepted (unioned with the
+ * table derivation); the cutover deletes it and rejects the legacy key.
  *
  * Keyed by command basename (`"git"`, `"gh"`) in
  * {@link Plugin.cliDescriptors} and the merged
@@ -518,8 +538,16 @@ export type FlagLeafInner = FlagSpreadBase;
 export interface CLIDescriptor {
   /** Walker half (cf. `DEFAULT_POSITION_POLICIES`). */
   positionPolicy?: PositionPolicy;
-  /** Pre-subcommand consumers (`-C`, `-c`, `-R`, …). */
+  /**
+   * Pre-subcommand consumers (`-C`, `-c`, `-R`, …).
+   *
+   * @deprecated Replaced by `flags` entries in #110. Still accepted
+   * during the migration (unioned with table derivation); the cutover
+   * deletes this field and treats its presence as malformed.
+   */
   valueConsumingFlags?: readonly string[];
+  /** Per-binary flag facts, keyed by canonical name (e.g. `repo`). */
+  flags?: Readonly<Record<string, CLIFlag>>;
 }
 
 /**

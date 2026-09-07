@@ -17,7 +17,7 @@
 
 import type { PositionPolicy } from "@cad0p/unbash-walker";
 import { DEFAULT_POSITION_POLICIES } from "@cad0p/unbash-walker";
-import type { CLIDescriptor } from "./schema.ts";
+import type { CLIDescriptor, CLIFlag } from "./schema.ts";
 
 /**
  * Core fallback map: basename → descriptor. Currently EMPTY — core
@@ -119,15 +119,122 @@ export function __resetDescriptorWarningsForTests(): void {
 }
 
 /**
+ * Resolved per-binary argv knowledge (issue #110).
+ *
+ * Derived spellings taking a separate value (table aliases where
+ * `takesValue`, unioned with the legacy `valueConsumingFlags` list during
+ * the #110 migration) plus derived glue letters (single-char-short aliases
+ * of `takesValue` entries). Longs never glue; bool shorts bundle, never
+ * glue.
+ */
+export interface ResolvedArity {
+  readonly positionPolicy: PositionPolicy;
+  /** Derived spellings taking a separate value (table aliases where takesValue). */
+  readonly valueConsumingFlags: ReadonlySet<string>;
+  /** Derived glue letters (single-char-short aliases of takesValue entries). */
+  readonly gluedShorts: ReadonlySet<string>;
+}
+
+/** Shared frozen empty arity for nameless refs (never throw, §2). */
+export const EMPTY_ARITY: ResolvedArity = Object.freeze({
+  positionPolicy: "globals-anywhere",
+  valueConsumingFlags: Object.freeze(new Set<string>()),
+  gluedShorts: Object.freeze(new Set<string>()),
+}) as ResolvedArity;
+
+/** True for `--long` (length > 2) or `-x` (length === 2) spellings. */
+function isWellFormedSpelling(spelling: unknown): spelling is string {
+  if (typeof spelling !== "string") return false;
+  if (spelling.startsWith("--")) return spelling.length > 2;
+  if (spelling.startsWith("-") && !spelling.startsWith("--")) {
+    return spelling.length === 2;
+  }
+  return false;
+}
+
+function isSingleCharShort(alias: string): boolean {
+  return alias.length === 2 && alias[0] === "-" && alias[1] !== "-";
+}
+
+/**
+ * PURE TOTAL table→sets derivation. SOLE site: called ONLY by
+ * `resolveDescriptor` (and `arityOf` through it). Longs contribute to
+ * `valueConsumingFlags` but NEVER to `gluedShorts`; multi-char `-xy`
+ * contributes to neither glue set (fail-open ignored ⇒ no glue).
+ * Malformed entries never reach here (merger skipped them; resolver
+ * re-validation guards plain-JS post-merge mutation first).
+ *
+ * Derivation rules (pinned): single-char-short of a `takesValue` entry
+ * glues (`{aliases:["-R","--repo"],takesValue:true}` ⇒ consuming
+ * `{"-R","--repo"}`, glue `{"R"}`); longs never glue (even `takesValue`);
+ * bool shorts bundle never glue (`takesValue:false` ⇒ contributes to neither
+ * set).
+ *
+ * getopt-`::` edge: optional-arg "glue-only never separate" shape is NOT
+ * modeled — declared `takesValue` consumes separate too; exotic,
+ * documented, ignored.
+ */
+export function deriveFlagSets(
+  flags: Readonly<Record<string, CLIFlag>> | undefined,
+): Pick<ResolvedArity, "valueConsumingFlags" | "gluedShorts"> {
+  const valueConsumingFlags = new Set<string>();
+  const gluedShorts = new Set<string>();
+  if (flags === undefined) return { valueConsumingFlags, gluedShorts };
+  if (flags === null || typeof flags !== "object" || Array.isArray(flags)) {
+    return { valueConsumingFlags, gluedShorts };
+  }
+  for (const entry of Object.values(flags)) {
+    if (entry === null || typeof entry !== "object") continue;
+    const { aliases, takesValue } = entry as Partial<CLIFlag>;
+    if (!Array.isArray(aliases) || aliases.length === 0) continue;
+    if (typeof takesValue !== "boolean") continue;
+    if (!aliases.every(isWellFormedSpelling)) continue;
+    if (!takesValue) continue;
+    for (const alias of aliases as readonly string[]) {
+      valueConsumingFlags.add(alias);
+      if (isSingleCharShort(alias)) {
+        gluedShorts.add(alias[1]!);
+      }
+    }
+  }
+  return { valueConsumingFlags, gluedShorts };
+}
+
+/**
+ * Per-tool_call hoisted resolution. `cache` is a call-scoped Map — created
+ * ONCE per tool_call in `evaluateEventInner` (stored on `SharedEvalContext`;
+ * per `mockContext` call on the test path); dies with the call;
+ * O(distinct basenames), in practice 1 entry. `runPredicateChain` (per
+ * rule×candidate) and `evaluateBashRule`'s per-ref loop only THREAD it,
+ * never create. `basename === undefined` → `EMPTY_ARITY` (no Map write,
+ * never throw).
+ */
+export function arityOf(
+  basename: string | undefined,
+  descriptors: Record<string, CLIDescriptor> | undefined,
+  cache: Map<string, ResolvedArity>,
+): ResolvedArity {
+  if (basename === undefined) return EMPTY_ARITY;
+  const cached = cache.get(basename);
+  if (cached !== undefined) return cached;
+  const resolved = resolveDescriptor(basename, descriptors);
+  cache.set(basename, resolved);
+  return resolved;
+}
+
+/**
  * Resolve per-binary argv knowledge for one ref basename (issues
- * #106/#107, registry-only).
+ * #106/#107, registry-only; #110 table derivation).
  *
  * Absent entry → throws {@link MissingDescriptorError} (loud:
  * basename + remedy). Present-but-empty (`{ npm: {} }`) is EXPLICIT
- * strict → silent verdicts (flags `[]`, policy table fallback).
+ * strict → silent verdicts (empty sets, policy table fallback).
+ * Missing/empty `flags` key ≡ `{flags:{}}` ≡ valid empty arity.
  *
- *   - `valueConsumingFlags`: registry list (validated) else empty
- *     strict default (nothing consumes).
+ *   - `valueConsumingFlags` + `gluedShorts`: derived via
+ *     {@link deriveFlagSets} from the `flags` table, UNIONED with the
+ *     legacy `valueConsumingFlags` list during the #110 migration
+ *     (cutover deletes the legacy channel).
  *   - `positionPolicy`: registry (when valid) >
  *     `DEFAULT_POSITION_POLICIES` table > strict `"globals-anywhere"`
  *     (table stays the fallback when registry absent).
@@ -136,11 +243,12 @@ export function __resetDescriptorWarningsForTests(): void {
  * `ResolvedPluginState.cliDescriptors` is mutable post-merge by
  * plain-JS callers. Invalid registry flags/policy → treat as absent
  * + one-shot WARN (module-level set, tagged `[invalid-descriptor]`).
+ * Invalid present NEVER throws — only ABSENT throws.
  */
 export function resolveDescriptor(
   basename: string,
   descriptors?: Record<string, CLIDescriptor>,
-): { positionPolicy: PositionPolicy; valueConsumingFlags: readonly string[] } {
+): ResolvedArity {
   const registryEntry =
     descriptors?.[basename] ?? CORE_CLI_DESCRIPTORS[basename];
 
@@ -151,54 +259,103 @@ export function resolveDescriptor(
     throw new MissingDescriptorError(basename);
   }
 
-  // Flags: registry (validated) else strict empty set.
-  let valueConsumingFlags: readonly string[];
+  // Flags: table derivation (validated) UNION legacy list (validated)
+  // else strict empty sets. Transition union keeps old readers green;
+  // the cutover deletes the legacy channel.
+  const derived = deriveFlagSets(registryEntry?.flags);
+  const valueConsumingFlags = new Set<string>(derived.valueConsumingFlags);
+  const gluedShorts = new Set<string>(derived.gluedShorts);
+  // Re-validate the table shape for WARN parity (derive skips silently;
+  // resolution warns once per basename on deformed tables).
+  const rawFlags: unknown = registryEntry?.flags;
+  if (rawFlags !== undefined) {
+    if (
+      rawFlags === null ||
+      typeof rawFlags !== "object" ||
+      Array.isArray(rawFlags)
+    ) {
+      warnInvalidDescriptorOnce(
+        basename,
+        "has malformed flags table (expected Record<name, { aliases, takesValue }>)",
+      );
+    } else {
+      for (const [key, entry] of Object.entries(
+        rawFlags as Record<string, unknown>,
+      )) {
+        if (
+          entry === null ||
+          typeof entry !== "object" ||
+          Array.isArray(entry)
+        ) {
+          warnInvalidDescriptorOnce(
+            basename,
+            `flag ${JSON.stringify(key)} has malformed entry ` +
+              `(expected { aliases: ("--long"|"-x")[], takesValue: boolean })`,
+          );
+          continue;
+        }
+        const { aliases, takesValue } = entry as {
+          aliases?: unknown;
+          takesValue?: unknown;
+        };
+        const aliasesOk =
+          Array.isArray(aliases) &&
+          aliases.length > 0 &&
+          aliases.every(isWellFormedSpelling);
+        if (!aliasesOk || typeof takesValue !== "boolean") {
+          warnInvalidDescriptorOnce(
+            basename,
+            `flag ${JSON.stringify(key)} has malformed entry ` +
+              `(expected { aliases: ("--long"|"-x")[], takesValue: boolean })`,
+          );
+        }
+      }
+    }
+  }
   if (registryEntry?.valueConsumingFlags !== undefined) {
     const v = registryEntry.valueConsumingFlags;
     if (Array.isArray(v) && v.every((f) => typeof f === "string")) {
-      valueConsumingFlags = v;
+      for (const f of v) valueConsumingFlags.add(f);
     } else {
       warnInvalidDescriptorOnce(
         basename,
         "has malformed valueConsumingFlags (expected string array)",
       );
-      valueConsumingFlags = [];
     }
-  } else {
-    valueConsumingFlags = [];
   }
 
   // Policy: registry (valid) > table > strict default.
   const rawRegistryPolicy = registryEntry?.positionPolicy;
+  let positionPolicy: PositionPolicy;
   if (typeof rawRegistryPolicy === "string") {
     if (VALID_DESCRIPTOR_POLICIES.has(rawRegistryPolicy)) {
-      return {
-        positionPolicy: rawRegistryPolicy as PositionPolicy,
-        valueConsumingFlags,
-      };
+      positionPolicy = rawRegistryPolicy as PositionPolicy;
+    } else {
+      warnInvalidDescriptorOnce(
+        basename,
+        `has invalid positionPolicy ${JSON.stringify(rawRegistryPolicy)}`,
+      );
+      positionPolicy = "globals-anywhere";
     }
-    warnInvalidDescriptorOnce(
-      basename,
-      `has invalid positionPolicy ${JSON.stringify(rawRegistryPolicy)}`,
-    );
   } else if (rawRegistryPolicy !== undefined) {
     warnInvalidDescriptorOnce(
       basename,
       `has invalid positionPolicy ${JSON.stringify(rawRegistryPolicy)}`,
     );
+    positionPolicy = "globals-anywhere";
+  } else {
+    const tablePolicy: unknown =
+      basename !== undefined
+        ? (DEFAULT_POSITION_POLICIES as Record<string, unknown>)[basename]
+        : undefined;
+    if (
+      typeof tablePolicy === "string" &&
+      VALID_DESCRIPTOR_POLICIES.has(tablePolicy)
+    ) {
+      positionPolicy = tablePolicy as PositionPolicy;
+    } else {
+      positionPolicy = "globals-anywhere";
+    }
   }
-  const tablePolicy: unknown =
-    basename !== undefined
-      ? (DEFAULT_POSITION_POLICIES as Record<string, unknown>)[basename]
-      : undefined;
-  if (
-    typeof tablePolicy === "string" &&
-    VALID_DESCRIPTOR_POLICIES.has(tablePolicy)
-  ) {
-    return {
-      positionPolicy: tablePolicy as PositionPolicy,
-      valueConsumingFlags,
-    };
-  }
-  return { positionPolicy: "globals-anywhere", valueConsumingFlags };
+  return { positionPolicy, valueConsumingFlags, gluedShorts };
 }

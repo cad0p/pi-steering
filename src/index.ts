@@ -234,6 +234,7 @@ export type {
   BuiltInWhenLeavesInner,
   BuiltInWhenLeavesOuter,
   CLIDescriptor,
+  CLIFlag,
   DefaultSpreadBase,
   EditRule,
   ExecOpts,

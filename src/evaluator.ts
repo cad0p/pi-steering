@@ -752,11 +752,15 @@ async function runPredicateChain(
 
     // Per-ref facade binding (registry-only, issue #107): resolve the
     // descriptor for this ref's basename once, bind its flags into
-    // the facade view (same list the ARGV leaves resolve).
+    // the facade view (same list the ARGV leaves resolve). Transition:
+    // ResolvedArity carries sets; spread here for the array-taking facade
+    // (cutover rebinds to arity directly).
     const resolvedFlags =
       cand.input.basename !== undefined
-        ? resolveDescriptor(cand.input.basename, shared.descriptors)
-            .valueConsumingFlags
+        ? [
+            ...resolveDescriptor(cand.input.basename, shared.descriptors)
+              .valueConsumingFlags,
+          ]
         : undefined;
     const ctx: PredicateContext = {
       cwd: cand.cwd,

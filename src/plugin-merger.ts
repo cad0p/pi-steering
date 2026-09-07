@@ -365,16 +365,21 @@ const VALID_DESCRIPTOR_POLICIES: ReadonlySet<string> = new Set([
 /**
  * Validate one `cliDescriptors` entry. Returns the entry unchanged
  * when well-formed, or `null` when malformed (caller skips + WARNs
- * with `invalid-descriptor`, never throws).
+ * with `invalid-descriptor`, never throws). Transition (#110): both
+ * `valueConsumingFlags` (legacy, still accepted) and `flags` (new table)
+ * validate; the cutover rejects the legacy key.
  *
  * Malformed: non-object descriptor, non-array `valueConsumingFlags`
- * (or non-string members), invalid `positionPolicy`.
+ * (or non-string members), invalid `positionPolicy`, non-object `flags`
+ * table. Per-entry malformation inside `flags` does NOT fail the whole
+ * descriptor here — the caller splits valid entries from warned ones
+ * (per-entry granularity, not per-descriptor rejection).
  */
 function validateDescriptorValue(value: unknown): CLIDescriptor | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
-  const obj = value as Partial<CLIDescriptor>;
+  const obj = value as Partial<CLIDescriptor> & { flags?: unknown };
   if (
     obj.positionPolicy !== undefined &&
     (typeof obj.positionPolicy !== "string" ||
@@ -390,7 +395,102 @@ function validateDescriptorValue(value: unknown): CLIDescriptor | null {
       return null;
     }
   }
+  if (obj.flags !== undefined) {
+    if (
+      obj.flags === null ||
+      typeof obj.flags !== "object" ||
+      Array.isArray(obj.flags)
+    ) {
+      return null;
+    }
+  }
   return obj as CLIDescriptor;
+}
+
+/** True for `--long` / `-x` spellings (merger-side entry validation). */
+function isValidFlagAlias(spelling: unknown): spelling is string {
+  if (typeof spelling !== "string") return false;
+  if (spelling.startsWith("--")) return spelling.length > 2;
+  if (spelling.startsWith("-") && !spelling.startsWith("--")) {
+    return spelling.length === 2;
+  }
+  return false;
+}
+
+/**
+ * Split a validated descriptor's `flags` table into merged entries +
+ * per-entry diagnostics. Malformed entries (non-object, bad `aliases`,
+ * non-boolean `takesValue`) are skipped + one `invalid-descriptor` WARN
+ * each naming basename + canonical key; the rest of the table still
+ * merges. Duplicate spellings across entries in ONE table → WARN +
+ * first-entry-wins (later entry's colliding spelling ignored,
+ * non-colliding spellings still merge).
+ */
+function splitValidFlagEntries(
+  basename: string,
+  flags: Readonly<Record<string, import("./schema.ts").CLIFlag>> | undefined,
+  diagnostics: import("./schema.ts").SteeringDiagnostic[],
+  pluginName: string,
+): Readonly<Record<string, import("./schema.ts").CLIFlag>> | undefined {
+  if (flags === undefined) return undefined;
+  const out: Record<string, import("./schema.ts").CLIFlag> = {};
+  const seenSpelling = new Map<string, string>(); // spelling -> canonical key
+  for (const [key, entry] of Object.entries(flags)) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      diagnostics.push({
+        type: "warning",
+        kind: "invalid-descriptor",
+        message:
+          `invalid CLI descriptor "${basename}" flag ${JSON.stringify(key)} — ` +
+          `plugin "${pluginName}" (entry ignored); expected ` +
+          `{ aliases: ("--long"|"-x")[], takesValue: boolean }`,
+      });
+      continue;
+    }
+    const { aliases, takesValue } = entry as {
+      aliases?: unknown;
+      takesValue?: unknown;
+    };
+    if (
+      !Array.isArray(aliases) ||
+      aliases.length === 0 ||
+      !aliases.every(isValidFlagAlias) ||
+      typeof takesValue !== "boolean"
+    ) {
+      diagnostics.push({
+        type: "warning",
+        kind: "invalid-descriptor",
+        message:
+          `invalid CLI descriptor "${basename}" flag ${JSON.stringify(key)} — ` +
+          `plugin "${pluginName}" (entry ignored); expected ` +
+          `{ aliases: ("--long"|"-x")[], takesValue: boolean }`,
+      });
+      continue;
+    }
+    const keptAliases: string[] = [];
+    for (const spelling of aliases as string[]) {
+      const owner = seenSpelling.get(spelling);
+      if (owner !== undefined) {
+        diagnostics.push({
+          type: "warning",
+          kind: "invalid-descriptor",
+          message:
+            `duplicate flag spelling ${JSON.stringify(spelling)} in CLI descriptor ` +
+            `"${basename}" — plugins entry ${JSON.stringify(key)} ignored for ` +
+            `that spelling (first-entry ${JSON.stringify(owner)} wins)`,
+        });
+        continue;
+      }
+      seenSpelling.set(spelling, key);
+      keptAliases.push(spelling);
+    }
+    if (keptAliases.length === 0) continue;
+    out[key] = {
+      aliases: keptAliases,
+      takesValue: takesValue as boolean,
+    };
+  }
+  return out;
 }
 
 export function resolvePlugins(
@@ -722,8 +822,8 @@ export function resolvePlugins(
           kind: "invalid-descriptor",
           message:
             `invalid CLI descriptor "${basename}" — plugin "${plugin.name}" ` +
-            `(ignored); expected { positionPolicy?, valueConsumingFlags? } ` +
-            `with a valid policy and string-array flags`,
+            `(ignored); expected { positionPolicy?, flags?: Record<name, ` +
+            `{ aliases, takesValue }> } with a valid policy and flag entries`,
         });
         continue;
       }
@@ -739,7 +839,15 @@ export function resolvePlugins(
         continue;
       }
       descriptorOwner.set(basename, plugin.name);
-      cliDescriptors[basename] = valid;
+      // Per-entry split: malformed entries warn + skip, rest merges.
+      const split = splitValidFlagEntries(
+        basename,
+        valid.flags,
+        diagnostics,
+        plugin.name,
+      );
+      cliDescriptors[basename] =
+        split === undefined ? valid : { ...valid, flags: split };
     }
   }
   // Core fallback fill (no WARN) + shadow loudness (WARN, plugin wins).

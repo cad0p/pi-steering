@@ -623,13 +623,15 @@ export function mockContext(
 
   const mockResolvedFlags =
     input.basename !== undefined && options.descriptors !== undefined
-      ? resolveDescriptor(
-          input.basename,
-          options.descriptors as Record<
-            string,
-            import("../schema.ts").CLIDescriptor
-          >,
-        ).valueConsumingFlags
+      ? [
+          ...resolveDescriptor(
+            input.basename,
+            options.descriptors as Record<
+              string,
+              import("../schema.ts").CLIDescriptor
+            >,
+          ).valueConsumingFlags,
+        ]
       : undefined;
   const ctx: PredicateContext = {
     cwd,

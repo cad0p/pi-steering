@@ -741,11 +741,11 @@ function evaluateSubcommand(
   // pre-loudness behavior (no binary, nothing to declare).
   const resolved: {
     positionPolicy: PositionPolicy;
-    valueConsumingFlags: readonly string[];
+    valueConsumingFlags: ReadonlySet<string>;
   } =
     basename !== undefined
       ? resolveDescriptor(basename, descriptors)
-      : { positionPolicy: "globals-anywhere", valueConsumingFlags: [] };
+      : { positionPolicy: "globals-anywhere", valueConsumingFlags: new Set() };
   // Invalid registry policy → skip the leaf (fail-SKIP, not unknown).
   // resolveDescriptor already one-shot WARNed with [invalid-descriptor];
   // returning false here keeps the invalid→absent→skip contract without
@@ -759,7 +759,8 @@ function evaluateSubcommand(
     return false;
   }
   const positionPolicy = resolved.positionPolicy;
-  const valueConsumingFlags = resolved.valueConsumingFlags;
+  // Transition: ResolvedArity carries sets; the walker still takes a list.
+  const valueConsumingFlags = [...resolved.valueConsumingFlags];
   // The resolved policy feeds the existing VALID guard below (S1):
   // descriptor re-validation already one-shot WARNed, so this stays
   // as defense-in-depth for table pollution.
@@ -934,10 +935,11 @@ function evaluateFlag(
   // re-validated at resolution time (no try/catch around flagPresent's
   // `new Set(...)` — a non-iterable registry value would escape as
   // rule-skip fail-open). Nameless refs skip resolution (silent
-  // strict, same carve-out as `evaluateSubcommand`).
+  // strict, same carve-out as `evaluateSubcommand`). Transition: spread
+  // the derived set for the list-taking leaf scan.
   const resolvedFlags: readonly string[] =
     basename !== undefined
-      ? resolveDescriptor(basename, descriptors).valueConsumingFlags
+      ? [...resolveDescriptor(basename, descriptors).valueConsumingFlags]
       : [];
   return flagPresent(
     args,

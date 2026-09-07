@@ -29,11 +29,13 @@ function PW(value: string, text?: string) {
 function bashCmd(
   args: ReturnType<typeof PW>[],
   envAssignments?: Word[],
+  resolvedFlags?: readonly string[],
 ): SteeringCommand {
   return commandFromInput(
     envAssignments === undefined
       ? { tool: "bash", args }
       : { tool: "bash", args, envAssignments },
+    resolvedFlags,
   );
 }
 
@@ -43,7 +45,10 @@ function S(...values: string[]): ReturnType<typeof PW>[] {
 
 describe("SteeringCommand.getAllFlagValues", () => {
   it("collects repeated flags in argv order across mixed aliases", () => {
-    const cmd = bashCmd(S("-m", "a", "--message", "b"));
+    const cmd = bashCmd(S("-m", "a", "--message", "b"), undefined, [
+      "-m",
+      "--message",
+    ]);
     assert.deepEqual(cmd.getAllFlagValues(["-m", "--message"]), ["a", "b"]);
   });
 
@@ -54,12 +59,11 @@ describe("SteeringCommand.getAllFlagValues", () => {
 
   it("skips separated-empty (no push), unlike attached-empty", () => {
     // Scalar returns null on `--flag ""`; the array twin SKIPS.
-    const cmd = bashCmd([
-      PW("--subject"),
-      PW("", '""'),
-      PW("--subject"),
-      PW("x"),
-    ]);
+    const cmd = bashCmd(
+      [PW("--subject"), PW("", '""'), PW("--subject"), PW("x")],
+      undefined,
+      ["--subject"],
+    );
     assert.deepEqual(cmd.getAllFlagValues("--subject"), ["x"]);
   });
 
@@ -78,13 +82,17 @@ describe("SteeringCommand.getAllFlagValues", () => {
   });
 
   it("trailing valueless occurrence contributes nothing (scalar poisoned to null)", () => {
-    const cmd = bashCmd(S("-m", "a", "-m"));
+    const cmd = bashCmd(S("-m", "a", "-m"), undefined, ["-m"]);
     assert.deepEqual(cmd.getAllFlagValues("-m"), ["a"]);
     assert.equal(cmd.getFlagValue("-m"), null);
   });
 
   it("trailing empty-next-token contributes nothing (scalar poisoned to null)", () => {
-    const cmd = bashCmd([PW("-m"), PW("a"), PW("-m"), PW("", '""')]);
+    const cmd = bashCmd(
+      [PW("-m"), PW("a"), PW("-m"), PW("", '""')],
+      undefined,
+      ["-m"],
+    );
     assert.deepEqual(cmd.getAllFlagValues("-m"), ["a"]);
     assert.equal(cmd.getFlagValue("-m"), null);
   });
@@ -96,10 +104,11 @@ describe("SteeringCommand.getAllFlagValues", () => {
   });
 
   it("is quote-aware via .value-first reads", () => {
-    const cmd = bashCmd([
-      PW("-m"),
-      PW("conventional: subject", "'conventional: subject'"),
-    ]);
+    const cmd = bashCmd(
+      [PW("-m"), PW("conventional: subject", "'conventional: subject'")],
+      undefined,
+      ["-m"],
+    );
     assert.deepEqual(cmd.getAllFlagValues("-m"), ["conventional: subject"]);
   });
 
@@ -112,15 +121,21 @@ describe("SteeringCommand.getAllFlagValues", () => {
   });
 
   it("last-element invariant holds for well-formed non-trailing-broken inputs", () => {
-    const cases: { args: ReturnType<typeof PW>[]; flags: string[] }[] = [
+    const cases: {
+      args: ReturnType<typeof PW>[];
+      flags: string[];
+    }[] = [
       { args: S("-m", "a", "-m", "b"), flags: ["-m"] },
-      { args: S("-m", "a", "--message", "b"), flags: ["-m", "--message"] },
+      {
+        args: S("-m", "a", "--message", "b"),
+        flags: ["-m", "--message"],
+      },
       { args: S("--subject=x"), flags: ["--subject"] },
       { args: S("--subject=", "--subject=y"), flags: ["--subject"] },
       { args: S("status"), flags: ["-m"] },
     ];
     for (const { args, flags } of cases) {
-      const cmd = bashCmd(args);
+      const cmd = bashCmd(args, undefined, flags);
       const all = cmd.getAllFlagValues(flags);
       assert.equal(
         cmd.getFlagValue(flags),
@@ -128,7 +143,7 @@ describe("SteeringCommand.getAllFlagValues", () => {
       );
     }
     // Glued form under matching opt-in options.
-    const glued = bashCmd(S("-Rc/d", "-Re/f"));
+    const glued = bashCmd(S("-Rc/d", "-Re/f"), undefined, ["-R"]);
     const opts = { gluedShorts: ["R"] };
     const allGlued = glued.getAllFlagValues("-R", opts);
     assert.deepEqual(allGlued, ["c/d", "e/f"]);
@@ -191,7 +206,9 @@ describe("commandFromInput totality + COPY", () => {
   it("snapshots (COPYs) the caller's arrays — later mutation cannot leak", () => {
     const args = [PW("-m"), PW("a")];
     const env = [W("A=1")];
-    const cmd = commandFromInput({ tool: "bash", args, envAssignments: env });
+    const cmd = commandFromInput({ tool: "bash", args, envAssignments: env }, [
+      "-m",
+    ]);
     args.push(PW("-m"), PW("b"));
     env.push(W("B=2"));
     assert.deepEqual(cmd.getAllFlagValues("-m"), ["a"]);

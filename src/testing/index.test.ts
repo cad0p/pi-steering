@@ -798,8 +798,12 @@ describe("mockContext", () => {
       input: {
         tool: "bash",
         command: "git commit -m a -m b",
+        basename: "testcli",
         args: [arg("-m"), arg("a"), arg("-m"), arg("b")],
       },
+      // Strict-always arity: the facade consumes `-m` only via the
+      // descriptor binding (same channel the engine uses per ref).
+      descriptors: { testcli: { valueConsumingFlags: ["-m"] } },
     });
     assert.deepEqual(ctx.command.getAllFlagValues("-m"), ["a", "b"]);
     assert.equal(ctx.command.getFlagValue("-m"), "b");
@@ -1081,7 +1085,19 @@ describe("ctx.command harness integration", () => {
         condition: (ctx) => ctx.command.getAllFlagValues(["-m"]).length === 2,
       },
     };
-    const h = loadHarness({ config: { rules: [rule] } });
+    const h = loadHarness({
+      config: {
+        // Synthetic plugin-registered `-m` fact (issue #107
+        // strict-always: the facade consumes only via descriptors).
+        plugins: [
+          {
+            name: "test-facts",
+            cliDescriptors: { git: { valueConsumingFlags: ["-m"] } },
+          },
+        ],
+        rules: [rule],
+      },
+    });
     const hit = await h.evaluate(
       {
         type: "tool_call",

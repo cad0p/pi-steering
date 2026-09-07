@@ -46,29 +46,40 @@ export interface FlagLookupOptions {
   gluedShorts?: readonly string[];
 
   /**
-   * Flags that consume the following token (issue #106 seam for #107).
-   * Precedence: per-call opts > descriptor > empty strict default
-   * (no declaration anywhere → nothing consumes). #107 implements
-   * consumption against this exact field; this issue only declares
-   * the seam (no `positionals()` impl, no behavior change).
+   * Flags that consume the following token (strict-always arity).
+   * The ONLY arity source on the standalone path: an exact-token
+   * occurrence consumes its next token iff ANY queried alias is in
+   * this list (see {@link isValueConsuming}); absent/empty means
+   * nothing consumes (undeclared separated forms are valueless).
+   * Attached `--flag=value` and opt-in glued `-X<rest>` forms always
+   * apply — they carry their value on the token. The bound facade
+   * (`commandFromInput`) threads its descriptor-resolved list here;
+   * bare-`Word[]` callers declare explicitly.
    */
   valueConsumingFlags?: readonly string[];
 }
 
 /**
  * Shared arity helper backing `getFlagValue` / `getAllFlagValues` /
- * `positionals()` (issue #106 seam, implemented by #107).
+ * `positionals()` (issues #106/#107, registry-only).
  *
- * Returns `true` iff `flag` is in `inline ?? descriptor ?? []` —
- * inline REPLACES the descriptor list (no union); absent everywhere
- * means non-consuming (strict always).
+ * Returns `true` iff `flag` is in `descriptor ?? []` — absent means
+ * non-consuming (strict always: undeclared flags never consume).
+ * Callers pass their resolved list: standalone helpers thread
+ * `opts.valueConsumingFlags`; the bound facade threads its
+ * `commandFromInput(input, resolvedFlags)` binding; the leaves
+ * thread `resolveDescriptor(basename, descriptors)`.
+ *
+ * Alias sets OR at each position: callers check ANY queried alias
+ * (`flagSet.some((f) => isValueConsuming(f, list))`) — checking only
+ * the matched spelling would break `[-t, --subject]`-style sets
+ * where the descriptor lists one spelling.
  */
 export function isValueConsuming(
   flag: string,
-  resolved: { inline?: readonly string[]; descriptor?: readonly string[] },
+  descriptor?: readonly string[],
 ): boolean {
-  const list = resolved.inline ?? resolved.descriptor ?? [];
-  return list.includes(flag);
+  return (descriptor ?? []).includes(flag);
 }
 
 /** Shared empty set so the no-glue fast path never allocates. */
@@ -206,7 +217,12 @@ export function hasFlag(
  *                ["-t", "--subject"]); // "closes #12"
  *
  * Recognizes three forms (precedence per scanned position):
- *   - exact:     `--flag`       → separated form: NEXT token's value
+ *   - exact:     `--flag`       → separated form: NEXT token's value,
+ *                 gated on strict-always arity — applies ONLY when a
+ *                 queried alias is declared in
+ *                 `opts.valueConsumingFlags` (undeclared exact
+ *                 occurrences are present-but-valueless: skipped here,
+ *                 their next token scans alone).
  *   - attached: `--flag=value`  → returns `"value"` (may be `""`)
  *   - glued:     `-X<rest>`     → returns `<rest>` (opt-in ONLY, via
  *                 {@link FlagLookupOptions.gluedShorts}: the walker keeps
@@ -227,7 +243,9 @@ export function hasFlag(
  *
  * Fail-closed edge: a TRAILING valueless occurrence wins over an
  * earlier valued one — `cmd -t foo --subject` returns `null`, with NO
- * fallback to the overridden `-t foo`. Real pflag rejects that command
+ * fallback to the overridden `-t foo` (declared or not: a trailing
+ * exact token never reads, so strict-always gating cannot resurrect
+ * an earlier value). Real pflag rejects that command
  * line anyway.
  *
  * Matching is exact token equality or the `${flag}=` attached prefix,
@@ -243,13 +261,23 @@ export function getFlagValue(
 ): string | null {
   const flagSet = typeof flags === "string" ? [flags] : flags;
   const glueLetters = glueLettersFor(flagSet, opts);
+  // Strict-always gate (issue #107): the separated form applies ONLY
+  // to declared consuming flags. Alias sets OR — ANY listed alias
+  // in the resolved list makes every exact occurrence consume.
+  const consumesNext = flagSet.some((f) =>
+    isValueConsuming(f, opts?.valueConsumingFlags),
+  );
   const argsArr = args ?? [];
   for (let i = argsArr.length - 1; i >= 0; i--) {
     const match = matchFlagAt(wordValue(argsArr[i]), flagSet, glueLetters);
     if (!match) continue;
     if (match.kind === "exact") {
       const next = argsArr[i + 1];
+      // Trailing valueless occurrence poisons the scalar (fail-closed),
+      // declared or not — `cmd --m` models a broken command line, so
+      // last-wins returns `null` with NO fallback to earlier values.
       if (next === undefined) return null;
+      if (!consumesNext) continue;
       const nextVal = wordValue(next);
       return nextVal === "" ? null : nextVal;
     }
@@ -314,12 +342,18 @@ export function getAllFlagValues(
 ): string[] {
   const flagSet = typeof flags === "string" ? [flags] : flags;
   const glueLetters = glueLettersFor(flagSet, opts);
+  // Same strict-always gate as the scalar: undeclared exact
+  // occurrences contribute nothing (their next token scans alone).
+  const consumesNext = flagSet.some((f) =>
+    isValueConsuming(f, opts?.valueConsumingFlags),
+  );
   const argsArr = args ?? [];
   const collected: string[] = [];
   for (let i = 0; i < argsArr.length; i++) {
     const match = matchFlagAt(wordValue(argsArr[i]), flagSet, glueLetters);
     if (!match) continue;
     if (match.kind === "exact") {
+      if (!consumesNext) continue;
       const next = argsArr[i + 1];
       if (next === undefined) continue;
       const nextVal = wordValue(next);

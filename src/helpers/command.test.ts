@@ -67,18 +67,17 @@ describe("SteeringCommand.getAllFlagValues", () => {
     assert.deepEqual(cmd.getAllFlagValues("--subject"), ["x"]);
   });
 
-  it("resolves glued shorts only when opted in", () => {
-    const glued = bashCmd(S("-Rc/d"));
-    assert.deepEqual(glued.getAllFlagValues("-R", { gluedShorts: ["R"] }), [
-      "c/d",
-    ]);
-    const blind = bashCmd(S("-Rc/d"));
-    assert.deepEqual(blind.getAllFlagValues("-R"), []);
+  it("bound path never decomposes glued shorts (no per-call opts)", () => {
+    const cmd = bashCmd(S("-Rc/d"), undefined, ["-R"]);
+    // Blind default: the glued word matches nothing, contributes nothing.
+    assert.deepEqual(cmd.getAllFlagValues("-R"), []);
+    assert.equal(cmd.getFlagValue("-R"), null);
+    assert.equal(cmd.hasFlag("-R"), false);
   });
 
   it("does not decompose an undeclared bundle lead", () => {
     const cmd = bashCmd(S("-vf", "alpine"));
-    assert.deepEqual(cmd.getAllFlagValues("-f", { gluedShorts: ["f"] }), []);
+    assert.deepEqual(cmd.getAllFlagValues("-f"), []);
   });
 
   it("trailing valueless occurrence contributes nothing (scalar poisoned to null)", () => {
@@ -142,12 +141,155 @@ describe("SteeringCommand.getAllFlagValues", () => {
         all.length > 0 ? all[all.length - 1] : null,
       );
     }
-    // Glued form under matching opt-in options.
+    // Bound path has no glue: glued words stay opaque on both sides.
     const glued = bashCmd(S("-Rc/d", "-Re/f"), undefined, ["-R"]);
-    const opts = { gluedShorts: ["R"] };
-    const allGlued = glued.getAllFlagValues("-R", opts);
-    assert.deepEqual(allGlued, ["c/d", "e/f"]);
-    assert.equal(glued.getFlagValue("-R", opts), allGlued[allGlued.length - 1]);
+    assert.deepEqual(glued.getAllFlagValues("-R"), []);
+    assert.equal(glued.getFlagValue("-R"), null);
+  });
+});
+
+describe("SteeringCommand bound methods take NO opts (issue #107)", () => {
+  it("excess-arg calls fail tsc (@ts-expect-error pins)", () => {
+    const cmd = bashCmd(S("-R", "c/d"), undefined, ["-R"]);
+    // @ts-expect-error — bound facade accepts no options bag (registry-only arity)
+    void cmd.hasFlag("-R", { gluedShorts: ["R"] });
+    // @ts-expect-error — bound facade accepts no options bag (registry-only arity)
+    void cmd.getFlagValue("-R", { valueConsumingFlags: ["-R"] });
+    // @ts-expect-error — bound facade accepts no options bag (registry-only arity)
+    void cmd.getAllFlagValues("-R", { valueConsumingFlags: ["-R"] });
+  });
+
+  it("binds the descriptor-resolved list; undeclared flags are valueless", () => {
+    const cmd = commandFromInput(
+      {
+        tool: "bash",
+        command: "git push --delete origin",
+        basename: "git",
+        args: [PW("push"), PW("--delete"), PW("origin")],
+      } as PredicateToolInput,
+      ["-C", "-c"],
+    );
+    assert.equal(cmd.hasFlag("--delete"), true);
+    assert.equal(cmd.getFlagValue("--delete"), null);
+    assert.deepEqual(cmd.getAllFlagValues("--delete"), []);
+    assert.deepEqual(cmd.positionals(), ["push", "--delete", "origin"]);
+  });
+});
+
+describe("SteeringCommand.positionals (issue #107)", () => {
+  it("includes the subcommand run", () => {
+    const cmd = bashCmd(S("push", "origin", ":branch"));
+    assert.deepEqual(cmd.positionals(), ["push", "origin", ":branch"]);
+  });
+
+  it("skips declared-consuming flags + values via the bound descriptor", () => {
+    const gh = (args: ReturnType<typeof PW>[]) =>
+      commandFromInput({ tool: "bash", args }, ["--body"]);
+    assert.deepEqual(gh(S("pr", "merge", "--body", "TEXT")).positionals(), [
+      "pr",
+      "merge",
+    ]);
+    // Undeclared `--frobnicate` consumes nothing: TEXT stays positional.
+    assert.deepEqual(
+      gh(S("pr", "merge", "--frobnicate", "TEXT")).positionals(),
+      ["pr", "merge", "--frobnicate", "TEXT"],
+    );
+  });
+
+  it("push --delete origin keeps both (registry-only pin)", () => {
+    // §6 rule 4 vs §7 pin: clean `--long` / `-x` flag-words that are
+    // not declared-consuming surface as themselves; only consuming
+    // values, attached forms, and opaque bundles skip.
+    const cmd = bashCmd(S("push", "--delete", "origin"));
+    assert.equal(cmd.getFlagValue("--delete"), null);
+    assert.deepEqual(cmd.getAllFlagValues("--delete"), []);
+    assert.deepEqual(cmd.positionals(), ["push", "--delete", "origin"]);
+  });
+
+  it("-- terminates: everything after is positional verbatim", () => {
+    assert.deepEqual(bashCmd(S("checkout", "--", ".")).positionals(), [
+      "checkout",
+      ".",
+    ]);
+    assert.deepEqual(bashCmd(S("exec", "<pod>", "--", "<cmd>")).positionals(), [
+      "exec",
+      "<pod>",
+      "<cmd>",
+    ]);
+    // Post-`--` `--force` surfaces here (documented divergence:
+    // `when.flag` still scans it as present).
+    assert.deepEqual(bashCmd(S("push", "--", "--force")).positionals(), [
+      "push",
+      "--force",
+    ]);
+  });
+
+  it("attached forms never surface", () => {
+    assert.deepEqual(bashCmd(S("--subject=x")).positionals(), []);
+    assert.deepEqual(
+      bashCmd(S("pr", "merge", "--subject=x"), undefined, [
+        "--subject",
+      ]).positionals(),
+      ["pr", "merge"],
+    );
+  });
+
+  it("bundles surface zero letters (never decomposed)", () => {
+    assert.deepEqual(bashCmd(S("-fdx")).positionals(), []);
+    assert.deepEqual(bashCmd(S("clean", "-fdx")).positionals(), ["clean"]);
+    assert.deepEqual(bashCmd(S("-vf", "alpine")).positionals(), ["alpine"]);
+  });
+
+  it("is quote-aware via .value-first reads", () => {
+    // A quoted value token classifies by its resolved value.
+    assert.deepEqual(
+      bashCmd([PW("see --help", '"see --help"')]).positionals(),
+      ["see --help"],
+    );
+    // Quoted flag spelling still exact-matches for consumption.
+    const declared = bashCmd(
+      [PW("--body", '"--body"'), PW("TEXT")],
+      undefined,
+      ["--body"],
+    );
+    assert.deepEqual(declared.positionals(), []);
+  });
+
+  it("empty args → []", () => {
+    assert.deepEqual(bashCmd([]).positionals(), []);
+    assert.deepEqual(commandFromInput({ tool: "bash" }).positionals(), []);
+  });
+
+  it("::weird / copy-refspec shapes pass through", () => {
+    assert.deepEqual(bashCmd(S("push", "origin", "::weird")).positionals(), [
+      "push",
+      "origin",
+      "::weird",
+    ]);
+    assert.deepEqual(
+      bashCmd(
+        S("fetch", "origin", "+refs/heads/*:refs/remotes/origin/*"),
+      ).positionals(),
+      ["fetch", "origin", "+refs/heads/*:refs/remotes/origin/*"],
+    );
+  });
+
+  it("trailing declared-consuming is skipped", () => {
+    assert.deepEqual(
+      bashCmd(S("--body"), undefined, ["--body"]).positionals(),
+      [],
+    );
+  });
+
+  it("bare - surfaces (stdin convention)", () => {
+    assert.deepEqual(bashCmd(S("-")).positionals(), ["-"]);
+  });
+
+  it("snapshots the input (no post-construction leak)", () => {
+    const args = [PW("push"), PW("origin")];
+    const cmd = commandFromInput({ tool: "bash", args });
+    args.push(PW(":branch"));
+    assert.deepEqual(cmd.positionals(), ["push", "origin"]);
   });
 });
 
@@ -155,11 +297,12 @@ describe("SteeringCommand delegation", () => {
   it("hasFlag / getFlagValue / hasEnvAssignment / isInfoOnly match the bare mechanism", () => {
     const args = [PW("--profile"), PW("dev"), PW("--profile=prod")];
     const env = [W("AWS_PROFILE=dev")];
-    const cmd = bashCmd(args, env);
+    const cmd = bashCmd(args, env, ["--profile"]);
+    const opts = { valueConsumingFlags: ["--profile"] };
     assert.equal(cmd.hasFlag("--profile"), hasFlag(args, "--profile"));
     assert.equal(
       cmd.getFlagValue("--profile"),
-      getFlagValue(args, "--profile"),
+      getFlagValue(args, "--profile", opts),
     );
     assert.equal(
       cmd.hasEnvAssignment("AWS_PROFILE"),
@@ -186,6 +329,7 @@ describe("SteeringCommand delegation", () => {
     assert.equal(cmd.hasFlag("--help"), false);
     assert.equal(cmd.getFlagValue("--help"), null);
     assert.deepEqual(cmd.getAllFlagValues("--help"), []);
+    assert.deepEqual(cmd.positionals(), []);
     assert.equal(cmd.hasEnvAssignment("A"), false);
     assert.equal(cmd.isInfoOnly(), false);
   });
@@ -198,6 +342,7 @@ describe("commandFromInput totality + COPY", () => {
       assert.equal(cmd.hasFlag("-m"), false);
       assert.equal(cmd.getFlagValue("-m"), null);
       assert.deepEqual(cmd.getAllFlagValues("-m"), []);
+      assert.deepEqual(cmd.positionals(), []);
       assert.equal(cmd.hasEnvAssignment("A"), false);
       assert.equal(cmd.isInfoOnly(), false);
     }

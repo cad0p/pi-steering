@@ -97,34 +97,3 @@ describe("resolveDescriptor: precedence inline > registry > strict-default", () 
     assert.deepEqual(CORE_CLI_DESCRIPTORS, {});
   });
 });
-
-describe("commandFromInput binding: FlagLookupOptions.valueConsumingFlags seam (issue #106 step-4)", () => {
-  it("per-ref binding threads the descriptor list; per-call opts win (step-1: gating live)", async () => {
-    const { commandFromInput } = await import("./helpers/command.ts");
-    // Per-ref binding is accepted: presence agrees, and the strict-
-    // always gate now applies (undeclared `--delete` is valueless).
-    const cmd = commandFromInput(
-      {
-        tool: "bash",
-        command: "git push --delete origin",
-        basename: "git",
-        args: [
-          { text: "push", value: "push", rawText: "push" },
-          { text: "--delete", value: "--delete", rawText: "--delete" },
-          { text: "origin", value: "origin", rawText: "origin" },
-        ],
-      } as never,
-      ["-C", "-c"],
-    );
-    assert.equal(cmd.hasFlag("--delete"), true);
-    // Per-call opts still win over the bound descriptor on the
-    // standalone-opts path (presence agrees either way).
-    assert.equal(
-      cmd.hasFlag("--delete", { valueConsumingFlags: ["--other"] }),
-      true,
-    );
-    // Gating is live: `--delete` is undeclared in the bound list.
-    assert.equal(cmd.getFlagValue("--delete"), null);
-    assert.deepEqual(cmd.getAllFlagValues("--delete"), []);
-  });
-});

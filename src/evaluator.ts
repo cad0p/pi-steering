@@ -60,7 +60,11 @@ import type {
   ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import { resolveDescriptor } from "./cli-descriptors.ts";
+import {
+  MissingDescriptorError,
+  missingDescriptorRemedy,
+  resolveDescriptor,
+} from "./cli-descriptors.ts";
 import {
   createAppendEntry,
   createExecCache,
@@ -348,7 +352,11 @@ export function buildEvaluator(
 interface BashRefState {
   readonly ref: CommandRef;
   readonly text: string;
-  readonly basename: string;
+  /**
+   * Ref binary name, or `undefined` for nameless refs (bare `VAR=x`
+   * chain assignments — no binary, no descriptor resolution).
+   */
+  readonly basename: string | undefined;
   readonly args: readonly PredicateWord[];
   readonly envAssignments: readonly Word[];
   readonly walkerState: Readonly<WhenWalkerState>;
@@ -410,10 +418,19 @@ function prepareBashState(
     synthesizeSpeculativeEntries(refs, observers, resolvedTexts);
   return effective.map(({ ref, trackerState, env, text }) => {
     const events = speculativeEvents.get(ref) ?? {};
+    // Nameless refs (bare `VAR=x` chain assignments — `node.name` is
+    // absent; the assignment lives in `prefix`) carry NO binary: leave
+    // `basename` undefined so descriptor resolution is skipped (issue
+    // #107 carve-out — there is no descriptor to declare and no argv
+    // to guard; leaves still fail closed via extraction-unknown).
+    // Without this, every `VAR=x; cmd` chain would fail-closed-block
+    // with a nonsense `Plugin.cliDescriptors.VAR` remedy.
+    const hasCommandWord =
+      (ref.node as { name?: unknown } | undefined)?.name != null;
     return {
       ref,
       text,
-      basename: getBasename(ref),
+      basename: hasCommandWord ? getBasename(ref) : undefined,
       // Per-ref env-snapshot projection: text/value carry the
       // ENV-RESOLVED runtime forms (text quote-preserving incl.
       // process-substitution inner expansion; value the unquoted
@@ -733,13 +750,12 @@ async function runPredicateChain(
     // Pattern-miss is the common case; exit before allocating ctx.
     if (!matchesPattern(rule.pattern, cand.target)) return null;
 
-    // Per-ref facade binding (issue #106, atomic with leaves):
-    // resolve the descriptor for this ref's basename once, bind its
-    // flags into the facade view. Behavior-inert until #107 wires
-    // consumption (hasFlag presence-only agrees today).
+    // Per-ref facade binding (registry-only, issue #107): resolve the
+    // descriptor for this ref's basename once, bind its flags into
+    // the facade view (same list the ARGV leaves resolve).
     const resolvedFlags =
       cand.input.basename !== undefined
-        ? resolveDescriptor(cand.input.basename, undefined, shared.descriptors)
+        ? resolveDescriptor(cand.input.basename, shared.descriptors)
             .valueConsumingFlags
         : undefined;
     const ctx: PredicateContext = {
@@ -779,6 +795,21 @@ async function runPredicateChain(
 
     return ctx;
   } catch (err) {
+    // Explicit passthrough (issue #107, absent-descriptor goes loud):
+    // a missing descriptor is a fail-CLOSED config hole, NOT a buggy
+    // predicate — swallowing it here would fail OPEN. Attach rule
+    // context and rethrow to `evaluateEvent`'s top catch BEFORE the
+    // warn+null. Deliberately STRONGER than the `UnknownPredicateError`
+    // precedent (isolated to warn+skip per evaluator.test.ts
+    // "isolates an unknown when.<key> throw as 'rule did not fire'").
+    // No intermediate catch sits between here and the top catch on the
+    // rule path (`evaluateCandidate` awaits bare; `onFire`'s catch wraps
+    // `onFire` only; the `evaluateEventInner` rule loop awaits bare).
+    if (err instanceof MissingDescriptorError) {
+      err.ruleName = rule.name;
+      err.source = source;
+      throw err;
+    }
     console.warn(
       `[pi-steering] predicate threw for rule "${rule.name}"@${source}: ${formatError(err)}`,
     );
@@ -802,7 +833,9 @@ async function runPredicateChain(
  *
  * All four steps are wrapped in a try/catch via
  * {@link runPredicateChain} — a throw is logged and treated as "rule
- * did not fire". That way a buggy predicate neither short-circuits the
+ * did not fire" (sole exception: `MissingDescriptorError`, which the
+ * catch rethrows with rule context to the top-level fail-closed
+ * catch — absent descriptors fail CLOSED, never silent). That way a the
  * whole rule list (a broken guardrail rule silently poisoning the
  * rest) nor leaks its raw `error.message` back to the agent via a
  * pi-level error tool_result.
@@ -921,8 +954,12 @@ async function evaluateCandidate(
  *     exemption — a throwing exemption predicate = "does not match"
  *     = guard fires. Warn logs label the EXEMPTION, not the target
  *     rule (`Rule "<target>"@<src>` would be misleading).
+ *
+ * Exported for unit pins of the exemption-catch composition
+ * (`MissingDescriptorError` on the exemption path → non-match →
+ * guard fires); not part of the package root surface.
  */
-async function evaluateExemptionClause(
+export async function evaluateExemptionClause(
   clause: TopLevelWhenClause<string>,
   cand: Candidate,
   ctx: PredicateContext,
@@ -986,6 +1023,21 @@ async function evaluateEvent(
       descriptors,
     );
   } catch (err) {
+    // Rule-tagged descriptor block (issue #107): the per-ref binding
+    // (or a leaf) rethrew `MissingDescriptorError` with rule context
+    // attached — emit an ACTIONABLE block naming rule + basename +
+    // remedy (ask the user), NOT the generic engine-error reason.
+    // Generic engine-error path below stays byte-identical.
+    if (err instanceof MissingDescriptorError && err.ruleName !== undefined) {
+      const tag = `[steering:${err.ruleName}@${err.source ?? "user"}]`;
+      return {
+        block: true,
+        reason:
+          `${BLOCK_REASON_PREAMBLE}\n\n${tag} ` +
+          `${missingDescriptorRemedy(err.basename)} ` +
+          `Ask the user to declare it.`,
+      };
+    }
     console.error(`[pi-steering] steering engine threw: ${formatError(err)}`);
     return {
       block: true,
@@ -1153,7 +1205,12 @@ async function evaluateBashRule(
       input: {
         tool: "bash",
         command: refState.text,
-        basename: refState.basename,
+        // Nameless refs omit `basename` (`exactOptionalPropertyTypes`:
+        // no explicit `undefined`) — downstream treats absent as
+        // skip-resolution, same as `undefined`.
+        ...(refState.basename !== undefined
+          ? { basename: refState.basename }
+          : {}),
         args: refState.args,
         envAssignments: refState.envAssignments,
       },

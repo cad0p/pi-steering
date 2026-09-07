@@ -174,10 +174,10 @@ export function validateWhenClauseShape(
     // `pattern` / `value` (e.g. `cwd: { pattern, onUnknown }`, or a
     // plugin predicate's `{ value, onUnknown }` spread) — or as a
     // sibling of the ARGV-spread keys (`subcommand: { depth,
-    // onUnknown }`, `flag: { anyOf / bundleAware /
-    // valueConsumingFlags, onUnknown }`). Bare-keyed spreads evade a
-    // `pattern | value`-only trigger, so every spread payload key
-    // arms the check. Reject those in strict mode too.
+    // onUnknown }`, `flag: { anyOf / bundleAware, onUnknown }`).
+    // Bare-keyed spreads evade a `pattern | value`-only trigger, so
+    // every spread payload key arms the check. Reject those in strict
+    // mode too.
     if (options.rejectOnUnknown && leafObjectCarriesOnUnknown(v)) {
       throw new Error(
         `[pi-steering] ${path}.${key} carries a forbidden 'onUnknown:' modifier ` +
@@ -245,7 +245,7 @@ export function validateWhenClauseShape(
  *   - the not-block top level (`when: { not: { cwd: /x/, onUnknown:
  *     ... } }` — the recursion below), and
  *   - leaf object forms carrying `pattern` / `value` / `anyOf` /
- *     `bundleAware` / `valueConsumingFlags` / `depth` keys
+ *     `bundleAware` / `depth` keys
  *     (`cwd: { pattern: /x/, onUnknown: ... }`, plugin spread forms
  *     `{ value: ..., onUnknown: ... }`, ARGV spreads
  *     `{ anyOf: [...], onUnknown: ... }` / `{ depth, onUnknown }`).
@@ -271,7 +271,7 @@ export function validateExemptionWhenClauseShape(
 
 /**
  * Does this leaf value carry a `{ pattern | value | anyOf |
- * bundleAware | valueConsumingFlags | depth, onUnknown }`
+ * bundleAware | depth, onUnknown }`
  * object form — i.e. a spread-form leaf that smuggles an `onUnknown`
  * modifier as a sibling of its payload key? Used by
  * {@link validateWhenClauseShape} in strict (`rejectOnUnknown`)
@@ -297,7 +297,6 @@ function leafObjectCarriesOnUnknown(value: unknown): boolean {
       "value" in record ||
       "anyOf" in record ||
       "bundleAware" in record ||
-      "valueConsumingFlags" in record ||
       "depth" in record) &&
     "onUnknown" in record
   );
@@ -555,20 +554,6 @@ const isSubcommandPattern = (v: unknown): v is SubcommandPattern =>
   typeof v === "string" || v instanceof RegExp;
 
 /**
- * Validate the `valueConsumingFlags` surface shared by both ARGV
- * spreads: absent → `[]`; otherwise must be an array of strings.
- * Returns the validated list, or `null` when malformed (caller
- * fail-skips the leaf → `false`, `cwd`-style).
- */
-function readValueConsumingFlags(value: unknown): readonly string[] | null {
-  if (value === undefined) return [];
-  if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
-    return value as string[];
-  }
-  return null;
-}
-
-/**
  * Valid `positionPolicy` values for `locateSubcommandRun`. The policy
  * resolves from the walker's `DEFAULT_POSITION_POLICIES` table keyed
  * on the ref basename, falling back to `"globals-anywhere"` — either
@@ -584,26 +569,28 @@ const VALID_POSITION_POLICIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Normalize a `when.subcommand` leaf into `{ patterns, depth,
- * valueConsumingFlags }`, or return `"unknown"` for the depth-0
- * shape (extracts nothing → walker-null → unknown → default block),
- * or `null` when malformed (caller fail-skips → `false`).
+ * Normalize a `when.subcommand` leaf into `{ patterns, depth }`, or
+ * return `"unknown"` for the depth-0 shape (extracts nothing →
+ * walker-null → unknown → default block), or `null` when malformed
+ * (caller fail-skips → `false`).
  *
  * Shapes:
  *   - bare `string | RegExp` → single pattern, depth 1.
  *   - bare array → OR-of-matches at depth 1 (any length ≥ 1, all
  *     members `string | RegExp`).
- *   - spread `{ pattern, depth?, valueConsumingFlags? }` → single
- *     pattern requires depth 1 (single + depth > 1 is invalid);
- *     array pattern requires `length === depth` (positional
- *     sequence). `depth` defaults to 1; non-integer / negative
- *     depths are invalid.
+ *   - spread `{ pattern, depth? }` → single pattern requires depth 1
+ *     (single + depth > 1 is invalid); array pattern requires
+ *     `length === depth` (positional sequence). `depth` defaults to
+ *     1; non-integer / negative depths are invalid.
+ *
+ * Arity is registry-only (issue #107): the spread carries no
+ * `valueConsumingFlags` — `evaluateSubcommand` resolves via
+ * `resolveDescriptor(basename, descriptors)`.
  */
 function normalizeSubcommandLeaf(value: unknown):
   | {
       patterns: SubcommandPattern[];
       depth: number;
-      valueConsumingFlags: readonly string[];
       sequence: boolean;
     }
   | "unknown"
@@ -613,7 +600,6 @@ function normalizeSubcommandLeaf(value: unknown):
     return {
       patterns: [value],
       depth: 1,
-      valueConsumingFlags: [],
       sequence: false,
     };
   }
@@ -623,7 +609,6 @@ function normalizeSubcommandLeaf(value: unknown):
     return {
       patterns: value as SubcommandPattern[],
       depth: 1,
-      valueConsumingFlags: [],
       sequence: false,
     };
   }
@@ -632,7 +617,6 @@ function normalizeSubcommandLeaf(value: unknown):
     const obj = value as Partial<SubcommandSpreadBase> & {
       pattern?: unknown;
       depth?: unknown;
-      valueConsumingFlags?: unknown;
     };
     if (!("pattern" in obj)) return null;
     const depth = obj.depth ?? 1;
@@ -640,17 +624,12 @@ function normalizeSubcommandLeaf(value: unknown):
       return null;
     }
     if (depth === 0) return "unknown";
-    const valueConsumingFlags = readValueConsumingFlags(
-      obj.valueConsumingFlags,
-    );
-    if (valueConsumingFlags === null) return null;
     if (isSubcommandPattern(obj.pattern)) {
       // Single (non-array) pattern with depth > 1 is invalid.
       if (depth !== 1) return null;
       return {
         patterns: [obj.pattern],
         depth,
-        valueConsumingFlags,
         sequence: false,
       };
     }
@@ -665,7 +644,6 @@ function normalizeSubcommandLeaf(value: unknown):
       return {
         patterns: obj.pattern as SubcommandPattern[],
         depth,
-        valueConsumingFlags,
         sequence: depth > 1,
       };
     }
@@ -735,10 +713,9 @@ function projectSubcommandWords(args: readonly PredicateWord[]): Word[] {
  * `"block"` = fail-CLOSED) exactly like {@link evaluateCwd}.
  *
  * Malformed leaves (empty array, length≠depth, non-`string|RegExp`
- * members, single pattern with depth > 1, bad depth, bad
- * `valueConsumingFlags`) fail-SKIP to `false` (`cwd`-style), NOT
- * unknown. Walker `TypeError`s (invalid resolved policy) never
- * escape: skip + warn (S1).
+ * members, single pattern with depth > 1, bad depth) fail-SKIP to
+ * `false` (`cwd`-style), NOT unknown. Walker `TypeError`s (invalid
+ * resolved policy) never escape: skip + warn (S1).
  */
 function evaluateSubcommand(
   value: unknown,
@@ -754,24 +731,21 @@ function evaluateSubcommand(
   const normalized = normalizeSubcommandLeaf(value);
   if (normalized === "unknown") return "unknown";
   if (normalized === null) return false;
-  const {
-    patterns,
-    depth,
-    valueConsumingFlags: inlineFlags,
-    sequence,
-  } = normalized;
-  // Resolve per-binary argv knowledge (issue #106): inline flags
-  // REPLACE the registry list; registry policy overrides the table
-  // fallback; absent → strict globals-anywhere/empty set.
-  // Re-validates at resolution time (post-merge mutation by plain-JS
-  // callers) with one-shot [invalid-descriptor] WARNs.
-  const inlineForResolve =
-    inlineFlags.length > 0 ? { valueConsumingFlags: inlineFlags } : undefined;
-  const resolved = resolveDescriptor(
-    basename ?? "",
-    inlineForResolve,
-    descriptors,
-  );
+  const { patterns, depth, sequence } = normalized;
+  // Resolve per-binary argv knowledge (registry-only, issue #107):
+  // registry policy overrides the table fallback; absent → strict
+  // globals-anywhere/empty set. Re-validates at resolution time
+  // (post-merge mutation by plain-JS callers) with one-shot
+  // [invalid-descriptor] WARNs. Nameless refs (bare `VAR=x`, basename
+  // `undefined`) skip resolution — silent strict, exactly the
+  // pre-loudness behavior (no binary, nothing to declare).
+  const resolved: {
+    positionPolicy: PositionPolicy;
+    valueConsumingFlags: readonly string[];
+  } =
+    basename !== undefined
+      ? resolveDescriptor(basename, descriptors)
+      : { positionPolicy: "globals-anywhere", valueConsumingFlags: [] };
   // Invalid registry policy → skip the leaf (fail-SKIP, not unknown).
   // resolveDescriptor already one-shot WARNed with [invalid-descriptor];
   // returning false here keeps the invalid→absent→skip contract without
@@ -858,7 +832,6 @@ function isValidFlagSpelling(spelling: string): boolean {
 function normalizeFlagLeaf(value: unknown): {
   anyOf: string[];
   bundleAware: boolean;
-  valueConsumingFlags: readonly string[];
 } | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -866,7 +839,6 @@ function normalizeFlagLeaf(value: unknown): {
   const obj = value as Partial<FlagSpreadBase> & {
     anyOf?: unknown;
     bundleAware?: unknown;
-    valueConsumingFlags?: unknown;
   };
   if (
     !Array.isArray(obj.anyOf) ||
@@ -877,12 +849,9 @@ function normalizeFlagLeaf(value: unknown): {
   }
   const anyOf = obj.anyOf as string[];
   if (!anyOf.every(isValidFlagSpelling)) return null;
-  const valueConsumingFlags = readValueConsumingFlags(obj.valueConsumingFlags);
-  if (valueConsumingFlags === null) return null;
   return {
     anyOf,
     bundleAware: obj.bundleAware === true,
-    valueConsumingFlags,
   };
 }
 
@@ -961,24 +930,20 @@ function evaluateFlag(
   if (!Array.isArray(args)) return "unknown";
   const normalized = normalizeFlagLeaf(value);
   if (normalized === null) return false;
-  // Resolve descriptor flags (issue #106): inline REPLACES registry;
+  // Resolve descriptor flags (registry-only, issue #107);
   // re-validated at resolution time (no try/catch around flagPresent's
   // `new Set(...)` — a non-iterable registry value would escape as
-  // rule-skip fail-open).
-  const inlineForResolve =
-    normalized.valueConsumingFlags.length > 0
-      ? { valueConsumingFlags: normalized.valueConsumingFlags }
-      : undefined;
-  const resolved = resolveDescriptor(
-    basename ?? "",
-    inlineForResolve,
-    descriptors,
-  );
+  // rule-skip fail-open). Nameless refs skip resolution (silent
+  // strict, same carve-out as `evaluateSubcommand`).
+  const resolvedFlags: readonly string[] =
+    basename !== undefined
+      ? resolveDescriptor(basename, descriptors).valueConsumingFlags
+      : [];
   return flagPresent(
     args,
     normalized.anyOf,
     normalized.bundleAware,
-    resolved.valueConsumingFlags,
+    resolvedFlags,
   );
 }
 

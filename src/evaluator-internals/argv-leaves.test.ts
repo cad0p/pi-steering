@@ -18,6 +18,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { evaluateExemptionClause } from "../evaluator.ts";
 import gitPlugin from "../plugins/git/index.ts";
 import type {
   CLIDescriptor,
@@ -69,7 +70,9 @@ async function fires(
     onUnknownDefault?: "allow" | "block";
     ignoreExplicitModifiers?: boolean;
     // Unit-level `evaluateWhen` calls never forward descriptors
-    // implicitly — callers pass the merged map explicitly (§13).
+    // implicitly — callers pass the merged map explicitly (§13),
+    // and `fires` threads it into BOTH `evaluateWhen` and the mock
+    // facade binding.
     descriptors?: Record<string, CLIDescriptor>;
   },
 ): Promise<boolean> {
@@ -80,6 +83,11 @@ async function fires(
       basename: opts?.basename ?? "git",
       args,
     },
+    // Thread descriptors into the mock facade too, so `ctx.command`
+    // binds exactly like the engine's per-ref binding (issue #107).
+    ...(opts?.descriptors !== undefined
+      ? { descriptors: opts.descriptors }
+      : {}),
   });
   return evaluateWhen(
     when,
@@ -135,37 +143,37 @@ const GH_DESCRIPTORS: Record<string, CLIDescriptor> = {
   },
 };
 
+/**
+ * Synthetic plugin-registered descriptor for bare `aws` pins. Core
+ * seeds no `aws` — tests that need `--profile` consumption declare it
+ * via the slot, like an external plugin would.
+ */
+const AWS_DESCRIPTORS: Record<string, CLIDescriptor> = {
+  aws: {
+    positionPolicy: "globals-anywhere",
+    valueConsumingFlags: ["--profile"],
+  },
+};
+
 // ---------------------------------------------------------------------------
 // subcommand: walker-parity extraction (unit)
 // ---------------------------------------------------------------------------
 
 describe("argv leaves: subcommand extraction parity", () => {
-  it("git -C /path push extracts push (declared consuming -C)", async () => {
+  it("git -C /path push extracts push (registry consuming -C)", async () => {
     assert.equal(
-      await fires(
-        {
-          subcommand: {
-            pattern: "push",
-            valueConsumingFlags: ["-C", "-c"],
-          },
-        },
-        [w("-C"), w("/path"), w("push")],
-      ),
+      await fires({ subcommand: "push" }, [w("-C"), w("/path"), w("push")], {
+        descriptors: GIT_DESCRIPTORS,
+      }),
       true,
     );
   });
 
-  it("git -c KEY=VAL push extracts push (declared consuming -c)", async () => {
+  it("git -c KEY=VAL push extracts push (registry consuming -c)", async () => {
     assert.equal(
-      await fires(
-        {
-          subcommand: {
-            pattern: "push",
-            valueConsumingFlags: ["-C", "-c"],
-          },
-        },
-        [w("-c"), w("KEY=VAL"), w("push")],
-      ),
+      await fires({ subcommand: "push" }, [w("-c"), w("KEY=VAL"), w("push")], {
+        descriptors: GIT_DESCRIPTORS,
+      }),
       true,
     );
   });
@@ -182,22 +190,25 @@ describe("argv leaves: subcommand extraction parity", () => {
       }),
       true,
     );
-    // Unknown basename → strict default (no descriptor, no table):
-    // `-c` consumes nothing, `KEY=VAL` is the subcommand → mismatch.
-    assert.equal(
-      await fires({ subcommand: "push" }, [w("-c"), w("KEY=VAL"), w("push")], {
+    // Unknown basename → LOUD: absent descriptors throw
+    // MissingDescriptorError (never silent strict).
+    await assert.rejects(
+      fires({ subcommand: "push" }, [w("-c"), w("KEY=VAL"), w("push")], {
         basename: "unknown-basileus-xyz",
       }),
-      false,
+      /No CLI descriptor for basename "unknown-basileus-xyz"/,
     );
   });
 
-  it("gh -R x/y pr merge extracts pr (declared consuming -R)", async () => {
+  it("gh -R x/y pr merge extracts pr (registry consuming -R)", async () => {
     assert.equal(
       await fires(
-        { subcommand: { pattern: "pr", valueConsumingFlags: ["-R"] } },
+        { subcommand: "pr" },
         [w("-R"), w("x/y"), w("pr"), w("merge")],
-        { basename: "gh" },
+        {
+          basename: "gh",
+          descriptors: GH_DESCRIPTORS,
+        },
       ),
       true,
     );
@@ -207,18 +218,18 @@ describe("argv leaves: subcommand extraction parity", () => {
     assert.equal(
       await fires({ subcommand: "pr" }, [w("--repo=x/y"), w("pr")], {
         basename: "gh",
+        descriptors: GH_DESCRIPTORS,
       }),
       true,
     );
   });
 
-  it("gh --hostname h pr extracts pr (declared consuming --hostname)", async () => {
+  it("gh --hostname h pr extracts pr (registry consuming --hostname)", async () => {
     assert.equal(
-      await fires(
-        { subcommand: { pattern: "pr", valueConsumingFlags: ["--hostname"] } },
-        [w("--hostname"), w("h"), w("pr")],
-        { basename: "gh" },
-      ),
+      await fires({ subcommand: "pr" }, [w("--hostname"), w("h"), w("pr")], {
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      }),
       true,
     );
   });
@@ -227,6 +238,9 @@ describe("argv leaves: subcommand extraction parity", () => {
     assert.equal(
       await fires({ subcommand: "build" }, [w("-v"), w("build")], {
         basename: "go",
+        // Explicit strict: policy still falls back to the walker table
+        // (go → globals-after-only) → invalid shape → unknown.
+        descriptors: { go: {} },
       }),
       true,
     );
@@ -239,11 +253,10 @@ describe("argv leaves: subcommand extraction parity", () => {
           subcommand: {
             pattern: ["s3", "ls"],
             depth: 2,
-            valueConsumingFlags: ["--profile"],
           },
         },
         [w("s3"), w("--profile"), w("x"), w("ls")],
-        { basename: "aws" },
+        { basename: "aws", descriptors: AWS_DESCRIPTORS },
       ),
       true,
     );
@@ -258,11 +271,10 @@ describe("argv leaves: subcommand extraction parity", () => {
           subcommand: {
             pattern: ["s3", "--profile"],
             depth: 2,
-            valueConsumingFlags: ["--profile"],
           },
         },
         [w("s3"), w("--profile"), w("x"), w("ls")],
-        { basename: "aws" },
+        { basename: "aws", descriptors: AWS_DESCRIPTORS },
       ),
       false,
     );
@@ -270,34 +282,47 @@ describe("argv leaves: subcommand extraction parity", () => {
 
   it("git push -C x extracts push (before-only: post-subcommand flags are subcommand args)", async () => {
     assert.equal(
-      await fires(
-        { subcommand: { pattern: "push", valueConsumingFlags: ["-C"] } },
-        [w("push"), w("-C"), w("x")],
-      ),
+      await fires({ subcommand: "push" }, [w("push"), w("-C"), w("x")], {
+        descriptors: GIT_DESCRIPTORS,
+      }),
       true,
     );
   });
 
   it("all-flags invocation (git --version) → unknown → fires", async () => {
-    assert.equal(await fires({ subcommand: "push" }, [w("--version")]), true);
-  });
-
-  it("trailing consuming flag (git -C) → unknown → fires", async () => {
     assert.equal(
-      await fires(
-        { subcommand: { pattern: "push", valueConsumingFlags: ["-C"] } },
-        [w("-C")],
-      ),
+      await fires({ subcommand: "push" }, [w("--version")], {
+        descriptors: GIT_DESCRIPTORS,
+      }),
       true,
     );
   });
 
-  it("unknown binary falls back to globals-anywhere", async () => {
+  it("trailing consuming flag (git -C) → unknown → fires", async () => {
+    assert.equal(
+      await fires({ subcommand: "push" }, [w("-C")], {
+        descriptors: GIT_DESCRIPTORS,
+      }),
+      true,
+    );
+  });
+
+  it("explicit-strict { mytool: {} } falls back to globals-anywhere", async () => {
     assert.equal(
       await fires({ subcommand: "frobnicate" }, [w("frobnicate")], {
         basename: "mytool",
+        descriptors: { mytool: {} },
       }),
       true,
+    );
+  });
+
+  it("absent basename entry → MissingDescriptorError (loud)", async () => {
+    await assert.rejects(
+      fires({ subcommand: "frobnicate" }, [w("frobnicate")], {
+        basename: "mytool",
+      }),
+      /No CLI descriptor for basename "mytool"/,
     );
   });
 });
@@ -308,21 +333,31 @@ describe("argv leaves: subcommand extraction parity", () => {
 
 describe("argv leaves: subcommand pattern semantics", () => {
   it("bare string is EXACT equality (push ≠ pushback)", async () => {
-    assert.equal(await fires({ subcommand: "push" }, [w("push")]), true);
-    assert.equal(await fires({ subcommand: "push" }, [w("pushback")]), false);
+    const g = { descriptors: GIT_DESCRIPTORS };
+    assert.equal(await fires({ subcommand: "push" }, [w("push")], g), true);
+    assert.equal(
+      await fires({ subcommand: "push" }, [w("pushback")], g),
+      false,
+    );
   });
 
   it("RegExp tests (pushback matches /^push/)", async () => {
-    assert.equal(await fires({ subcommand: /^push/ }, [w("pushback")]), true);
+    assert.equal(
+      await fires({ subcommand: /^push/ }, [w("pushback")], {
+        descriptors: GIT_DESCRIPTORS,
+      }),
+      true,
+    );
   });
 
   it("bare array is OR-of-matches at depth 1", async () => {
+    const g = { descriptors: GIT_DESCRIPTORS };
     assert.equal(
-      await fires({ subcommand: ["push", "pull"] }, [w("pull")]),
+      await fires({ subcommand: ["push", "pull"] }, [w("pull")], g),
       true,
     );
     assert.equal(
-      await fires({ subcommand: ["push", "pull"] }, [w("fetch")]),
+      await fires({ subcommand: ["push", "pull"] }, [w("fetch")], g),
       false,
     );
   });
@@ -332,22 +367,35 @@ describe("argv leaves: subcommand pattern semantics", () => {
       subcommand: { pattern: ["s3", "ls"], depth: 2 },
     };
     assert.equal(
-      await fires(leaf, [w("s3"), w("ls")], { basename: "aws" }),
+      await fires(leaf, [w("s3"), w("ls")], {
+        basename: "aws",
+        descriptors: AWS_DESCRIPTORS,
+      }),
       true,
     );
-    assert.equal(await fires(leaf, [w("s3")], { basename: "aws" }), false);
     assert.equal(
-      await fires(leaf, [w("s3"), w("cp")], { basename: "aws" }),
+      await fires(leaf, [w("s3")], {
+        basename: "aws",
+        descriptors: AWS_DESCRIPTORS,
+      }),
+      false,
+    );
+    assert.equal(
+      await fires(leaf, [w("s3"), w("cp")], {
+        basename: "aws",
+        descriptors: AWS_DESCRIPTORS,
+      }),
       false,
     );
   });
 
   it("sequence members mix string-exact + RegExp", async () => {
+    const k = { basename: "kubectl", descriptors: { kubectl: {} } };
     assert.equal(
       await fires(
         { subcommand: { pattern: ["get", /^pod/], depth: 2 } },
         [w("get"), w("pods")],
-        { basename: "kubectl" },
+        k,
       ),
       true,
     );
@@ -355,7 +403,7 @@ describe("argv leaves: subcommand pattern semantics", () => {
       await fires(
         { subcommand: { pattern: ["get", /^svc/], depth: 2 } },
         [w("get"), w("pods")],
-        { basename: "kubectl" },
+        k,
       ),
       false,
     );
@@ -379,7 +427,7 @@ describe("argv leaves: subcommand pattern semantics", () => {
       // spread array length ≠ depth (bare arrays cover OR)
       { subcommand: { pattern: ["a", "b"] } },
       { subcommand: { pattern: ["a", "b", "c"], depth: 2 } },
-      // bad depth / bad valueConsumingFlags
+      // bad depth
       { subcommand: { pattern: "push", depth: -1 } },
       { subcommand: { pattern: "push", depth: 1.5 } },
       {
@@ -388,33 +436,31 @@ describe("argv leaves: subcommand pattern semantics", () => {
           depth: "2",
         } as unknown as SubcommandLeaf,
       },
-      {
-        subcommand: {
-          pattern: "push",
-          valueConsumingFlags: "-C",
-        } as unknown as SubcommandLeaf,
-      },
-      {
-        subcommand: {
-          pattern: "push",
-          valueConsumingFlags: ["-C", 1],
-        } as unknown as SubcommandLeaf,
-      },
     ];
     for (const when of bad) {
-      assert.equal(await fires(when, args), false, JSON.stringify(when));
+      assert.equal(
+        await fires(when, args, { descriptors: GIT_DESCRIPTORS }),
+        false,
+        JSON.stringify(when),
+      );
     }
   });
 
   it("depth 0 → unknown → fires by default, skips with onUnknown allow", async () => {
+    const g = { descriptors: GIT_DESCRIPTORS };
     assert.equal(
-      await fires({ subcommand: { pattern: "push", depth: 0 } }, [w("push")]),
+      await fires(
+        { subcommand: { pattern: "push", depth: 0 } },
+        [w("push")],
+        g,
+      ),
       true,
     );
     assert.equal(
       await fires(
         { subcommand: { pattern: "push", depth: 0, onUnknown: "allow" } },
         [w("push")],
+        g,
       ),
       false,
     );
@@ -424,21 +470,27 @@ describe("argv leaves: subcommand pattern semantics", () => {
     // `"$X"` IS `--force` at execution: skipped as a flag, so `push`
     // still extracts. The walker-raw scan would see positional `$X`.
     assert.equal(
-      await fires({ subcommand: "push" }, [
-        w('"$X"', { value: "--force", rawText: '"$X"' }),
-        w("push"),
-      ]),
+      await fires(
+        { subcommand: "push" },
+        [w('"$X"', { value: "--force", rawText: '"$X"' }), w("push")],
+        { descriptors: GIT_DESCRIPTORS },
+      ),
       true,
     );
   });
 
   it("rawText fallback when text + value are both undefined", async () => {
-    assert.equal(await fires({ subcommand: "push" }, [rawOnly("push")]), true);
+    const g = { descriptors: GIT_DESCRIPTORS };
     assert.equal(
-      await fires({ subcommand: "push" }, [
-        rawOnly("--force"),
-        rawOnly("push"),
-      ]),
+      await fires({ subcommand: "push" }, [rawOnly("push")], g),
+      true,
+    );
+    assert.equal(
+      await fires(
+        { subcommand: "push" },
+        [rawOnly("--force"), rawOnly("push")],
+        g,
+      ),
       true,
     );
   });
@@ -449,79 +501,75 @@ describe("argv leaves: subcommand pattern semantics", () => {
 // ---------------------------------------------------------------------------
 
 describe("argv leaves: flag presence semantics", () => {
+  const g = { descriptors: GIT_DESCRIPTORS };
   it("long exact token matches; absent flag is definite false", async () => {
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, [w("push"), w("--force")]),
+      await fires(
+        { flag: { anyOf: ["--force"] } },
+        [w("push"), w("--force")],
+        g,
+      ),
       true,
     );
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, [w("push")]),
+      await fires({ flag: { anyOf: ["--force"] } }, [w("push")], g),
       false,
     );
   });
 
   it("attached --flag=value matches without declaration", async () => {
+    // Attached forms need no consumption entry — but resolution still
+    // requires a registry entry (loud otherwise).
+    const gh = { basename: "gh", descriptors: GH_DESCRIPTORS };
     assert.equal(
-      await fires({ flag: { anyOf: ["--repo"] } }, [w("--repo=x/y")], {
-        basename: "gh",
-      }),
+      await fires({ flag: { anyOf: ["--repo"] } }, [w("--repo=x/y")], gh),
       true,
     );
     assert.equal(
-      await fires({ flag: { anyOf: ["--repo"] } }, [w("--repo=x/y")], {
-        basename: "gh",
-      }),
+      await fires({ flag: { anyOf: ["--repo"] } }, [w("--repo=x/y")], gh),
       true,
     );
   });
 
   it("short exact token matches without bundleAware", async () => {
     assert.equal(
-      await fires({ flag: { anyOf: ["-f"] } }, [w("push"), w("-f")]),
+      await fires({ flag: { anyOf: ["-f"] } }, [w("push"), w("-f")], g),
       true,
     );
   });
 
   it("bundleAware routes -uf through bundleContains (-u and -f)", async () => {
     const args = [w("push"), w("-uf")];
-    assert.equal(await fires({ flag: { anyOf: ["-f"] } }, args), false);
+    assert.equal(await fires({ flag: { anyOf: ["-f"] } }, args, g), false);
     assert.equal(
-      await fires({ flag: { anyOf: ["-f"], bundleAware: true } }, args),
+      await fires({ flag: { anyOf: ["-f"], bundleAware: true } }, args, g),
       true,
     );
     assert.equal(
-      await fires({ flag: { anyOf: ["-u"], bundleAware: true } }, args),
+      await fires({ flag: { anyOf: ["-u"], bundleAware: true } }, args, g),
       true,
     );
     assert.equal(
-      await fires({ flag: { anyOf: ["-x"], bundleAware: true } }, args),
+      await fires({ flag: { anyOf: ["-x"], bundleAware: true } }, args, g),
       false,
     );
   });
 
   it("longs NEVER bundle-match", async () => {
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"], bundleAware: true } }, [
-        w("--forceful"),
-      ]),
+      await fires(
+        { flag: { anyOf: ["--force"], bundleAware: true } },
+        [w("--forceful")],
+        g,
+      ),
       false,
     );
   });
 
   it("consuming values skipped BY POSITION, never by content", async () => {
-    // `gh -R --force pr` with -R declared: `--force` is -R's VALUE.
+    // `gh -R --force pr` with -R in the plugin-registered gh
+    // descriptor: `--force` is -R's VALUE.
     const args = [w("-R"), w("--force"), w("pr")];
-    assert.equal(
-      await fires(
-        { flag: { anyOf: ["--force"], valueConsumingFlags: ["-R"] } },
-        args,
-        { basename: "gh" },
-      ),
-      false,
-    );
-    // Bare (no inline) still skips via the plugin-registered gh
-    // descriptor (#106): `-R` is in the synthetic registry entry, so
-    // `--force` is its value.
     assert.equal(
       await fires({ flag: { anyOf: ["--force"] } }, args, {
         basename: "gh",
@@ -529,22 +577,22 @@ describe("argv leaves: flag presence semantics", () => {
       }),
       false,
     );
-    // Unknown basename → strict default: undeclared never consumes.
-    assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, args, {
+    // Unknown basename → LOUD: absent descriptors throw (never
+    // silent strict).
+    await assert.rejects(
+      fires({ flag: { anyOf: ["--force"] } }, args, {
         basename: "unknown-basileus-xyz",
       }),
-      true,
+      /No CLI descriptor for basename "unknown-basileus-xyz"/,
     );
   });
 
   it("the consuming flag itself IS present (only its value is skipped)", async () => {
     assert.equal(
-      await fires(
-        { flag: { anyOf: ["-R"], valueConsumingFlags: ["-R"] } },
-        [w("-R"), w("x/y"), w("pr")],
-        { basename: "gh" },
-      ),
+      await fires({ flag: { anyOf: ["-R"] } }, [w("-R"), w("x/y"), w("pr")], {
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      }),
       true,
     );
   });
@@ -564,16 +612,9 @@ describe("argv leaves: flag presence semantics", () => {
       { flag: "--force" as unknown as FlagLeaf },
       { flag: ["--force"] as unknown as FlagLeaf },
       { flag: 123 as unknown as FlagLeaf },
-      // bad valueConsumingFlags
-      {
-        flag: { anyOf: ["--force"], valueConsumingFlags: "--repo" },
-      } as unknown as TopLevelWhenClause,
-      {
-        flag: { anyOf: ["--force"], valueConsumingFlags: [1] },
-      } as unknown as TopLevelWhenClause,
     ];
     for (const when of bad) {
-      assert.equal(await fires(when, args), false, JSON.stringify(when));
+      assert.equal(await fires(when, args, g), false, JSON.stringify(when));
     }
   });
 
@@ -585,6 +626,7 @@ describe("argv leaves: flag presence semantics", () => {
           flag: { anyOf: ["-f"], bundleAware: "yes" },
         } as unknown as TopLevelWhenClause,
         args,
+        g,
       ),
       false,
     );
@@ -598,31 +640,35 @@ describe("argv leaves: flag presence semantics", () => {
     // classifies on the same resolved form as the rest of the scan →
     // match → fires.
     assert.equal(
-      await fires({ flag: { anyOf: ["-f"], bundleAware: true } }, [
-        rawOnly("-uf"),
-      ]),
+      await fires(
+        { flag: { anyOf: ["-f"], bundleAware: true } },
+        [rawOnly("-uf")],
+        g,
+      ),
       true,
     );
     // Non-matching bundle letter skips cleanly (no throw).
     assert.equal(
-      await fires({ flag: { anyOf: ["-x"], bundleAware: true } }, [
-        rawOnly("-uf"),
-      ]),
+      await fires(
+        { flag: { anyOf: ["-x"], bundleAware: true } },
+        [rawOnly("-uf")],
+        g,
+      ),
       false,
     );
     // All-absent word (no text/value/rawText) → `""` → positional,
     // never throws, never flag-shaped.
     const absent = {} as unknown as PredicateWord;
     assert.equal(
-      await fires({ flag: { anyOf: ["-f"], bundleAware: true } }, [absent]),
+      await fires({ flag: { anyOf: ["-f"], bundleAware: true } }, [absent], g),
       false,
     );
-    assert.equal(await fires({ subcommand: "push" }, [absent]), false);
+    assert.equal(await fires({ subcommand: "push" }, [absent], g), false);
   });
 
   it("-- is flag-shaped; post--- positionals scan as ordinary tokens (documented limit)", async () => {
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, [w("--"), w("--force")]),
+      await fires({ flag: { anyOf: ["--force"] } }, [w("--"), w("--force")], g),
       true,
     );
   });
@@ -651,27 +697,29 @@ describe("argv leaves: flag presence semantics", () => {
 // ---------------------------------------------------------------------------
 
 describe("argv leaves: not-block Kleene semantics", () => {
+  const g = { descriptors: GIT_DESCRIPTORS };
   it("not: { subcommand } — mismatch fires, match skips", async () => {
     assert.equal(
-      await fires({ not: { subcommand: "push" } }, [w("pull")]),
+      await fires({ not: { subcommand: "push" } }, [w("pull")], g),
       true,
     );
     assert.equal(
-      await fires({ not: { subcommand: "push" } }, [w("push")]),
+      await fires({ not: { subcommand: "push" } }, [w("push")], g),
       false,
     );
   });
 
   it("not: { flag } — absent fires, present skips", async () => {
     assert.equal(
-      await fires({ not: { flag: { anyOf: ["--force"] } } }, [w("push")]),
+      await fires({ not: { flag: { anyOf: ["--force"] } } }, [w("push")], g),
       true,
     );
     assert.equal(
-      await fires({ not: { flag: { anyOf: ["--force"] } } }, [
-        w("push"),
-        w("--force"),
-      ]),
+      await fires(
+        { not: { flag: { anyOf: ["--force"] } } },
+        [w("push"), w("--force")],
+        g,
+      ),
       false,
     );
   });
@@ -680,6 +728,7 @@ describe("argv leaves: not-block Kleene semantics", () => {
     assert.equal(
       await fires({ not: { subcommand: "build" } }, [w("-v"), w("build")], {
         basename: "go",
+        descriptors: { go: {} },
       }),
       true,
     );
@@ -690,9 +739,18 @@ describe("argv leaves: not-block Kleene semantics", () => {
       await fires(
         { not: { subcommand: "build", onUnknown: "allow" } },
         [w("-v"), w("build")],
-        { basename: "go" },
+        { basename: "go", descriptors: { go: {} } },
       ),
       false,
+    );
+  });
+
+  it("not: never inverts a descriptor throw (absent leaf → rejects)", async () => {
+    await assert.rejects(
+      fires({ not: { subcommand: "push" } }, [w("push")], {
+        basename: "mytool",
+      }),
+      /No CLI descriptor for basename "mytool"/,
     );
   });
 
@@ -793,21 +851,9 @@ describe("argv leaves: exemption strictness (S1)", () => {
         } as unknown as TopLevelWhenClause,
       ],
       [
-        "bare valueConsumingFlags",
-        {
-          flag: { valueConsumingFlags: ["-R"], onUnknown: "allow" },
-        } as unknown as TopLevelWhenClause,
-      ],
-      [
         "depth-only",
         {
           subcommand: { depth: 1, onUnknown: "allow" },
-        } as unknown as TopLevelWhenClause,
-      ],
-      [
-        "bare valueConsumingFlags (subcommand)",
-        {
-          subcommand: { valueConsumingFlags: ["-C"], onUnknown: "allow" },
         } as unknown as TopLevelWhenClause,
       ],
       [
@@ -863,6 +909,7 @@ describe("argv leaves: exemption strictness (S1)", () => {
         "t",
         "allow",
         true,
+        { go: {} },
       ),
       false,
     );
@@ -887,6 +934,7 @@ describe("argv leaves: exemption strictness (S1)", () => {
         "t",
         "allow",
         true,
+        { go: {} },
       ),
       false,
     );
@@ -912,6 +960,9 @@ describe("argv leaves: plugin collision parity (explicit branch wins)", () => {
             },
             rules: [],
           },
+          // Explicit strict: this test is about predicate-key
+          // precedence, not argv arity.
+          { name: "git-facts", cliDescriptors: { git: {} } },
         ],
         rules: [gitRule({ subcommand: "push" })],
       },
@@ -933,6 +984,9 @@ describe("argv leaves: plugin collision parity (explicit branch wins)", () => {
             predicates: { cwd: () => false },
             rules: [],
           },
+          // Explicit strict: this test is about predicate-key
+          // precedence, not argv arity.
+          { name: "git-facts", cliDescriptors: { git: {} } },
         ],
         rules: [
           {
@@ -962,11 +1016,10 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
   it("git -C /path push + git -c KEY=VAL push match subcommand push", async () => {
     const h = loadHarness({
       config: {
-        rules: [
-          gitRule({
-            subcommand: { pattern: "push", valueConsumingFlags: ["-C", "-c"] },
-          }),
-        ],
+        // Registry-only arity: the git plugin's declared descriptor
+        // supplies `-C` / `-c` consumption (no inline declaration).
+        plugins: [gitPlugin],
+        rules: [gitRule({ subcommand: "push" })],
       },
     });
     await expectBlocks(
@@ -985,6 +1038,8 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
   it("flag bundleAware matches git push -uf for -u/-f", async () => {
     const h = loadHarness({
       config: {
+        // Explicit strict: bundle matching needs no consumption facts.
+        plugins: [{ name: "git-facts", cliDescriptors: { git: {} } }],
         rules: [
           gitRule({ flag: { anyOf: ["-f", "--force"], bundleAware: true } }),
         ],
@@ -1006,6 +1061,19 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
   it("gh -R x/y pr merge / --repo= / --hostname shapes extract pr", async () => {
     const h = loadHarness({
       config: {
+        // Synthetic plugin-registered gh descriptor (core seeds no
+        // `gh` — owned by pi-steering-github).
+        plugins: [
+          {
+            name: "gh-facts",
+            cliDescriptors: {
+              gh: {
+                positionPolicy: "globals-anywhere",
+                valueConsumingFlags: ["-R", "--repo", "--hostname"],
+              },
+            },
+          },
+        ],
         rules: [
           {
             name: "no-pr-merge",
@@ -1013,12 +1081,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
             field: "command",
             pattern: "^gh\\b",
             reason: "no merge",
-            when: {
-              subcommand: {
-                pattern: "pr",
-                valueConsumingFlags: ["-R", "--repo", "--hostname"],
-              },
-            },
+            when: { subcommand: "pr" },
           },
         ],
       },
@@ -1066,6 +1129,18 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
   it("aws s3 --profile x ls matches depth-2 [s3, ls]; inner sh -c ref works", async () => {
     const h = loadHarness({
       config: {
+        // Synthetic plugin-registered aws descriptor for `--profile`.
+        plugins: [
+          {
+            name: "aws-facts",
+            cliDescriptors: {
+              aws: {
+                positionPolicy: "globals-anywhere",
+                valueConsumingFlags: ["--profile"],
+              },
+            },
+          },
+        ],
         rules: [
           {
             name: "no-s3-ls",
@@ -1077,7 +1152,6 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
               subcommand: {
                 pattern: ["s3", "ls"],
                 depth: 2,
-                valueConsumingFlags: ["--profile"],
               },
             },
           },
@@ -1124,6 +1198,8 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
   it("exemption with subcommand exempts on match, never on unknown", async () => {
     const h = loadHarness({
       config: {
+        // Explicit strict: exemption parity needs no consumption facts.
+        plugins: [{ name: "git-facts", cliDescriptors: { git: {} } }],
         rules: [
           {
             name: "no-git",
@@ -1228,7 +1304,29 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     await expectAllows(h, { command: "gh -R x/y issue list" });
   });
 
-  it("unknown basename → strict default", async () => {
+  it("explicit-strict { mycli: {} } → silent strict default", async () => {
+    const h = loadHarness({
+      config: {
+        plugins: [{ name: "mycli-facts", cliDescriptors: { mycli: {} } }],
+        rules: [
+          {
+            name: "no-sub",
+            tool: "bash",
+            field: "command",
+            pattern: "^mycli\\b",
+            reason: "no sub",
+            when: { subcommand: "push" },
+          },
+        ],
+      },
+    });
+    // Explicit strict, no table: `-C` consumes nothing, `/x` is the
+    // subcommand → mismatch → allow.
+    await expectAllows(h, { command: "mycli -C /x push" });
+    await expectBlocks(h, { command: "mycli push" }, { rule: "no-sub" });
+  });
+
+  it("absent descriptor → rule-TAGGED block (not generic engine error)", async () => {
     const h = loadHarness({
       config: {
         rules: [
@@ -1243,9 +1341,63 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
         ],
       },
     });
-    // No descriptor, no table: `-C` consumes nothing, `/x` is the
-    // subcommand → mismatch → allow.
-    await expectAllows(h, { command: "mycli -C /x push" });
+    // No descriptor anywhere: the per-ref binding rethrows with rule
+    // context → top-level fail-closed catch emits an actionable block
+    // naming rule + basename + remedy (ask the user).
+    const res = await expectBlocks(
+      h,
+      { command: "mycli push" },
+      { rule: "no-sub" },
+    );
+    const reason =
+      res && "reason" in res && typeof res.reason === "string"
+        ? res.reason
+        : "";
+    assert.match(reason, /\[steering:no-sub@user\]/);
+    assert.match(reason, /No CLI descriptor for basename "mycli"/);
+    assert.match(reason, /Plugin\.cliDescriptors\.mycli/);
+    assert.match(reason, /\{ "mycli": \{\} \}/);
+    assert.match(reason, /Ask the user/);
+    assert.doesNotMatch(reason, /engine error/);
+  });
+
+  it("absent descriptor on the condition path → same tagged block", async () => {
+    const h = loadHarness({
+      config: {
+        rules: [
+          {
+            name: "no-mycli",
+            tool: "bash",
+            field: "command",
+            pattern: "^mycli\\b",
+            reason: "no mycli",
+            when: {
+              condition: (ctx) => ctx.command.positionals().length > 0,
+            },
+          },
+        ],
+      },
+    });
+    await expectBlocks(h, { command: "mycli push" }, { rule: "no-mycli" });
+  });
+
+  it("not:-wrapped absent leaf → block (no inversion)", async () => {
+    const h = loadHarness({
+      config: {
+        rules: [
+          {
+            name: "no-sub",
+            tool: "bash",
+            field: "command",
+            pattern: "^mycli\\b",
+            reason: "no sub",
+            when: { not: { subcommand: "push" } },
+          },
+        ],
+      },
+    });
+    // Binding throws before the not-block ever runs; the throw is a
+    // verdict-never — nothing inverts it to allow.
     await expectBlocks(h, { command: "mycli push" }, { rule: "no-sub" });
   });
 
@@ -1369,11 +1521,10 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     }
   });
 
-  it("leaf/facade agreement on hasFlag PRESENCE ONLY (no value assertions)", async () => {
+  it("leaf/facade agreement at VALUE level (issue #107)", async () => {
     // `push --delete origin`: the flag leaf and the per-ref
-    // `commandFromInput` binding agree that `--delete` is present.
-    // MUST NOT assert getFlagValue/getAllFlagValues (exact-branch
-    // consumes unconditionally until #107).
+    // `commandFromInput` binding agree `--delete` is present AND
+    // valueless (the #106 presence-only limitation is lifted).
     const h = loadHarness({
       config: {
         rules: [gitRule({ flag: { anyOf: ["--delete"] } })],
@@ -1384,27 +1535,88 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
       { command: "git push --delete origin" },
       { rule: "no-push" },
     );
+    const deleted = [
+      { text: "push", value: "push", rawText: "push" } as PredicateWord,
+      {
+        text: "--delete",
+        value: "--delete",
+        rawText: "--delete",
+      } as PredicateWord,
+      {
+        text: "origin",
+        value: "origin",
+        rawText: "origin",
+      } as PredicateWord,
+    ];
     const ctx = mockContext({
       input: {
         tool: "bash",
         command: "git push --delete origin",
         basename: "git",
-        args: [
-          { text: "push", value: "push", rawText: "push" } as PredicateWord,
-          {
-            text: "--delete",
-            value: "--delete",
-            rawText: "--delete",
-          } as PredicateWord,
-          {
-            text: "origin",
-            value: "origin",
-            rawText: "origin",
-          } as PredicateWord,
-        ],
+        args: deleted,
       },
+      descriptors: GIT_DESCRIPTORS,
     });
     assert.equal(ctx.command.hasFlag("--delete"), true);
+    assert.equal(ctx.command.getFlagValue("--delete"), null);
+    assert.deepEqual(ctx.command.getAllFlagValues("--delete"), []);
+    assert.deepEqual(ctx.command.positionals(), ["push", "--delete", "origin"]);
+  });
+
+  it("positionals() skip-set equals leaf consumption set (minus the -- axis)", async () => {
+    // Shared fixture: `gh pr merge --repo TEXT` with the synthetic gh
+    // descriptor. The leaf skips TEXT by position; the facade's
+    // `positionals()` skips the same set.
+    const args = [
+      { text: "pr", value: "pr", rawText: "pr" } as PredicateWord,
+      { text: "merge", value: "merge", rawText: "merge" } as PredicateWord,
+      { text: "--repo", value: "--repo", rawText: "--repo" } as PredicateWord,
+      { text: "TEXT", value: "TEXT", rawText: "TEXT" } as PredicateWord,
+    ];
+    assert.equal(
+      await fires({ flag: { anyOf: ["--repo"] } }, args, {
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      }),
+      true,
+    );
+    // The consumed VALUE is not flaggable: `--body`'s `TEXT` never
+    // reports present even when queried through a matching shape —
+    // pin via the `-R`/`--force` consumption pair on shared args.
+    const consumed = [w("-R"), w("--force"), w("pr")];
+    assert.equal(
+      await fires({ flag: { anyOf: ["--force"] } }, consumed, {
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      }),
+      false,
+    );
+    const ctx = mockContext({
+      input: { tool: "bash", command: "gh …", basename: "gh", args },
+      descriptors: GH_DESCRIPTORS,
+    });
+    assert.equal(ctx.command.getFlagValue("--repo"), "TEXT");
+    assert.deepEqual(ctx.command.positionals(), ["pr", "merge"]);
+    const cctx = mockContext({
+      input: { tool: "bash", command: "gh …", basename: "gh", args: consumed },
+      descriptors: GH_DESCRIPTORS,
+    });
+    assert.deepEqual(cctx.command.positionals(), ["pr"]);
+    // `--` axis divergence (documented, no action): `positionals()`
+    // is `--`-aware while `when.flag` still scans post-`--` tokens.
+    const dashed = [...args, w("--"), w("--force")];
+    assert.equal(
+      await fires({ flag: { anyOf: ["--force"] } }, dashed, {
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      }),
+      true,
+    );
+    const dctx = mockContext({
+      input: { tool: "bash", command: "gh …", basename: "gh", args: dashed },
+      descriptors: GH_DESCRIPTORS,
+    });
+    assert.deepEqual(dctx.command.positionals(), ["pr", "merge", "--force"]);
   });
 
   it("exemption parity: unknown never exempts (kept pin)", async () => {
@@ -1422,7 +1634,8 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
         exemptions: [{ rule: "no-git", when: { subcommand: "pull" } }],
       },
     });
-    // All-flags: extraction null → unknown → guard still fires.
+    // No git descriptor anywhere: the per-ref binding throws →
+    // rule-tagged block (guard still fires — unknown never exempts).
     await expectBlocks(h, { command: "git --version" }, { rule: "no-git" });
   });
 
@@ -1475,5 +1688,39 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
       { command: "git -C /x push origin main" },
       { rule: "no-push" },
     );
+  });
+
+  it("exemption path: descriptor throw → non-match + warn (guard still fires)", async () => {
+    // evaluateExemptionClause's catch is UNCHANGED by the loudness
+    // work: a throwing exemption predicate = "does not match" =
+    // guard fires (fail-closed in the guard's direction).
+    const ctx = mockContext({
+      input: {
+        tool: "bash",
+        command: "mycli push",
+        basename: "mycli",
+        args: [w("push")],
+      },
+    });
+    const warnings: string[] = [];
+    const orig = console.warn;
+    console.warn = (msg?: unknown) => {
+      warnings.push(String(msg));
+    };
+    try {
+      const matched = await evaluateExemptionClause(
+        { subcommand: "push" },
+        { cwd: "/tmp/test" } as never,
+        ctx,
+        { predicates: {}, descriptors: {} } as never,
+        "no-sub",
+      );
+      assert.equal(matched, false);
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0] ?? "", /exemption for rule "no-sub" threw/);
+      assert.match(warnings[0] ?? "", /No CLI descriptor for basename "mycli"/);
+    } finally {
+      console.warn = orig;
+    }
   });
 });

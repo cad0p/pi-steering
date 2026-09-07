@@ -561,11 +561,11 @@ export interface MockContextOptions {
   readonly toolCallEvents?: Readonly<Record<string, readonly SyntheticEntry[]>>;
 
   /**
-   * CLI descriptors for the facade binding symmetry (issue #106).
+   * CLI descriptors for the facade binding symmetry (issue #107).
    * When provided, `command` binds via
    * `resolveDescriptor(input.basename).valueConsumingFlags` exactly
    * as the engine does per ref. Omitted → strict default (no
-   * descriptor). Behavior-inert until #107 wires consumption.
+   * descriptor).
    */
   readonly descriptors?: Readonly<
     Record<string, import("../schema.ts").CLIDescriptor>
@@ -625,7 +625,6 @@ export function mockContext(
     input.basename !== undefined && options.descriptors !== undefined
       ? resolveDescriptor(
           input.basename,
-          undefined,
           options.descriptors as Record<
             string,
             import("../schema.ts").CLIDescriptor

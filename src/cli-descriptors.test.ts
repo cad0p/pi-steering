@@ -2,11 +2,10 @@
 // Part of pi-steering.
 
 /**
- * Tests for `resolveDescriptor` precedence (issue #106 step-4).
+ * Tests for `resolveDescriptor` (issues #106/#107, registry-only).
  *
- * Pins the firm per-field composition:
- *   - inline `valueConsumingFlags`, when present, REPLACES the
- *     registry list (no union).
+ * Pins the firm resolution:
+ *   - registry `valueConsumingFlags` (validated) else strict empty set.
  *   - registry `positionPolicy` always overrides the
  *     `DEFAULT_POSITION_POLICIES` table fallback.
  *   - registry-absent + table-miss → strict `globals-anywhere` /
@@ -18,31 +17,19 @@ import { describe, it } from "node:test";
 import {
   __resetDescriptorWarningsForTests,
   CORE_CLI_DESCRIPTORS,
+  MissingDescriptorError,
   resolveDescriptor,
 } from "./cli-descriptors.ts";
 import { GIT_CLI_DESCRIPTOR } from "./plugins/git/descriptors.ts";
 import type { CLIDescriptor } from "./schema.ts";
 
-describe("resolveDescriptor: precedence inline > registry > strict-default", () => {
-  it("inline flags REPLACE the registry list (no union)", () => {
-    __resetDescriptorWarningsForTests();
-    const registry = {
-      git: { valueConsumingFlags: ["-C", "-c", "--extra"] },
-    };
-    const resolved = resolveDescriptor(
-      "git",
-      { valueConsumingFlags: ["--only"] },
-      registry,
-    );
-    assert.deepEqual(resolved.valueConsumingFlags, ["--only"]);
-  });
-
-  it("registry flags win when inline absent", () => {
+describe("resolveDescriptor: registry > table > strict-default", () => {
+  it("registry flags resolve (no inline channel)", () => {
     __resetDescriptorWarningsForTests();
     const registry = {
       mycli: { valueConsumingFlags: ["--take"] },
     };
-    const resolved = resolveDescriptor("mycli", undefined, registry);
+    const resolved = resolveDescriptor("mycli", registry);
     assert.deepEqual(resolved.valueConsumingFlags, ["--take"]);
   });
 
@@ -52,33 +39,39 @@ describe("resolveDescriptor: precedence inline > registry > strict-default", () 
     const registry = {
       git: { positionPolicy: "globals-anywhere" as const },
     };
-    const resolved = resolveDescriptor("git", undefined, registry);
+    const resolved = resolveDescriptor("git", registry);
     assert.equal(resolved.positionPolicy, "globals-anywhere");
   });
 
-  it("registry-absent + table-miss → strict globals-anywhere / empty set", () => {
+  it("absent basename → throws MissingDescriptorError (loud, never silent strict)", () => {
     __resetDescriptorWarningsForTests();
-    const resolved = resolveDescriptor("unknown-basileus-xyz", undefined, {});
-    assert.equal(resolved.positionPolicy, "globals-anywhere");
-    assert.deepEqual(resolved.valueConsumingFlags, []);
-  });
-
-  it("per-field composition is UNCONDITIONAL (flags replace, policy overrides)", () => {
-    __resetDescriptorWarningsForTests();
-    const registry = {
-      git: {
-        positionPolicy: "globals-anywhere" as const,
-        valueConsumingFlags: ["--reg"],
+    assert.throws(
+      () => resolveDescriptor("unknown-basileus-xyz", {}),
+      (err: unknown) => {
+        assert.ok(err instanceof MissingDescriptorError);
+        assert.equal(err.basename, "unknown-basileus-xyz");
+        assert.match(err.message, /unknown-basileus-xyz/);
+        assert.match(err.message, /cliDescriptors/);
+        assert.match(err.message, /\{ "unknown-basileus-xyz": \{\} \}/);
+        return true;
       },
-    };
-    const resolved = resolveDescriptor(
-      "git",
-      { valueConsumingFlags: ["--inline"] },
-      registry,
     );
-    // Inline flags replace; registry policy still overrides table.
-    assert.deepEqual(resolved.valueConsumingFlags, ["--inline"]);
+    // Missing map entirely throws too.
+    assert.throws(
+      () => resolveDescriptor("npm", undefined),
+      MissingDescriptorError,
+    );
+  });
+
+  it("present-but-empty descriptor ({ npm: {} }) = explicit strict (silent)", () => {
+    __resetDescriptorWarningsForTests();
+    const resolved = resolveDescriptor("npm", { npm: {} });
+    assert.deepEqual(resolved.valueConsumingFlags, []);
+    // Policy still falls back to the walker table, then strict.
     assert.equal(resolved.positionPolicy, "globals-anywhere");
+    const gitStrict = resolveDescriptor("git", { git: {} });
+    assert.deepEqual(gitStrict.valueConsumingFlags, []);
+    assert.equal(gitStrict.positionPolicy, "globals-before-only");
   });
 
   it("git plugin descriptor is pinned (plugin-owned, core seeds nothing)", () => {

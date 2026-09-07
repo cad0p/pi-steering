@@ -85,7 +85,7 @@ describe("schema: shape smoke tests", () => {
   it("TopLevelWhenClause accepts subcommand/flag ARGV leaves (issue #90)", () => {
     const w: TopLevelWhenClause = {
       subcommand: "push",
-      flag: { anyOf: ["--force"], bundleAware: true },
+      flag: { anyOf: [{ aliases: ["--force"], takesValue: false }], bundleAware: true },
     };
     const spread: TopLevelWhenClause = {
       subcommand: {
@@ -290,5 +290,29 @@ describe("package-root exports", () => {
     // import time, not at runtime.
     const rootExports = await import("./index.ts");
     assert.equal(rootExports.AGENT_LOOP_INDEX_KEY, "_agentLoopIndex");
+  });
+});
+
+describe("collapse pins (issue #110: two-list seam is gone, not deprecated)", () => {
+  it("CLIDescriptor carries flags only (no legacy valueConsumingFlags key)", async () => {
+    const { GIT_CLI_DESCRIPTOR } = await import("./plugins/git/descriptors.ts");
+    assert.equal("valueConsumingFlags" in (GIT_CLI_DESCRIPTOR as object), false);
+    assert.ok("flags" in (GIT_CLI_DESCRIPTOR as object));
+  });
+
+  it("FlagLookupOptions is deleted from flags.ts and the root (no remnant export)", async () => {
+    const flagsMod = await import("./helpers/flags.ts");
+    assert.equal("FlagLookupOptions" in flagsMod, false);
+    const root = await import("./index.ts");
+    assert.equal("FlagLookupOptions" in root, false);
+  });
+
+  it("no gluedShorts field anywhere (glue derives, never listed)", async () => {
+    // Structural: the git descriptor carries no glue list; derivation
+    // lives in arity.ts only. (Full `grep -r` sweep recorded in the PR.)
+    const { GIT_CLI_DESCRIPTOR } = await import("./plugins/git/descriptors.ts");
+    assert.equal("gluedShorts" in (GIT_CLI_DESCRIPTOR as object), false);
+    const arityMod = await import("./arity.ts");
+    assert.equal(typeof arityMod.deriveFlagSets, "function");
   });
 });

@@ -91,7 +91,10 @@ describe("resolvePlugins: single plugin surface", () => {
       cliDescriptors: {
         git: {
           positionPolicy: "globals-before-only",
-          valueConsumingFlags: ["-C", "-c"],
+          flags: {
+            C: { aliases: ["-C"], takesValue: true },
+            config: { aliases: ["-c"], takesValue: true },
+          },
         },
       },
     };
@@ -103,7 +106,10 @@ describe("resolvePlugins: single plugin surface", () => {
     // Plugin-declared git fill (core seeds nothing — §13 amendment).
     assert.deepEqual(state.cliDescriptors["git"], {
       positionPolicy: "globals-before-only",
-      valueConsumingFlags: ["-C", "-c"],
+      flags: {
+        C: { aliases: ["-C"], takesValue: true },
+        config: { aliases: ["-c"], takesValue: true },
+      },
     });
     // No extensions → composed tracker is identity-equal when no extras
     // were layered on.
@@ -1085,15 +1091,15 @@ describe("runMergerPipeline: exemption-orphan detection", () => {
   });
 });
 
-describe("resolvePlugins: CLI descriptors (issue #106)", () => {
+describe("resolvePlugins: CLI descriptors (issue #106; #110 table)", () => {
   it("first-wins + descriptor-collision WARN (plugin↔plugin)", () => {
     const kept = {
       positionPolicy: "globals-anywhere" as const,
-      valueConsumingFlags: ["--kept"],
+      flags: { kept: { aliases: ["--kept"], takesValue: true } },
     };
     const dropped = {
       positionPolicy: "globals-anywhere" as const,
-      valueConsumingFlags: ["--dropped"],
+      flags: { dropped: { aliases: ["--dropped"], takesValue: true } },
     };
     const p1: Plugin = { name: "first", cliDescriptors: { mycli: kept } };
     const p2: Plugin = { name: "second", cliDescriptors: { mycli: dropped } };
@@ -1124,14 +1130,14 @@ describe("resolvePlugins: CLI descriptors (issue #106)", () => {
       cliDescriptors: {
         git: {
           positionPolicy: "globals-anywhere",
-          valueConsumingFlags: ["--custom"],
+          flags: { custom: { aliases: ["--custom"], takesValue: true } },
         },
       },
     };
     const state = resolvePlugins([p], {});
     assert.deepEqual(state.cliDescriptors["git"], {
       positionPolicy: "globals-anywhere",
-      valueConsumingFlags: ["--custom"],
+      flags: { custom: { aliases: ["--custom"], takesValue: true } },
     });
     assert.equal(
       state.diagnostics.some((d) => d.kind === "descriptor-collision"),
@@ -1145,7 +1151,7 @@ describe("resolvePlugins: CLI descriptors (issue #106)", () => {
       cliDescriptors: {
         mycli: {
           positionPolicy: "globals-anywhere",
-          valueConsumingFlags: ["--x"],
+          flags: { x: { aliases: ["--x"], takesValue: true } },
         },
       },
     };
@@ -1164,22 +1170,33 @@ describe("resolvePlugins: CLI descriptors (issue #106)", () => {
     const badFlags = {
       name: "bad-flags",
       cliDescriptors: {
-        // Non-array flags.
-        mycli: { valueConsumingFlags: "--not-an-array" },
+        // Non-object flags table.
+        mycli: { flags: "--not-a-table" },
       },
     } as unknown as Plugin;
     const badPolicy = {
       name: "bad-policy",
       cliDescriptors: { mycli2: { positionPolicy: "bogus-policy" } },
     } as unknown as Plugin;
-    const state = resolvePlugins([badFlags, badPolicy], {});
+    const legacy = {
+      name: "legacy",
+      cliDescriptors: {
+        // Legacy key present (even well-formed) → whole-descriptor skip.
+        mycli3: { valueConsumingFlags: ["--take"] },
+      },
+    } as unknown as Plugin;
+    const state = resolvePlugins([badFlags, badPolicy, legacy], {});
     assert.equal("mycli" in state.cliDescriptors, false);
     assert.equal("mycli2" in state.cliDescriptors, false);
+    assert.equal("mycli3" in state.cliDescriptors, false);
     const hits = state.diagnostics.filter(
       (d) => d.kind === "invalid-descriptor",
     );
-    assert.equal(hits.length, 2);
+    assert.equal(hits.length, 3);
     for (const hit of hits) assert.equal(hit.type, "warning");
+    const legacyHit = hits.find((h) => h.message.includes("mycli3"));
+    assert.ok(legacyHit, "expected legacy-key WARN naming migration");
+    assert.match(legacyHit!.message, /valueConsumingFlags was replaced/);
     // Core seeds nothing — skipped entries leave the map empty.
     assert.deepEqual(state.cliDescriptors, {});
   });

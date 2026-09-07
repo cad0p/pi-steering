@@ -8,12 +8,21 @@
  * `when.flag` leaves (issue #90) and are exported for rule authors
  * reaching for `when.condition` escape-hatch logic.
  *
+ * Entry-only queries (issue #110, forcing function): `hasFlag` /
+ * `getFlagValue` / `getAllFlagValues` take `CLIFlag | readonly CLIFlag[]`
+ * — never bare strings, never opts. An entry is self-contained per query
+ * (aliases for matching, `takesValue` for consumption, single-char-short
+ * for glue — no table lookup needed at query time), so standalone (bare
+ * `Word[]`, no basename, no engine) works with just the entry too.
+ * `FlagLookupOptions` is deleted entirely.
+ *
  * All helpers are quote-aware: they read `.value` first (the walker's
  * resolved value after quote removal) before falling back to `.text`
  * (the raw source slice).
  */
 
 import type { Word } from "@cad0p/unbash-walker";
+import type { CLIFlag } from "../schema.ts";
 
 /**
  * Read a word's resolved value with a fallback to its text form.
@@ -36,88 +45,84 @@ function* iterWords(
   for (const w of words) yield w;
 }
 
-/** Options for {@link hasFlag} / {@link getFlagValue} / {@link getAllFlagValues}. */
-export interface FlagLookupOptions {
-  /**
-   * Letters X whose GLUED short form `-X<value>` (one argv word) resolves.
-   * Opt-in: absent/empty keeps the ShellCheck-norm blind default.
-   * Only letters whose own `-X` alias is in the queried flag set apply.
-   */
-  gluedShorts?: readonly string[];
+/**
+ * Trivial takesValue read — keeps a named surface for entry testing.
+ */
+export function isValueConsuming(entry: CLIFlag): boolean {
+  return entry?.takesValue === true;
+}
 
-  /**
-   * Flags that consume the following token (strict-always arity).
-   * The ONLY arity source on the standalone path: an exact-token
-   * occurrence consumes its next token iff ANY queried alias is in
-   * this list (see {@link isValueConsuming}); absent/empty means
-   * nothing consumes (undeclared separated forms are valueless).
-   * Attached `--flag=value` and opt-in glued `-X<rest>` forms always
-   * apply — they carry their value on the token. The bound facade
-   * (`commandFromInput`) threads its descriptor-resolved list here;
-   * bare-`Word[]` callers declare explicitly.
-   */
-  valueConsumingFlags?: readonly string[];
+/** True for `--long` / `-x` spellings; malformed shapes fail-open-ignored. */
+function isWellFormedAlias(spelling: unknown): spelling is string {
+  if (typeof spelling !== "string") return false;
+  if (spelling.startsWith("--")) return spelling.length > 2;
+  if (spelling.startsWith("-") && !spelling.startsWith("--")) {
+    return spelling.length === 2;
+  }
+  return false;
+}
+
+function isSingleCharShort(alias: string): boolean {
+  return alias.length === 2 && alias[0] === "-" && alias[1] !== "-";
 }
 
 /**
- * Shared arity helper backing `getFlagValue` / `getAllFlagValues` /
- * `positionals()` (issues #106/#107, registry-only).
- *
- * Returns `true` iff `flag` is in `descriptor ?? []` — absent means
- * non-consuming (strict always: undeclared flags never consume).
- * Callers pass their resolved list: standalone helpers thread
- * `opts.valueConsumingFlags`; the bound facade threads its
- * `commandFromInput(input, resolvedFlags)` binding; the leaves
- * thread `resolveDescriptor(basename, descriptors)`.
- *
- * Alias sets OR at each position: callers check ANY queried alias
- * (`flagSet.some((f) => isValueConsuming(f, list))`) — checking only
- * the matched spelling would break `[-t, --subject]`-style sets
- * where the descriptor lists one spelling.
+ * Normalize requested entries to well-formed alias lists.
+ * Malformed entry shapes at runtime (plain-JS callers) fail-open-ignored
+ * per-entry (house precedent — never throw out of a scan).
  */
-export function isValueConsuming(
-  flag: string,
-  descriptor?: readonly string[],
-): boolean {
-  return (descriptor ?? []).includes(flag);
+function validEntries(
+  flags: CLIFlag | readonly CLIFlag[],
+): { aliases: readonly string[]; takesValue: boolean }[] {
+  const list = (Array.isArray(flags) ? flags : [flags]) as readonly unknown[];
+  const out: { aliases: readonly string[]; takesValue: boolean }[] = [];
+  for (const entry of list) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const { aliases, takesValue } = entry as Partial<CLIFlag>;
+    if (
+      !Array.isArray(aliases) ||
+      aliases.length === 0 ||
+      !aliases.every(isWellFormedAlias) ||
+      typeof takesValue !== "boolean"
+    ) {
+      continue;
+    }
+    out.push({ aliases: aliases as readonly string[], takesValue });
+  }
+  return out;
 }
 
-/** Shared empty set so the no-glue fast path never allocates. */
-const EMPTY_GLUE_LETTERS: ReadonlySet<string> = new Set<string>();
-
 /**
- * Letters eligible for glued-short decomposition: the declared
- * `gluedShorts` intersected with the letters of ELIGIBLE aliases
- * (single-dash single-letter shorts) in the queried flag set. Long
- * aliases (`--repo`) and multi-char shorts (`-xy`) are never eligible,
- * and malformed option entries fail open (ignored ⇒ no glue).
- *
- * An empty result makes {@link matchFlagAt} behave exactly like the
- * pre-gluedShorts helpers — byte-for-byte default behavior.
+ * Glue letters for the PASSED entries: single-char-short aliases of
+ * `takesValue:true` entries. Longs never glue. This is NOT a second
+ * table→sets site — it reads no registry, walks no table, caches nothing.
  */
-function glueLettersFor(
-  flags: string | readonly string[],
-  opts?: FlagLookupOptions,
+function glueLettersForEntries(
+  entries: readonly { aliases: readonly string[]; takesValue: boolean }[],
 ): ReadonlySet<string> {
-  const raw = opts?.gluedShorts;
-  // Fail-open guard: a non-array gluedShorts ("RR", 123, …) degrades to
-  // the blind default instead of iterating chars or throwing.
-  const declared: readonly unknown[] = Array.isArray(raw) ? raw : [];
-  if (declared.length === 0) return EMPTY_GLUE_LETTERS;
-  const flagAliases = typeof flags === "string" ? [flags] : flags;
   const letters = new Set<string>();
-  for (const entry of declared) {
-    // Fail-open on malformed entries (house precedent): non-array /
-    // non-string / non-single-char letters are ignored ⇒ no glue.
-    if (typeof entry !== "string" || entry.length !== 1) continue;
-    for (const alias of flagAliases) {
-      if (alias.length === 2 && alias[0] === "-" && alias[1] === entry) {
-        letters.add(entry);
-        break;
+  for (const entry of entries) {
+    if (!entry.takesValue) continue;
+    for (const alias of entry.aliases) {
+      if (isSingleCharShort(alias)) {
+        letters.add(alias[1]!);
       }
     }
   }
   return letters;
+}
+
+/** Flattened alias set across valid entries (OR at every position). */
+function flattenAliases(
+  entries: readonly { aliases: readonly string[]; takesValue: boolean }[],
+): readonly string[] {
+  const out: string[] = [];
+  for (const entry of entries) {
+    for (const alias of entry.aliases) out.push(alias);
+  }
+  return out;
 }
 
 /**
@@ -163,29 +168,30 @@ function matchFlagAt(
 }
 
 /**
- * `true` if `args` contains any listed flag as a bare token, as the key
- * of an attached-value `flag=value` token, or — when opted in via
- * {@link FlagLookupOptions.gluedShorts} — as a glued short form
- * `-X<value>` carrying its value inline (`gh -Rc/d` keeps `-Rc/d` as
- * ONE argv word).
+ * `true` if `args` contains any listed flag entry as a bare token, as the
+ * key of an attached-value `flag=value` token, or as a glued short form
+ * `-X<value>` carrying its value inline (`gh -Rc/d` keeps `-Rc/d` as ONE
+ * argv word — iff X is a single-char-short alias of a PASSED entry with
+ * `takesValue:true`).
  *
- * Accepts a single flag or an alias SET (OR'd at every scanned
- * position), mirroring {@link getFlagValue}. Quote-aware (reads
- * `.value` first, falls back to `.text`).
+ * Accepts a single entry or entry array (OR'd at every scanned position),
+ * mirroring {@link getFlagValue}. Quote-aware (reads `.value` first, falls
+ * back to `.text`).
  *
  * @example
- *   hasFlag([W("--profile"), W("dev")], "--profile");    // true  (bare)
- *   hasFlag([W("--profile=dev")], "--profile");          // true  (attached)
- *   hasFlag([W("--profile-foo")], "--profile");          // false (prefix collision avoided)
- *   hasFlag([W("-Rc/d")], "-R", { gluedShorts: ["R"] }); // true  (glued, opt-in)
+ *   hasFlag([W("--profile"), W("dev")], {aliases:["--profile"],takesValue:true}); // true (bare)
+ *   hasFlag([W("--profile=dev")], {aliases:["--profile"],takesValue:false});      // true (attached)
+ *   hasFlag([W("--profile-foo")], {aliases:["--profile"],takesValue:false});      // false (prefix collision avoided)
+ *   hasFlag([W("-Rc/d")], {aliases:["-R"],takesValue:true});                      // true (glued)
  */
 export function hasFlag(
   args: readonly Word[] | undefined,
-  flag: string | readonly string[],
-  opts?: FlagLookupOptions,
+  flag: CLIFlag | readonly CLIFlag[],
 ): boolean {
-  const flagSet = typeof flag === "string" ? [flag] : flag;
-  const glueLetters = glueLettersFor(flagSet, opts);
+  const entries = validEntries(flag);
+  if (entries.length === 0) return false;
+  const flagSet = flattenAliases(entries);
+  const glueLetters = glueLettersForEntries(entries);
   for (const w of iterWords(args)) {
     if (matchFlagAt(wordValue(w), flagSet, glueLetters) !== undefined) {
       return true;
@@ -195,46 +201,37 @@ export function hasFlag(
 }
 
 /**
- * Value associated with the LAST occurrence of any listed flag alias
+ * Value associated with the LAST occurrence of any listed flag entry
  * in `args`, or `null` if the flag is absent or present-but-valueless.
  *
  * **LAST-flag-wins**: the scan runs RIGHT→LEFT, so the highest-index
  * occurrence wins — the effective value under every real argv parser.
- * This supersedes this helper's 0.1.0 form, which scanned left-to-
- * right (FIRST occurrence won, single flag only): first-wins models
- * no real parser — argparse / cobra / pflag all default to last-flag-
- * wins, and CLIs like gh collapse repeated spellings of one logical
- * flag to its final value.
  *
- * The second parameter accepts a single flag OR an alias SET
- * (`["-t", "--subject"]` — gh treats those spellings as one logical
- * flag). Aliases are OR'd at every scanned position, so the winner is
- * whichever alias occurrence comes last:
+ * Entries OR at every scanned position, so the winner is whichever entry
+ * occurrence comes last:
  *
  *   // gh pr merge -t "see #13" --subject "closes #12"
  *   getFlagValue([W("-t"), W("see #13"),
  *                 W("--subject"), W("closes #12")],
- *                ["-t", "--subject"]); // "closes #12"
+ *                [{aliases:["-t"],takesValue:true},
+ *                 {aliases:["--subject"],takesValue:true}]); // "closes #12"
  *
  * Recognizes three forms (precedence per scanned position):
  *   - exact:     `--flag`       → separated form: NEXT token's value,
- *                 gated on strict-always arity — applies ONLY when a
- *                 queried alias is declared in
- *                 `opts.valueConsumingFlags` (undeclared exact
- *                 occurrences are present-but-valueless: skipped here,
- *                 their next token scans alone).
+ *                 gated on strict-always arity — applies ONLY when ANY
+ *                 passed entry takes a value (`entries.some(takesValue)`;
+ *                 undeclared exact occurrences are present-but-valueless:
+ *                 skipped here, their next token scans alone).
  *   - attached: `--flag=value`  → returns `"value"` (may be `""`)
- *   - glued:     `-X<rest>`     → returns `<rest>` (opt-in ONLY, via
- *                 {@link FlagLookupOptions.gluedShorts}: the walker keeps
- *                 `gh -Rc/d`'s `-Rc/d` as ONE argv word)
+ *   - glued:     `-X<rest>`     → returns `<rest>` (iff X is a
+ *                 single-char-short alias of a PASSED `takesValue:true`
+ *                 entry: the walker keeps `gh -Rc/d`'s `-Rc/d` as ONE
+ *                 argv word)
  *
- * Glued decomposition is opt-in per LETTER and bundling-safe: with
- * `gluedShorts: ["f"]`, docker's `-vf alpine` matches NOTHING (the
- * bundle starts with the undeclared `-v`); a declared lead letter
- * consumes its remainder (`-fv` → flag `f`, value `v`). Blanket
- * decomposition is unsound because POSIX CLIs accept glued values AND
- * bundling simultaneously — telling them apart requires per-CLI arity
- * knowledge the caller must assert.
+ * Glued decomposition is bundling-safe: with a `takesValue:true` `{f}`
+ * entry, docker's `-vf alpine` matches NOTHING (the bundle starts with
+ * the undeclared `-v`); a declared lead letter consumes its remainder
+ * (`-fv` → flag `f`, value `v`).
  *
  * The separated form does NOT inspect whether the next token looks
  * like a flag — some CLIs accept `--flag --next-flag` and treat
@@ -250,23 +247,19 @@ export function hasFlag(
  *
  * Matching is exact token equality or the `${flag}=` attached prefix,
  * so prefix collisions are safe (`--profile-foo` ≠ `--profile`).
- * Quote-awareness is inherited (`.value` is read before `.text`) —
- * adopters migrating from hand-rolled `.text` + `unquote` scans get
- * correct handling of quoted values for free.
+ * Quote-awareness is inherited (`.value` is read before `.text`).
  */
 export function getFlagValue(
   args: readonly Word[] | undefined,
-  flags: string | readonly string[],
-  opts?: FlagLookupOptions,
+  flags: CLIFlag | readonly CLIFlag[],
 ): string | null {
-  const flagSet = typeof flags === "string" ? [flags] : flags;
-  const glueLetters = glueLettersFor(flagSet, opts);
-  // Strict-always gate (issue #107): the separated form applies ONLY
-  // to declared consuming flags. Alias sets OR — ANY listed alias
-  // in the resolved list makes every exact occurrence consume.
-  const consumesNext = flagSet.some((f) =>
-    isValueConsuming(f, opts?.valueConsumingFlags),
-  );
+  const entries = validEntries(flags);
+  if (entries.length === 0) return null;
+  const flagSet = flattenAliases(entries);
+  const glueLetters = glueLettersForEntries(entries);
+  // Strict-always gate: the separated form applies ONLY when ANY passed
+  // entry takes a value — every exact occurrence consumes.
+  const consumesNext = entries.some((e) => e.takesValue);
   const argsArr = args ?? [];
   for (let i = argsArr.length - 1; i >= 0; i--) {
     const match = matchFlagAt(wordValue(argsArr[i]), flagSet, glueLetters);
@@ -287,12 +280,12 @@ export function getFlagValue(
 }
 
 /**
- * All values associated with any listed flag alias in `args`, in argv
+ * All values associated with any listed flag entry in `args`, in argv
  * order, or `[]` if the flag is absent or present-but-valueless.
  *
  * Forward-scan (LEFT→RIGHT) accumulation twin of {@link getFlagValue}:
  * at each position the same `matchFlagAt` precedence applies
- * (exact → attached → glued with the same `glueLettersFor` gating),
+ * (exact → attached → glued with the same per-entry glue gating),
  * and each match resolves its value exactly as `getFlagValue` would at
  * that position — except the scan collects every occurrence instead of
  * keeping only the last:
@@ -305,10 +298,9 @@ export function getFlagValue(
  *     empty value.
  *   - attached (`--flag=value`): pushes `value` verbatim INCLUDING `""`
  *     (`--flag=` is an explicit empty value — the scalar returns `""`).
- *   - glued (`-X<rest>`, opt-in via {@link FlagLookupOptions.gluedShorts}):
- *     pushes `<rest>` (non-empty by construction).
+ *   - glued (`-X<rest>`): pushes `<rest>` (non-empty by construction).
  *
- * Alias sets OR'd per position, same as the scalar; mixed spellings
+ * Entries OR'd per position, same as the scalar; mixed spellings
  * interleave in argv order (`-m a --message b` → `["a", "b"]`).
  * Quote-aware via `.value`-first (`wordValue`), same as scalar.
  * No match → `[]` (never `null`).
@@ -328,7 +320,7 @@ export function getFlagValue(
  *     `null`, array `[""]`.
  *
  * Invariant (well-formed non-trailing-broken inputs ONLY):
- * `getFlagValue(args, f, o) === (all.length ? all[all.length-1] : null)`.
+ * `getFlagValue(args, f) === (all.length ? all[all.length-1] : null)`.
  * Trailing-broken inputs (no-next-token OR empty-next-token in trailing
  * position) are the documented exception.
  *
@@ -337,16 +329,15 @@ export function getFlagValue(
  */
 export function getAllFlagValues(
   args: readonly Word[] | undefined,
-  flags: string | readonly string[],
-  opts?: FlagLookupOptions,
+  flags: CLIFlag | readonly CLIFlag[],
 ): string[] {
-  const flagSet = typeof flags === "string" ? [flags] : flags;
-  const glueLetters = glueLettersFor(flagSet, opts);
+  const entries = validEntries(flags);
+  if (entries.length === 0) return [];
+  const flagSet = flattenAliases(entries);
+  const glueLetters = glueLettersForEntries(entries);
   // Same strict-always gate as the scalar: undeclared exact
   // occurrences contribute nothing (their next token scans alone).
-  const consumesNext = flagSet.some((f) =>
-    isValueConsuming(f, opts?.valueConsumingFlags),
-  );
+  const consumesNext = entries.some((e) => e.takesValue);
   const argsArr = args ?? [];
   const collected: string[] = [];
   for (let i = 0; i < argsArr.length; i++) {
@@ -372,7 +363,7 @@ export function getAllFlagValues(
  * extracted by the walker into a separate slot on `ctx.input`; this
  * helper reads them directly without scanning the arg list.
  *
- * The comparison is literal on the variable name \u2014 `hasEnvAssignment`
+ * The comparison is literal on the variable name — `hasEnvAssignment`
  * does NOT match partial prefixes (e.g. `AWS_PROFILE=x` does not
  * satisfy `AWS`).
  *
@@ -406,6 +397,12 @@ export function hasEnvAssignment(
  */
 export const INFO_FLAGS = ["--help", "--version"] as const;
 
+/** Module-private entry literals backing the info-only check. */
+const INFO_FLAG_ENTRIES: readonly CLIFlag[] = INFO_FLAGS.map((f) => ({
+  aliases: [f],
+  takesValue: false,
+}));
+
 /**
  * `true` if `args` contains any info-only flag (token-level, quote-
  * aware). Checks the default {@link INFO_FLAGS} set plus any additive
@@ -427,6 +424,9 @@ export function isInfoOnly(
   args: readonly Word[] | undefined,
   extraFlags?: readonly string[],
 ): boolean {
-  const flags = [...INFO_FLAGS, ...(extraFlags ?? [])];
-  return flags.some((f) => hasFlag(args, f));
+  const entries: CLIFlag[] = [...INFO_FLAG_ENTRIES];
+  for (const f of extraFlags ?? []) {
+    entries.push({ aliases: [f], takesValue: false });
+  }
+  return hasFlag(args, entries);
 }

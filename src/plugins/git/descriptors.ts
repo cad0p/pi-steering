@@ -2,7 +2,7 @@
 // Part of pi-steering.
 
 /**
- * Git plugin-owned CLI descriptor (issue #106).
+ * Git plugin-owned CLI descriptor (issue #106; #110 flag table).
  *
  * Per-binary argv knowledge for the `git` basename. Declared via the
  * git plugin's own `cliDescriptors` slot — the exemplar every
@@ -20,10 +20,17 @@ import type { CLIDescriptor } from "../../schema.ts";
  * `DEFAULT_POSITION_POLICIES["git"]`; flags match the `-C`/`-c`
  * handling in `./trackers/branch-tracker.ts`.
  *
+ * Transition (#110 cutover): minimal entries for the carried `-C`/`-c`
+ * value-takers. The seed step expands this table from Fig's `git.ts`
+ * human-reviewed vs `git --help` with provenance + oracles-lite pins.
+ *
  * Referenced by name (never inlined) in the plugin literal so hover
  * rides on this const.
  */
 export const GIT_CLI_DESCRIPTOR = {
   positionPolicy: "globals-before-only",
-  valueConsumingFlags: ["-C", "-c"],
+  flags: {
+    C: { aliases: ["-C"], takesValue: true },
+    config: { aliases: ["-c"], takesValue: true },
+  },
 } as const satisfies CLIDescriptor;

@@ -827,18 +827,18 @@ describe("mockContext", () => {
       },
       // Strict-always arity: the facade consumes `-m` only via the
       // descriptor binding (same channel the engine uses per ref).
-      descriptors: { testcli: { valueConsumingFlags: ["-m"] } },
+      descriptors: { testcli: { flags: { m: { aliases: ["-m"], takesValue: true } } } },
     });
-    assert.deepEqual(ctx.command.getAllFlagValues("-m"), ["a", "b"]);
-    assert.equal(ctx.command.getFlagValue("-m"), "b");
-    assert.equal(ctx.command.hasFlag("-m"), true);
+    assert.deepEqual(ctx.command.getAllFlagValues({ aliases: ["-m"], takesValue: true }), ["a", "b"]);
+    assert.equal(ctx.command.getFlagValue({ aliases: ["-m"], takesValue: true }), "b");
+    assert.equal(ctx.command.hasFlag({ aliases: ["-m"], takesValue: false }), true);
   });
 
   it("default input drives an empty command view (no throw)", () => {
     const ctx = mockContext();
-    assert.equal(ctx.command.hasFlag("--help"), false);
-    assert.equal(ctx.command.getFlagValue("--help"), null);
-    assert.deepEqual(ctx.command.getAllFlagValues("--help"), []);
+    assert.equal(ctx.command.hasFlag({ aliases: ["--help"], takesValue: false }), false);
+    assert.equal(ctx.command.getFlagValue({ aliases: ["--help"], takesValue: false }), null);
+    assert.deepEqual(ctx.command.getAllFlagValues({ aliases: ["--help"], takesValue: false }), []);
     assert.equal(ctx.command.isInfoOnly(), false);
   });
 
@@ -1106,7 +1106,7 @@ describe("ctx.command harness integration", () => {
       pattern: "^git\\b",
       reason: "two -m values",
       when: {
-        condition: (ctx) => ctx.command.getAllFlagValues(["-m"]).length === 2,
+        condition: (ctx) => ctx.command.getAllFlagValues([{ aliases: ["-m"], takesValue: true }]).length === 2,
       },
     };
     const h = loadHarness({
@@ -1116,7 +1116,7 @@ describe("ctx.command harness integration", () => {
         plugins: [
           {
             name: "test-facts",
-            cliDescriptors: { git: { valueConsumingFlags: ["-m"] } },
+            cliDescriptors: { git: { flags: { m: { aliases: ["-m"], takesValue: true } } } },
           },
         ],
         rules: [rule],
@@ -1157,9 +1157,9 @@ describe("ctx.command harness integration", () => {
       when: {
         condition: (ctx) => {
           sawEmpty =
-            ctx.command.getAllFlagValues(["-m"]).length === 0 &&
-            ctx.command.getFlagValue("-m") === null &&
-            ctx.command.hasFlag("-m") === false;
+            ctx.command.getAllFlagValues([{ aliases: ["-m"], takesValue: true }]).length === 0 &&
+            ctx.command.getFlagValue({ aliases: ["-m"], takesValue: true }) === null &&
+            ctx.command.hasFlag({ aliases: ["-m"], takesValue: false }) === false;
           return true;
         },
       },
@@ -2111,6 +2111,56 @@ describe("issue #54: harness parity for plugin env trackers", () => {
       fired,
       1,
       "loadHarness dispatch threads the plugin-composed registry — resolved watch fires",
+    );
+  });
+});
+
+describe("mockContext binding symmetry (issue #110)", () => {
+  it("with descriptors → derived arity (glued gh -Rfoo TRUE through the mock facade)", async () => {
+    const { mockContext } = await import("./index.ts");
+    const W = (value: string) => ({ value, text: value, pos: 0, end: value.length });
+    const ctx = mockContext({
+      input: {
+        tool: "bash",
+        command: "gh -Rfoo pr list",
+        basename: "gh",
+        args: [W("-Rfoo")],
+      } as never,
+      descriptors: {
+        gh: { flags: { repo: { aliases: ["-R", "--repo"], takesValue: true } } },
+      },
+    });
+    assert.equal(
+      ctx.command.hasFlag({ aliases: ["-R"], takesValue: true }),
+      true,
+    );
+  });
+
+  it("omitted descriptors + defined basename → THROWS MissingDescriptorError (matches engine)", async () => {
+    const { mockContext } = await import("./index.ts");
+    const { MissingDescriptorError } = await import("../arity.ts");
+    assert.throws(
+      () =>
+        mockContext({
+          input: {
+            tool: "bash",
+            command: "gh pr list",
+            basename: "gh",
+            args: [],
+          } as never,
+        }),
+      MissingDescriptorError,
+    );
+  });
+
+  it("nameless → silent strict (never throws)", async () => {
+    const { mockContext } = await import("./index.ts");
+    const ctx = mockContext({
+      input: { tool: "bash", command: "VAR=x" } as never,
+    });
+    assert.equal(
+      ctx.command.hasFlag({ aliases: ["-R"], takesValue: true }),
+      false,
     );
   });
 });

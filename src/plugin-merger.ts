@@ -365,13 +365,15 @@ const VALID_DESCRIPTOR_POLICIES: ReadonlySet<string> = new Set([
 /**
  * Validate one `cliDescriptors` entry. Returns the entry unchanged
  * when well-formed, or `null` when malformed (caller skips + WARNs
- * with `invalid-descriptor`, never throws). Transition (#110): both
- * `valueConsumingFlags` (legacy, still accepted) and `flags` (new table)
- * validate; the cutover rejects the legacy key.
+ * with `invalid-descriptor`, never throws).
  *
- * Malformed: non-object descriptor, non-array `valueConsumingFlags`
- * (or non-string members), invalid `positionPolicy`, non-object `flags`
- * table. Per-entry malformation inside `flags` does NOT fail the whole
+ * Malformed: non-object descriptor, invalid `positionPolicy`, non-object
+ * `flags` table, or PRESENT `valueConsumingFlags` (legacy key deleted in
+ * #110 — a plugin still shipping it is stale; whole-descriptor skip +
+ * WARN naming the migration, so a half-migrated descriptor never silently
+ * carries half its arity).
+ *
+ * Per-entry malformation inside `flags` does NOT fail the whole
  * descriptor here — the caller splits valid entries from warned ones
  * (per-entry granularity, not per-descriptor rejection).
  */
@@ -379,7 +381,10 @@ function validateDescriptorValue(value: unknown): CLIDescriptor | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
-  const obj = value as Partial<CLIDescriptor> & { flags?: unknown };
+  const obj = value as Partial<CLIDescriptor> & {
+    flags?: unknown;
+    valueConsumingFlags?: unknown;
+  };
   if (
     obj.positionPolicy !== undefined &&
     (typeof obj.positionPolicy !== "string" ||
@@ -387,13 +392,13 @@ function validateDescriptorValue(value: unknown): CLIDescriptor | null {
   ) {
     return null;
   }
+  // Legacy key: PRESENT-but-anything (even well-formed, whether or not
+  // `flags` is also present) → whole descriptor malformed. Justification:
+  // silently carrying a half-migrated descriptor would re-create the
+  // two-source seam this PR deletes; skip ⇒ absent ⇒ loud
+  // MissingDescriptorError (fail-closed), never silent carry.
   if (obj.valueConsumingFlags !== undefined) {
-    if (
-      !Array.isArray(obj.valueConsumingFlags) ||
-      !obj.valueConsumingFlags.every((v) => typeof v === "string")
-    ) {
-      return null;
-    }
+    return null;
   }
   if (obj.flags !== undefined) {
     if (
@@ -817,13 +822,22 @@ export function resolvePlugins(
     )) {
       const valid = validateDescriptorValue(descriptor);
       if (valid === null) {
+        const hasLegacy =
+          descriptor !== null &&
+          typeof descriptor === "object" &&
+          !Array.isArray(descriptor) &&
+          (descriptor as { valueConsumingFlags?: unknown })
+            .valueConsumingFlags !== undefined;
         diagnostics.push({
           type: "warning",
           kind: "invalid-descriptor",
-          message:
-            `invalid CLI descriptor "${basename}" — plugin "${plugin.name}" ` +
-            `(ignored); expected { positionPolicy?, flags?: Record<name, ` +
-            `{ aliases, takesValue }> } with a valid policy and flag entries`,
+          message: hasLegacy
+            ? `invalid CLI descriptor "${basename}" — plugin "${plugin.name}" ` +
+              `(ignored); valueConsumingFlags was replaced by flags entries in ` +
+              `#110 (whole descriptor skipped)`
+            : `invalid CLI descriptor "${basename}" — plugin "${plugin.name}" ` +
+              `(ignored); expected { positionPolicy?, flags?: Record<name, ` +
+              `{ aliases, takesValue }> } with a valid policy and flag entries`,
         });
         continue;
       }

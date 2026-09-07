@@ -122,8 +122,7 @@ export function __resetDescriptorWarningsForTests(): void {
  * Resolved per-binary argv knowledge (issue #110).
  *
  * Derived spellings taking a separate value (table aliases where
- * `takesValue`, unioned with the legacy `valueConsumingFlags` list during
- * the #110 migration) plus derived glue letters (single-char-short aliases
+ * `takesValue`) plus derived glue letters (single-char-short aliases
  * of `takesValue` entries). Longs never glue; bool shorts bundle, never
  * glue.
  */
@@ -232,9 +231,7 @@ export function arityOf(
  * Missing/empty `flags` key ≡ `{flags:{}}` ≡ valid empty arity.
  *
  *   - `valueConsumingFlags` + `gluedShorts`: derived via
- *     {@link deriveFlagSets} from the `flags` table, UNIONED with the
- *     legacy `valueConsumingFlags` list during the #110 migration
- *     (cutover deletes the legacy channel).
+ *     {@link deriveFlagSets} from the `flags` table ONLY (sole source).
  *   - `positionPolicy`: registry (when valid) >
  *     `DEFAULT_POSITION_POLICIES` table > strict `"globals-anywhere"`
  *     (table stays the fallback when registry absent).
@@ -259,9 +256,21 @@ export function resolveDescriptor(
     throw new MissingDescriptorError(basename);
   }
 
-  // Flags: table derivation (validated) UNION legacy list (validated)
-  // else strict empty sets. Transition union keeps old readers green;
-  // the cutover deletes the legacy channel.
+  // Flags: table derivation ONLY (sole source). Legacy `valueConsumingFlags`
+  // key present → whole-descriptor skip + WARN (stale plugin); the field is
+  // deleted and a plugin still shipping it is stale (fail-closed via absent).
+  const rawLegacy: unknown = (registryEntry as { valueConsumingFlags?: unknown })?.valueConsumingFlags;
+  if (rawLegacy !== undefined) {
+    warnInvalidDescriptorOnce(
+      basename,
+      "has legacy valueConsumingFlags (was replaced by flags entries in #110)",
+    );
+    return {
+      positionPolicy: "globals-anywhere",
+      valueConsumingFlags: new Set<string>(),
+      gluedShorts: new Set<string>(),
+    };
+  }
   const derived = deriveFlagSets(registryEntry?.flags);
   const valueConsumingFlags = new Set<string>(derived.valueConsumingFlags);
   const gluedShorts = new Set<string>(derived.gluedShorts);
@@ -312,19 +321,12 @@ export function resolveDescriptor(
       }
     }
   }
-  if (registryEntry?.valueConsumingFlags !== undefined) {
-    const v = registryEntry.valueConsumingFlags;
-    if (Array.isArray(v) && v.every((f) => typeof f === "string")) {
-      for (const f of v) valueConsumingFlags.add(f);
-    } else {
-      warnInvalidDescriptorOnce(
-        basename,
-        "has malformed valueConsumingFlags (expected string array)",
-      );
-    }
-  }
+  // Legacy presence already returned strict-empty above; this guard is
+  // defense-in-depth for plain-JS post-check mutation (no second WARN).
 
   // Policy: registry (valid) > table > strict default.
+  // NOTE: legacy-key skip above returns strict-empty early (policy strict
+  // too — whole-descriptor skip, never partial carry).
   const rawRegistryPolicy = registryEntry?.positionPolicy;
   let positionPolicy: PositionPolicy;
   if (typeof rawRegistryPolicy === "string") {

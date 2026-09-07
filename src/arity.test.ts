@@ -24,14 +24,37 @@ import { GIT_CLI_DESCRIPTOR } from "./plugins/git/descriptors.ts";
 import type { CLIDescriptor } from "./schema.ts";
 
 describe("resolveDescriptor: registry > table > strict-default", () => {
-  it("registry flags resolve (no inline channel)", () => {
+  it("table flags resolve (no inline channel)", () => {
     __resetDescriptorWarningsForTests();
     const registry = {
-      mycli: { valueConsumingFlags: ["--take"] },
+      mycli: { flags: { take: { aliases: ["--take"], takesValue: true } } },
     };
     const resolved = resolveDescriptor("mycli", registry);
     assert.deepEqual([...resolved.valueConsumingFlags], ["--take"]);
     assert.deepEqual([...resolved.gluedShorts], []);
+  });
+
+  it("legacy valueConsumingFlags key present → whole-descriptor skip + WARN", () => {
+    __resetDescriptorWarningsForTests();
+    const warnings: string[] = [];
+    const orig = console.warn;
+    console.warn = (msg?: unknown) => {
+      warnings.push(String(msg));
+    };
+    try {
+      const registry = {
+        mycli: { valueConsumingFlags: ["--take"] },
+      } as unknown as Record<string, CLIDescriptor>;
+      const resolved = resolveDescriptor("mycli", registry);
+      assert.deepEqual([...resolved.valueConsumingFlags], []);
+      assert.deepEqual([...resolved.gluedShorts], []);
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0]!, /\[invalid-descriptor\]/);
+      assert.match(warnings[0]!, /valueConsumingFlags/);
+    } finally {
+      console.warn = orig;
+      __resetDescriptorWarningsForTests();
+    }
   });
 
   it("registry policy overrides the table fallback", () => {
@@ -87,11 +110,14 @@ describe("resolveDescriptor: registry > table > strict-default", () => {
 
   it("git plugin descriptor is pinned (plugin-owned, core seeds nothing)", () => {
     // Value pin against the plugin-owned const (imported from its
-    // plugin home, not core). Transition: legacy list still present;
-    // the seed step migrates it to entries.
+    // plugin home, not core). Cutover minimal entries; the seed step
+    // expands the table with provenance + oracles-lite pins.
     assert.deepEqual(GIT_CLI_DESCRIPTOR, {
       positionPolicy: "globals-before-only",
-      valueConsumingFlags: ["-C", "-c"],
+      flags: {
+        C: { aliases: ["-C"], takesValue: true },
+        config: { aliases: ["-c"], takesValue: true },
+      },
     });
     // Assignability pin (§9): the const satisfies CLIDescriptor
     // (JSDoc presence itself is not tsc-pinnable — hover rides on
@@ -168,12 +194,11 @@ describe("deriveFlagSets: table→sets (sole derivation site)", () => {
   });
 });
 
-describe("resolveDescriptor: flags table (additive)", () => {
-  it("table entries resolve alongside the legacy list (union)", () => {
+describe("resolveDescriptor: flags table (cutover)", () => {
+  it("table entries resolve (sole source)", () => {
     __resetDescriptorWarningsForTests();
     const resolved = resolveDescriptor("mycli", {
       mycli: {
-        valueConsumingFlags: ["--legacy"],
         flags: {
           repo: { aliases: ["-R", "--repo"], takesValue: true },
           verbose: { aliases: ["-v"], takesValue: false },
@@ -181,7 +206,6 @@ describe("resolveDescriptor: flags table (additive)", () => {
       },
     });
     assert.deepEqual([...resolved.valueConsumingFlags].sort(), [
-      "--legacy",
       "--repo",
       "-R",
     ]);

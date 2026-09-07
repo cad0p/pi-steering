@@ -21,6 +21,7 @@ import { describe, it } from "node:test";
 import { evaluateExemptionClause } from "../evaluator.ts";
 import gitPlugin from "../plugins/git/index.ts";
 import type {
+  CLIFlag,
   CLIDescriptor,
   Exemption,
   FlagLeaf,
@@ -139,7 +140,11 @@ const GIT_DESCRIPTORS: Record<string, CLIDescriptor> = {
 const GH_DESCRIPTORS: Record<string, CLIDescriptor> = {
   gh: {
     positionPolicy: "globals-anywhere",
-    valueConsumingFlags: ["-R", "--repo", "--hostname"],
+    flags: {
+      R: { aliases: ["-R"], takesValue: true },
+      repo: { aliases: ["--repo"], takesValue: true },
+      hostname: { aliases: ["--hostname"], takesValue: true },
+    },
   },
 };
 
@@ -151,7 +156,9 @@ const GH_DESCRIPTORS: Record<string, CLIDescriptor> = {
 const AWS_DESCRIPTORS: Record<string, CLIDescriptor> = {
   aws: {
     positionPolicy: "globals-anywhere",
-    valueConsumingFlags: ["--profile"],
+    flags: {
+      profile: { aliases: ["--profile"], takesValue: true },
+    },
   },
 };
 
@@ -505,14 +512,14 @@ describe("argv leaves: flag presence semantics", () => {
   it("long exact token matches; absent flag is definite false", async () => {
     assert.equal(
       await fires(
-        { flag: { anyOf: ["--force"] } },
+        { flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } },
         [w("push"), w("--force")],
         g,
       ),
       true,
     );
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, [w("push")], g),
+      await fires({ flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } }, [w("push")], g),
       false,
     );
   });
@@ -522,35 +529,35 @@ describe("argv leaves: flag presence semantics", () => {
     // requires a registry entry (loud otherwise).
     const gh = { basename: "gh", descriptors: GH_DESCRIPTORS };
     assert.equal(
-      await fires({ flag: { anyOf: ["--repo"] } }, [w("--repo=x/y")], gh),
+      await fires({ flag: { anyOf: [{ aliases: ["--repo"], takesValue: false }] } }, [w("--repo=x/y")], gh),
       true,
     );
     assert.equal(
-      await fires({ flag: { anyOf: ["--repo"] } }, [w("--repo=x/y")], gh),
+      await fires({ flag: { anyOf: [{ aliases: ["--repo"], takesValue: false }] } }, [w("--repo=x/y")], gh),
       true,
     );
   });
 
   it("short exact token matches without bundleAware", async () => {
     assert.equal(
-      await fires({ flag: { anyOf: ["-f"] } }, [w("push"), w("-f")], g),
+      await fires({ flag: { anyOf: [{ aliases: ["-f"], takesValue: false }] } }, [w("push"), w("-f")], g),
       true,
     );
   });
 
   it("bundleAware routes -uf through bundleContains (-u and -f)", async () => {
     const args = [w("push"), w("-uf")];
-    assert.equal(await fires({ flag: { anyOf: ["-f"] } }, args, g), false);
+    assert.equal(await fires({ flag: { anyOf: [{ aliases: ["-f"], takesValue: false }] } }, args, g), false);
     assert.equal(
-      await fires({ flag: { anyOf: ["-f"], bundleAware: true } }, args, g),
+      await fires({ flag: { anyOf: [{ aliases: ["-f"], takesValue: false }], bundleAware: true } }, args, g),
       true,
     );
     assert.equal(
-      await fires({ flag: { anyOf: ["-u"], bundleAware: true } }, args, g),
+      await fires({ flag: { anyOf: [{ aliases: ["-u"], takesValue: false }], bundleAware: true } }, args, g),
       true,
     );
     assert.equal(
-      await fires({ flag: { anyOf: ["-x"], bundleAware: true } }, args, g),
+      await fires({ flag: { anyOf: [{ aliases: ["-x"], takesValue: false }], bundleAware: true } }, args, g),
       false,
     );
   });
@@ -558,7 +565,7 @@ describe("argv leaves: flag presence semantics", () => {
   it("longs NEVER bundle-match", async () => {
     assert.equal(
       await fires(
-        { flag: { anyOf: ["--force"], bundleAware: true } },
+        { flag: { anyOf: [{ aliases: ["--force"], takesValue: false }], bundleAware: true } },
         [w("--forceful")],
         g,
       ),
@@ -571,7 +578,7 @@ describe("argv leaves: flag presence semantics", () => {
     // descriptor: `--force` is -R's VALUE.
     const args = [w("-R"), w("--force"), w("pr")];
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, args, {
+      await fires({ flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } }, args, {
         basename: "gh",
         descriptors: GH_DESCRIPTORS,
       }),
@@ -580,7 +587,7 @@ describe("argv leaves: flag presence semantics", () => {
     // Unknown basename → LOUD: absent descriptors throw (never
     // silent strict).
     await assert.rejects(
-      fires({ flag: { anyOf: ["--force"] } }, args, {
+      fires({ flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } }, args, {
         basename: "unknown-basileus-xyz",
       }),
       /No CLI descriptor for basename "unknown-basileus-xyz"/,
@@ -589,7 +596,7 @@ describe("argv leaves: flag presence semantics", () => {
 
   it("the consuming flag itself IS present (only its value is skipped)", async () => {
     assert.equal(
-      await fires({ flag: { anyOf: ["-R"] } }, [w("-R"), w("x/y"), w("pr")], {
+      await fires({ flag: { anyOf: [{ aliases: ["-R"], takesValue: false }] } }, [w("-R"), w("x/y"), w("pr")], {
         basename: "gh",
         descriptors: GH_DESCRIPTORS,
       }),
@@ -601,13 +608,23 @@ describe("argv leaves: flag presence semantics", () => {
     const args = [w("push"), w("--force")];
     const bad: TopLevelWhenClause[] = [
       { flag: { anyOf: [] } },
-      { flag: { anyOf: ["--force", 1] } as unknown as FlagLeaf },
+      // non-string alias member → invalid entry → fail-skip
+      {
+        flag: {
+          anyOf: [{ aliases: ["--force", 1], takesValue: false }],
+        } as unknown as TopLevelWhenClause["flag"],
+      } as TopLevelWhenClause,
       // multi-char short spellings are invalid members
-      { flag: { anyOf: ["-ff"], bundleAware: true } },
+      {
+        flag: {
+          anyOf: [{ aliases: ["-ff"], takesValue: false }],
+          bundleAware: true,
+        },
+      },
       // bare `-` / `--` / non-dash spellings invalid
-      { flag: { anyOf: ["-"] } },
-      { flag: { anyOf: ["--"] } },
-      { flag: { anyOf: ["force"] } },
+      { flag: { anyOf: [{ aliases: ["-"], takesValue: false }] } },
+      { flag: { anyOf: [{ aliases: ["--"], takesValue: false }] } },
+      { flag: { anyOf: [{ aliases: ["force"], takesValue: false }] } },
       // no bare form: non-object leaves invalid
       { flag: "--force" as unknown as FlagLeaf },
       { flag: ["--force"] as unknown as FlagLeaf },
@@ -623,7 +640,7 @@ describe("argv leaves: flag presence semantics", () => {
     assert.equal(
       await fires(
         {
-          flag: { anyOf: ["-f"], bundleAware: "yes" },
+          flag: { anyOf: [{ aliases: ["-f"], takesValue: false }], bundleAware: "yes" },
         } as unknown as TopLevelWhenClause,
         args,
         g,
@@ -641,7 +658,7 @@ describe("argv leaves: flag presence semantics", () => {
     // match → fires.
     assert.equal(
       await fires(
-        { flag: { anyOf: ["-f"], bundleAware: true } },
+        { flag: { anyOf: [{ aliases: ["-f"], takesValue: false }], bundleAware: true } },
         [rawOnly("-uf")],
         g,
       ),
@@ -650,7 +667,7 @@ describe("argv leaves: flag presence semantics", () => {
     // Non-matching bundle letter skips cleanly (no throw).
     assert.equal(
       await fires(
-        { flag: { anyOf: ["-x"], bundleAware: true } },
+        { flag: { anyOf: [{ aliases: ["-x"], takesValue: false }], bundleAware: true } },
         [rawOnly("-uf")],
         g,
       ),
@@ -660,7 +677,7 @@ describe("argv leaves: flag presence semantics", () => {
     // never throws, never flag-shaped.
     const absent = {} as unknown as PredicateWord;
     assert.equal(
-      await fires({ flag: { anyOf: ["-f"], bundleAware: true } }, [absent], g),
+      await fires({ flag: { anyOf: [{ aliases: ["-f"], takesValue: false }], bundleAware: true } }, [absent], g),
       false,
     );
     assert.equal(await fires({ subcommand: "push" }, [absent], g), false);
@@ -668,15 +685,15 @@ describe("argv leaves: flag presence semantics", () => {
 
   it("-- is flag-shaped; post--- positionals scan as ordinary tokens (documented limit)", async () => {
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, [w("--"), w("--force")], g),
+      await fires({ flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } }, [w("--"), w("--force")], g),
       true,
     );
   });
 
   it("non-bash (no args) → unknown → fires; onUnknown allow skips", async () => {
-    assert.equal(await firesOnWrite({ flag: { anyOf: ["--force"] } }), true);
+    assert.equal(await firesOnWrite({ flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } }), true);
     assert.equal(
-      await firesOnWrite({ flag: { anyOf: ["--force"], onUnknown: "allow" } }),
+      await firesOnWrite({ flag: { anyOf: [{ aliases: ["--force"], takesValue: false }], onUnknown: "allow" } }),
       false,
     );
   });
@@ -711,12 +728,12 @@ describe("argv leaves: not-block Kleene semantics", () => {
 
   it("not: { flag } — absent fires, present skips", async () => {
     assert.equal(
-      await fires({ not: { flag: { anyOf: ["--force"] } } }, [w("push")], g),
+      await fires({ not: { flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } } }, [w("push")], g),
       true,
     );
     assert.equal(
       await fires(
-        { not: { flag: { anyOf: ["--force"] } } },
+        { not: { flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } } },
         [w("push"), w("--force")],
         g,
       ),
@@ -761,7 +778,7 @@ describe("argv leaves: not-block Kleene semantics", () => {
     });
     assert.equal(
       await evaluateWhen(
-        { not: { flag: { anyOf: ["--force"] } } },
+        { not: { flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } } },
         { cwd: "/tmp/test" },
         ctx,
         {},
@@ -793,7 +810,7 @@ describe("argv leaves: exemption strictness (S1)", () => {
       rule: "x",
       when: {
         flag: {
-          anyOf: ["--force"],
+          anyOf: [{ aliases: ["--force"], takesValue: false }],
           // @ts-expect-error: leaf-level onUnknown forbidden in exemptions
           onUnknown: "allow",
         },
@@ -816,7 +833,7 @@ describe("argv leaves: exemption strictness (S1)", () => {
       when: {
         not: {
           flag: {
-            anyOf: ["--force"],
+            anyOf: [{ aliases: ["--force"], takesValue: false }],
             // @ts-expect-error: leaf-level onUnknown forbidden inside not:
             onUnknown: "allow",
           },
@@ -835,13 +852,13 @@ describe("argv leaves: exemption strictness (S1)", () => {
       [
         "anyOf",
         {
-          flag: { anyOf: ["--force"], onUnknown: "allow" },
+          flag: { anyOf: [{ aliases: ["--force"], takesValue: false }], onUnknown: "allow" },
         } as unknown as TopLevelWhenClause,
       ],
       [
         "bundleAware-only",
         {
-          flag: { anyOf: ["--force"], bundleAware: true, onUnknown: "allow" },
+          flag: { anyOf: [{ aliases: ["--force"], takesValue: false }], bundleAware: true, onUnknown: "allow" },
         } as unknown as TopLevelWhenClause,
       ],
       [
@@ -877,7 +894,7 @@ describe("argv leaves: exemption strictness (S1)", () => {
       () =>
         validateExemptionWhenClauseShape(
           {
-            not: { flag: { anyOf: ["--force"] }, onUnknown: "allow" },
+            not: { flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] }, onUnknown: "allow" },
           } as unknown as TopLevelWhenClause,
           "exemption x",
         ),
@@ -898,6 +915,7 @@ describe("argv leaves: exemption strictness (S1)", () => {
         basename: "go",
         args: [w("-v"), w("build")],
       },
+      descriptors: { go: {} },
     });
     assert.equal(
       await evaluateWhen(
@@ -923,6 +941,7 @@ describe("argv leaves: exemption strictness (S1)", () => {
         basename: "go",
         args: [w("-v"), w("build")],
       },
+      descriptors: { go: {} },
     });
     assert.equal(
       await evaluateWhen(
@@ -1041,7 +1060,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
         // Explicit strict: bundle matching needs no consumption facts.
         plugins: [{ name: "git-facts", cliDescriptors: { git: {} } }],
         rules: [
-          gitRule({ flag: { anyOf: ["-f", "--force"], bundleAware: true } }),
+          gitRule({ flag: { anyOf: [{ aliases: ["-f", "--force"], takesValue: false }], bundleAware: true } }),
         ],
       },
     });
@@ -1069,7 +1088,11 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
             cliDescriptors: {
               gh: {
                 positionPolicy: "globals-anywhere",
-                valueConsumingFlags: ["-R", "--repo", "--hostname"],
+                flags: {
+                  R: { aliases: ["-R"], takesValue: true },
+                  repo: { aliases: ["--repo"], takesValue: true },
+                  hostname: { aliases: ["--hostname"], takesValue: true },
+                },
               },
             },
           },
@@ -1136,7 +1159,9 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
             cliDescriptors: {
               aws: {
                 positionPolicy: "globals-anywhere",
-                valueConsumingFlags: ["--profile"],
+                flags: {
+                  profile: { aliases: ["--profile"], takesValue: true },
+                },
               },
             },
           },
@@ -1155,7 +1180,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
               },
             },
           },
-          gitRule({ flag: { anyOf: ["-f", "--force"], bundleAware: true } }),
+          gitRule({ flag: { anyOf: [{ aliases: ["-f", "--force"], takesValue: false }], bundleAware: true } }),
         ],
       },
     });
@@ -1250,7 +1275,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
         plugins: [gitPlugin],
         rules: [
           gitRule({ subcommand: "push" }),
-          gitRule({ flag: { anyOf: ["--force"] } }),
+          gitRule({ flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } }),
         ],
       },
     });
@@ -1283,7 +1308,11 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
             cliDescriptors: {
               gh: {
                 positionPolicy: "globals-anywhere",
-                valueConsumingFlags: ["-R", "--repo", "--hostname"],
+                flags: {
+                  R: { aliases: ["-R"], takesValue: true },
+                  repo: { aliases: ["--repo"], takesValue: true },
+                  hostname: { aliases: ["--hostname"], takesValue: true },
+                },
               },
             },
           },
@@ -1421,6 +1450,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
             { text: "push", value: "push", rawText: "push" } as PredicateWord,
           ],
         },
+        descriptors: { git: {} },
       });
       const bad = { git: { positionPolicy: "bogus" } } as unknown as Record<
         string,
@@ -1461,7 +1491,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     }
   });
 
-  it("invalid registry flags → treated absent + one-shot WARN ([invalid-descriptor])", async () => {
+  it("invalid registry flags → strict-empty + one-shot WARN ([invalid-descriptor])", async () => {
     const { __resetDescriptorWarningsForTests } = await import(
       "../arity.ts"
     );
@@ -1483,10 +1513,11 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
             { text: "push", value: "push", rawText: "push" } as PredicateWord,
           ],
         },
+        descriptors: { git: {} },
       });
       const bad = {
-        git: { valueConsumingFlags: "--not-an-array" },
-      } as unknown as Record<string, { valueConsumingFlags: string }>;
+        git: { flags: "--not-a-table" },
+      } as unknown as Record<string, CLIDescriptor>;
       const first = await evaluateWhen(
         { subcommand: "push" },
         { cwd: "/tmp/test" },
@@ -1527,7 +1558,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     // valueless (the #106 presence-only limitation is lifted).
     const h = loadHarness({
       config: {
-        rules: [gitRule({ flag: { anyOf: ["--delete"] } })],
+        rules: [gitRule({ flag: { anyOf: [{ aliases: ["--delete"], takesValue: false }] } })],
       },
     });
     await expectBlocks(
@@ -1557,9 +1588,9 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
       },
       descriptors: GIT_DESCRIPTORS,
     });
-    assert.equal(ctx.command.hasFlag("--delete"), true);
-    assert.equal(ctx.command.getFlagValue("--delete"), null);
-    assert.deepEqual(ctx.command.getAllFlagValues("--delete"), []);
+    assert.equal(ctx.command.hasFlag({ aliases: ["--delete"], takesValue: false }), true);
+    assert.equal(ctx.command.getFlagValue({ aliases: ["--delete"], takesValue: false }), null);
+    assert.deepEqual(ctx.command.getAllFlagValues({ aliases: ["--delete"], takesValue: false }), []);
     assert.deepEqual(ctx.command.positionals(), ["push", "--delete", "origin"]);
   });
 
@@ -1574,7 +1605,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
       { text: "TEXT", value: "TEXT", rawText: "TEXT" } as PredicateWord,
     ];
     assert.equal(
-      await fires({ flag: { anyOf: ["--repo"] } }, args, {
+      await fires({ flag: { anyOf: [{ aliases: ["--repo"], takesValue: false }] } }, args, {
         basename: "gh",
         descriptors: GH_DESCRIPTORS,
       }),
@@ -1585,7 +1616,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     // pin via the `-R`/`--force` consumption pair on shared args.
     const consumed = [w("-R"), w("--force"), w("pr")];
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, consumed, {
+      await fires({ flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } }, consumed, {
         basename: "gh",
         descriptors: GH_DESCRIPTORS,
       }),
@@ -1595,7 +1626,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
       input: { tool: "bash", command: "gh …", basename: "gh", args },
       descriptors: GH_DESCRIPTORS,
     });
-    assert.equal(ctx.command.getFlagValue("--repo"), "TEXT");
+    assert.equal(ctx.command.getFlagValue({ aliases: ["--repo"], takesValue: true }), "TEXT");
     assert.deepEqual(ctx.command.positionals(), ["pr", "merge"]);
     const cctx = mockContext({
       input: { tool: "bash", command: "gh …", basename: "gh", args: consumed },
@@ -1606,7 +1637,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     // is `--`-aware while `when.flag` still scans post-`--` tokens.
     const dashed = [...args, w("--"), w("--force")];
     assert.equal(
-      await fires({ flag: { anyOf: ["--force"] } }, dashed, {
+      await fires({ flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } }, dashed, {
         basename: "gh",
         descriptors: GH_DESCRIPTORS,
       }),
@@ -1694,6 +1725,9 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     // evaluateExemptionClause's catch is UNCHANGED by the loudness
     // work: a throwing exemption predicate = "does not match" =
     // guard fires (fail-closed in the guard's direction).
+    // mockContext binds with explicit-strict so the facade builds;
+    // the exemption clause itself resolves against an EMPTY registry
+    // (absent → throw → non-match).
     const ctx = mockContext({
       input: {
         tool: "bash",
@@ -1701,6 +1735,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
         basename: "mycli",
         args: [w("push")],
       },
+      descriptors: { mycli: {} },
     });
     const warnings: string[] = [];
     const orig = console.warn;
@@ -1722,5 +1757,151 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     } finally {
       console.warn = orig;
     }
+  });
+});
+
+describe("leaf/facade agreement (issue #110)", () => {
+  it("gh -Rfoo agrees presence TRUE both sides (blind-default divergence closed)", async () => {
+    const args = [w("-Rfoo")];
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["-R"], takesValue: true }] } },
+        args,
+        { basename: "gh", descriptors: GH_DESCRIPTORS },
+      ),
+      true,
+    );
+    const ctx = mockContext({
+      input: { tool: "bash", command: "gh …", basename: "gh", args },
+      descriptors: GH_DESCRIPTORS,
+    });
+    assert.equal(
+      ctx.command.hasFlag({ aliases: ["-R"], takesValue: true }),
+      true,
+    );
+  });
+
+  it("push --delete origin agrees leaf-vs-facade at VALUE level", async () => {
+    const args = [w("push"), w("--delete"), w("origin")];
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["--delete"], takesValue: false }] } },
+        args,
+        { basename: "git", descriptors: GIT_DESCRIPTORS },
+      ),
+      true,
+    );
+    const ctx = mockContext({
+      input: {
+        tool: "bash",
+        command: "git push --delete origin",
+        basename: "git",
+        args,
+      },
+      descriptors: GIT_DESCRIPTORS,
+    });
+    assert.equal(
+      ctx.command.getFlagValue({ aliases: ["--delete"], takesValue: false }),
+      null,
+    );
+    assert.deepEqual(ctx.command.positionals(), ["push", "--delete", "origin"]);
+  });
+
+  it("anyOf-entries migration: OR-over-entries × OR-over-aliases truth table", async () => {
+    const args = [w("--subject"), w("x")];
+    // Single entry, both aliases.
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["-t", "--subject"], takesValue: false }] } },
+        args,
+        { basename: "git", descriptors: GIT_DESCRIPTORS },
+      ),
+      true,
+    );
+    // Two entries, one alias each — same verdict.
+    assert.equal(
+      await fires(
+        {
+          flag: {
+            anyOf: [
+              { aliases: ["-t"], takesValue: false },
+              { aliases: ["--subject"], takesValue: false },
+            ],
+          },
+        },
+        args,
+        { basename: "git", descriptors: GIT_DESCRIPTORS },
+      ),
+      true,
+    );
+    // Neither alias present → false.
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["-t", "--subject"], takesValue: false }] } },
+        [w("push")],
+        { basename: "git", descriptors: GIT_DESCRIPTORS },
+      ),
+      false,
+    );
+  });
+
+  it("invalid-entry silent-skip pin (leaf false, no WARN — vs descriptor WARN at merger)", async () => {
+    const warnings: string[] = [];
+    const orig = console.warn;
+    console.warn = (msg?: unknown) => {
+      warnings.push(String(msg));
+    };
+    try {
+      const result = await fires(
+        {
+          flag: {
+            anyOf: [{ aliases: [], takesValue: true } as unknown as never],
+          },
+        },
+        [w("push")],
+        { basename: "git", descriptors: GIT_DESCRIPTORS },
+      );
+      assert.equal(result, false);
+      assert.equal(warnings.length, 0);
+    } finally {
+      console.warn = orig;
+    }
+  });
+
+  it("unlisted-flag strict-always re-pinned (absent-from-table never consumes)", async () => {
+    // --unknown with a value: leaf sees --unknown present, but TEXT is
+    // NOT consumed (strict) — it stays positional in the facade view.
+    const args = [w("--unknown"), w("TEXT"), w("push")];
+    assert.equal(
+      await fires(
+        { flag: { anyOf: [{ aliases: ["--unknown"], takesValue: false }] } },
+        args,
+        { basename: "git", descriptors: GIT_DESCRIPTORS },
+      ),
+      true,
+    );
+    const ctx = mockContext({
+      input: { tool: "bash", command: "git …", basename: "git", args },
+      descriptors: GIT_DESCRIPTORS,
+    });
+    // TEXT was NOT consumed as --unknown's value: it surfaces positional.
+    assert.ok(ctx.command.positionals().includes("TEXT"));
+  });
+
+  it("nameless-ref empty-arity pin (no basename → silent strict, never throws)", async () => {
+    const ctx = mockContext({
+      input: { tool: "bash", command: "VAR=x", args: [w("VAR=x")] } as never,
+    });
+    assert.equal(
+      await evaluateWhen(
+        { flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] } },
+        { cwd: "/tmp/test" },
+        ctx,
+        {},
+        "t",
+        "t",
+      ),
+      false,
+    );
   });
 });

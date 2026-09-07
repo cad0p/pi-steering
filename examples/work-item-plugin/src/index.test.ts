@@ -26,7 +26,7 @@ import workItemPlugin, {
   DESCRIPTION_REVIEWED_EVENT,
   TEST_PASSED_EVENT,
 } from "./index.ts";
-import { exampleNpmFacts, featureBranchHost } from "./test-helpers.ts";
+import { featureBranchHost } from "./test-helpers.ts";
 
 describe("work-item-plugin (end-to-end)", () => {
   it("registers the expected predicates, rules, observers", () => {
@@ -132,7 +132,7 @@ describe("work-item-plugin (end-to-end)", () => {
     const ctx = mockExtensionContext("/tmp/test", host.entries);
     const harness = loadHarness({
       config: {
-        plugins: [workItemPlugin, gitPlugin, exampleNpmFacts],
+        plugins: [workItemPlugin, gitPlugin],
       },
       host,
     });

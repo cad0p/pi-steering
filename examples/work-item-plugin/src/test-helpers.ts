@@ -13,16 +13,7 @@
  * instead of silently passing on empty stdout.
  */
 
-import type { Plugin } from "@cad0p/pi-steering";
 import { createRecordingHost } from "@cad0p/pi-steering/testing";
-
-// Minimal npm facts for harnesses driving `npm test` (issue #107:
-// absent descriptors are loud); `{ npm: {} }` is explicit-strict,
-// honest for the plain `npm test` invocations used here.
-export const exampleNpmFacts = {
-  name: "example-npm-facts",
-  cliDescriptors: { npm: {} },
-} as const satisfies Plugin;
 
 /** Recording host with `git branch --show-current` pinned to a feature branch. */
 export function featureBranchHost(branchName = "feat/x") {

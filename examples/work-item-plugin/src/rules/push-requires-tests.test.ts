@@ -40,7 +40,7 @@ import {
   RETEST_REQUIRED_EVENT,
   retestRequiredTracker,
 } from "../observers/retest-required-tracker.ts";
-import { exampleNpmFacts } from "../test-helpers.ts";
+
 import { pushRequiresTests } from "./push-requires-tests.ts";
 
 /**
@@ -89,7 +89,7 @@ describe("push-requires-tests", () => {
 
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin, gitPlugin, exampleNpmFacts],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
       host,
@@ -139,7 +139,7 @@ describe("push-requires-tests", () => {
 
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin, gitPlugin, exampleNpmFacts],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
       host,
@@ -202,7 +202,7 @@ describe("push-requires-tests", () => {
     // circuits and `git push` never runs.
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin, gitPlugin, exampleNpmFacts],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
     });
@@ -217,7 +217,7 @@ describe("push-requires-tests", () => {
     // cite; the rule fires normally.
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin, gitPlugin, exampleNpmFacts],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
     });
@@ -234,7 +234,7 @@ describe("push-requires-tests", () => {
     // allow would be unsafe.
     const harness = loadHarness({
       config: {
-        plugins: [testPlugin, gitPlugin, exampleNpmFacts],
+        plugins: [testPlugin, gitPlugin],
         rules: [pushRequiresTests],
       },
     });

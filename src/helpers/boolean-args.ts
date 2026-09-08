@@ -2,9 +2,9 @@
 // Part of pi-steering.
 
 /**
- * Shared internal boolean-leaf argument unwrapping for boolean
- * predicates (`isClean`, `hasStagedChanges`, `isForcePush`,
- * `hasRecursiveForce`).
+ * Shared boolean-leaf argument unwrapping for boolean-predicate
+ * authors (`isClean`, `hasStagedChanges`, `isForcePush`,
+ * `hasRecursiveForce`, and any external boolean predicate).
  *
  * Promoted here from the git plugin during the issue #117 command-
  * filter work — four boolean handlers accept the same bare / spread
@@ -13,24 +13,22 @@
 
 /**
  * Unwrap the boolean payload from a {@link PredicateShape}<boolean>
- * argument. Accepts the bare form (`true` / `false`) and the
- * spread form (`{ value: true, onUnknown? }` /
- * `{ value: false, onUnknown? }`); the engine's `readLeafOnUnknown`
- * reads any `onUnknown:` sibling and `projectVerdict` applies the
- * policy to the handler's `"unknown"` returns. The handler itself
- * treats `onUnknown:` as an opaque sibling field and only consumes
- * `value:`.
+ * argument. Plugin-author API for boolean predicates: accepts the
+ * bare form (`true` / `false`) and the spread form
+ * (`{ value: true, onUnknown? }` / `{ value: false, onUnknown? }`).
  *
- * Returns `undefined` on malformed input — the caller decides what
- * to do with that (typically `return false`, mirroring the existing
+ * Malformed input returns `undefined` — the caller decides what to
+ * do with that (typically `return false`, mirroring the existing
  * pattern-unwrap fail-closed contract).
+ *
+ * `onUnknown:` is an opaque sibling owned by the engine's
+ * `readLeafOnUnknown` projection — the handler never reads it and
+ * only consumes `value:`.
  *
  * Used by {@link isClean}, {@link hasStagedChanges},
  * {@link isForcePush}, and {@link hasRecursiveForce}; all ship
  * with `PredicateShape<boolean>` in the registry so the bare/spread
  * shape is identical at the type level too.
- *
- * @internal
  */
 export function unwrapBooleanLeafArg(args: unknown): boolean | undefined {
   if (typeof args === "boolean") return args;
@@ -45,12 +43,9 @@ export function unwrapBooleanLeafArg(args: unknown): boolean | undefined {
 }
 
 /**
- * Test-internal export of {@link unwrapBooleanLeafArg}. Module-private
- * by intent; the `@internal` JSDoc tag (TypeScript ecosystem-standard)
- * flags "not part of the public surface" and the underscore prefix
- * mirrors the convention so external consumers can grep-discover it
- * too. Direct unit tests pin malformed-input branches that are hard
- * to drive via the engine end-to-end.
+ * Test alias of {@link unwrapBooleanLeafArg}. Direct unit tests pin
+ * malformed-input branches that are hard to drive via the engine
+ * end-to-end.
  *
  * @internal
  */

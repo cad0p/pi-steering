@@ -201,6 +201,7 @@ export {
   BLOCK_REASON_PREAMBLE,
   ENGINE_ERROR_PREAMBLE,
 } from "./helpers/block-reason-preamble.ts";
+export { unwrapBooleanLeafArg } from "./helpers/boolean-args.ts";
 export type { SteeringCommand } from "./helpers/command.ts";
 export { commandFromInput } from "./helpers/command.ts";
 // Command facade: context-provided flag-value view (issue #101; #110

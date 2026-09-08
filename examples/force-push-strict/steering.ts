@@ -50,6 +50,7 @@ import {
   definePredicate,
   type Plugin,
   type PredicateShape,
+  unwrapBooleanLeafArg,
 } from "@cad0p/pi-steering";
 import gitPlugin, { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
 
@@ -91,17 +92,11 @@ declare global {
 const isForcePushSignal = definePredicate<
   boolean | { value: boolean; onUnknown?: "allow" | "block" }
 >((args, ctx) => {
-  // Bare (`true` / `false`) or spread (`{ value, onUnknown? }`)
-  // boolean-leaf shapes; malformed → false (fail-closed — same
-  // contract as the shared `unwrapBooleanLeafArg` in
-  // `src/helpers/boolean-args.ts`, inlined here because this pack
-  // only depends on the package's public exports).
-  const expected =
-    typeof args === "boolean"
-      ? args
-      : args !== null && typeof args === "object"
-        ? (args as { value?: unknown }).value
-        : undefined;
+  // Shared public boolean-leaf unwrap (bare `boolean` |
+  // `{ value, onUnknown? }` spread; malformed → undefined → false
+  // fail-closed). Imported from the package root like any external
+  // plugin would.
+  const expected = unwrapBooleanLeafArg(args);
   if (typeof expected !== "boolean") return false;
   if (ctx.input.tool !== "bash") return false;
   const words = ctx.input.args;

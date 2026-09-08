@@ -767,15 +767,27 @@ describe("command facade: package-root surface pin (#101; #110 entries)", () => 
 describe("bundleHasShort (issue #117)", () => {
   it("matches bool-short letters inside bundles", () => {
     assert.equal(
-      bundleHasShort([W("-Rf")], [{ aliases: ["-R"], takesValue: false }], new Set()),
+      bundleHasShort(
+        [W("-Rf")],
+        [{ aliases: ["-R"], takesValue: false }],
+        new Set(),
+      ),
       true,
     );
     assert.equal(
-      bundleHasShort([W("-Rf")], [{ aliases: ["-f"], takesValue: false }], new Set()),
+      bundleHasShort(
+        [W("-Rf")],
+        [{ aliases: ["-f"], takesValue: false }],
+        new Set(),
+      ),
       true,
     );
     assert.equal(
-      bundleHasShort([W("-Rf")], [{ aliases: ["-x"], takesValue: false }], new Set()),
+      bundleHasShort(
+        [W("-Rf")],
+        [{ aliases: ["-x"], takesValue: false }],
+        new Set(),
+      ),
       false,
     );
   });
@@ -795,23 +807,49 @@ describe("bundleHasShort (issue #117)", () => {
     // -Rfoo with R declared: R consumes "foo" as its value, so f is
     // NOT present — only R counts.
     assert.equal(
-      bundleHasShort([W("-Rfoo")], [{ aliases: ["-R"], takesValue: false }], new Set(["R"])),
+      bundleHasShort(
+        [W("-Rfoo")],
+        [{ aliases: ["-R"], takesValue: false }],
+        new Set(["R"]),
+      ),
       true,
     );
     assert.equal(
-      bundleHasShort([W("-Rfoo")], [{ aliases: ["-f"], takesValue: false }], new Set(["R"])),
+      bundleHasShort(
+        [W("-Rfoo")],
+        [{ aliases: ["-f"], takesValue: false }],
+        new Set(["R"]),
+      ),
       false,
     );
     // -xRfoo: xR present (glue at R, inclusive), f still absent.
     assert.equal(
-      bundleHasShort([W("-xRfoo")], [{ aliases: ["-x"], takesValue: false }], new Set(["R"])),
+      bundleHasShort(
+        [W("-xRfoo")],
+        [{ aliases: ["-x"], takesValue: false }],
+        new Set(["R"]),
+      ),
       true,
     );
   });
 
   it("ignores non-short tokens and empty letter sets", () => {
-    assert.equal(bundleHasShort([W("push"), W("--force")], [{ aliases: ["-f"], takesValue: false }], new Set()), false);
+    assert.equal(
+      bundleHasShort(
+        [W("push"), W("--force")],
+        [{ aliases: ["-f"], takesValue: false }],
+        new Set(),
+      ),
+      false,
+    );
     assert.equal(bundleHasShort([W("-Rf")], [], new Set()), false);
-    assert.equal(bundleHasShort(undefined, [{ aliases: ["-f"], takesValue: false }], new Set()), false);
+    assert.equal(
+      bundleHasShort(
+        undefined,
+        [{ aliases: ["-f"], takesValue: false }],
+        new Set(),
+      ),
+      false,
+    );
   });
 });

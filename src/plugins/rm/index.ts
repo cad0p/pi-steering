@@ -42,7 +42,7 @@ import type {
   PredicateShape,
   Rule,
 } from "../../schema.ts";
-import { RM_CLI_DESCRIPTOR, RM_FORCE_FLAG, RM_RECURSIVE_FLAG } from "./descriptors.ts";
+import { RM_CLI_DESCRIPTOR } from "./descriptors.ts";
 import { hasRecursiveForce } from "./predicates/has-recursive-force.ts";
 import { noRmRfSlash } from "./rules/no-rm-rf-slash.ts";
 
@@ -112,6 +112,10 @@ export const RM_PLUGIN_NAME: "rm" = rmPlugin.name;
 
 export default rmPlugin;
 
-export { RM_CLI_DESCRIPTOR, RM_FORCE_FLAG, RM_RECURSIVE_FLAG } from "./descriptors.ts";
+export {
+  RM_CLI_DESCRIPTOR,
+  RM_FORCE_FLAG,
+  RM_RECURSIVE_FLAG,
+} from "./descriptors.ts";
 export { hasRecursiveForce } from "./predicates/has-recursive-force.ts";
 export { noRmRfSlash };

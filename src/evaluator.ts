@@ -280,9 +280,7 @@ export function buildEvaluator(
     const checkBashCommand = (rule: Rule): void => {
       if (rule.tool !== "bash") return;
       const source = ruleSources.get(rule) ?? "user";
-      const cmds = Array.isArray(rule.command)
-        ? rule.command
-        : [rule.command];
+      const cmds = Array.isArray(rule.command) ? rule.command : [rule.command];
       for (const cmd of cmds) {
         if (typeof cmd !== "string" || cmd.length === 0 || /\s/.test(cmd)) {
           throw new Error(
@@ -815,9 +813,7 @@ async function runPredicateChain(
       // Nameless refs (`basename === undefined` — bare `VAR=x`
       // chains) never match: no throw (carve-out preserved). An empty
       // array never matches (mirrors the empty-`anyOf` invalid rule).
-      const cmds = Array.isArray(rule.command)
-        ? rule.command
-        : [rule.command];
+      const cmds = Array.isArray(rule.command) ? rule.command : [rule.command];
       const basename = cand.input.basename;
       if (basename === undefined || !cmds.includes(basename)) return null;
     } else if (!matchesPattern(rule.pattern, cand.target)) {

@@ -44,10 +44,7 @@
  * `disabledRules: ["no-force-push", "no-main-commit"]`.
  */
 
-import {
-  defineConfig,
-  type PredicateContext,
-} from "@cad0p/pi-steering";
+import { defineConfig, type PredicateContext } from "@cad0p/pi-steering";
 import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 /**

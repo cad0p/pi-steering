@@ -160,9 +160,7 @@ describe("git seed oracles-lite (Fig → --help verdict)", () => {
     >;
     assert.deepEqual(flags["force"]!.aliases, ["--force"]);
     assert.deepEqual(flags["forceShort"]!.aliases, ["-f"]);
-    assert.deepEqual(flags["forceWithLease"]!.aliases, [
-      "--force-with-lease",
-    ]);
+    assert.deepEqual(flags["forceWithLease"]!.aliases, ["--force-with-lease"]);
     assert.deepEqual(flags["forceIfIncludes"]!.aliases, [
       "--force-if-includes",
     ]);
@@ -213,11 +211,7 @@ describe("rm presence pins (explicit entries, not omission)", () => {
       { aliases: readonly string[]; takesValue: boolean }
     >;
     assert.deepEqual(Object.keys(flags).sort(), ["force", "recursive"]);
-    assert.deepEqual(flags["recursive"]!.aliases, [
-      "-r",
-      "-R",
-      "--recursive",
-    ]);
+    assert.deepEqual(flags["recursive"]!.aliases, ["-r", "-R", "--recursive"]);
     assert.equal(flags["recursive"]!.takesValue, false);
     assert.deepEqual(flags["force"]!.aliases, ["-f", "--force"]);
     assert.equal(flags["force"]!.takesValue, false);

@@ -228,9 +228,7 @@ describe("compat: fromJSON rejections", () => {
     assert.throws(
       () =>
         fromJSON({
-          rules: [
-            { tool: "write", field: "path", pattern: "p", reason: "r" },
-          ],
+          rules: [{ tool: "write", field: "path", pattern: "p", reason: "r" }],
         }),
       FromJSONError,
     );

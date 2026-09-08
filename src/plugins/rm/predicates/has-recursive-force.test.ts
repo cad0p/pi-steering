@@ -63,7 +63,10 @@ describe("predicates/has-recursive-force", () => {
 
   it("malformed args fail closed to `false`", () => {
     const ctx = rmCtx(["-rf", "/"]);
-    assert.equal(hasRecursiveForce(undefined as unknown as boolean, ctx), false);
+    assert.equal(
+      hasRecursiveForce(undefined as unknown as boolean, ctx),
+      false,
+    );
     assert.equal(hasRecursiveForce(null as unknown as boolean, ctx), false);
     assert.equal(
       hasRecursiveForce({ nope: 1 } as unknown as boolean, ctx),

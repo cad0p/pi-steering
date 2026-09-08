@@ -224,9 +224,9 @@ export { buildConfig, loadConfigs, loadSteeringConfig } from "./loader.ts";
 // Schema types — the public authoring surface.
 export type {
   AnyPredicateHandler,
+  Basename,
   BaseRule,
   BashRule,
-  Basename,
   BuiltInWhenLeaves,
   BuiltInWhenLeavesInner,
   BuiltInWhenLeavesOuter,

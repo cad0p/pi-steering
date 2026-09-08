@@ -439,8 +439,14 @@ describe("hasFlagOrBundle (issue #117)", () => {
     const cmd = bashCmd(S("-Rfoo"), undefined, {
       repo: { aliases: ["-R"], takesValue: true },
     });
-    assert.equal(cmd.hasFlagOrBundle({ aliases: ["-R"], takesValue: false }), true);
-    assert.equal(cmd.hasFlagOrBundle({ aliases: ["-f"], takesValue: false }), false);
+    assert.equal(
+      cmd.hasFlagOrBundle({ aliases: ["-R"], takesValue: false }),
+      true,
+    );
+    assert.equal(
+      cmd.hasFlagOrBundle({ aliases: ["-f"], takesValue: false }),
+      false,
+    );
   });
 
   it("still matches exact and attached forms", () => {
@@ -448,7 +454,13 @@ describe("hasFlagOrBundle (issue #117)", () => {
       force: { aliases: ["--force"], takesValue: false },
       mirror: { aliases: ["--mirror"], takesValue: false },
     });
-    assert.equal(cmd.hasFlagOrBundle({ aliases: ["--force"], takesValue: false }), true);
-    assert.equal(cmd.hasFlagOrBundle({ aliases: ["--mirror"], takesValue: false }), true);
+    assert.equal(
+      cmd.hasFlagOrBundle({ aliases: ["--force"], takesValue: false }),
+      true,
+    );
+    assert.equal(
+      cmd.hasFlagOrBundle({ aliases: ["--mirror"], takesValue: false }),
+      true,
+    );
   });
 });

@@ -1437,9 +1437,7 @@ type BasenameWalk<P extends readonly Plugin[]> = P extends readonly [
       | (Rest extends readonly Plugin[] ? BasenameWalk<Rest> : never)
   : never;
 
-export type Basename<P extends readonly Plugin[] = never> = [P] extends [
-  never,
-]
+export type Basename<P extends readonly Plugin[] = never> = [P] extends [never]
   ? string
   : [BasenameWalk<P>] extends [never]
     ? string

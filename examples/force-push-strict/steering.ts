@@ -92,8 +92,10 @@ const isForcePushSignal = definePredicate<
   boolean | { value: boolean; onUnknown?: "allow" | "block" }
 >((args, ctx) => {
   // Bare (`true` / `false`) or spread (`{ value, onUnknown? }`)
-  // boolean-leaf shapes; malformed → false (fail-closed contract
-  // mirrored from the git plugin's `isForcePush`).
+  // boolean-leaf shapes; malformed → false (fail-closed — same
+  // contract as the shared `unwrapBooleanLeafArg` in
+  // `src/helpers/boolean-args.ts`, inlined here because this pack
+  // only depends on the package's public exports).
   const expected =
     typeof args === "boolean"
       ? args

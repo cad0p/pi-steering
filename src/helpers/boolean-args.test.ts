@@ -3,10 +3,11 @@
 
 /**
  * Direct unit tests for the shared boolean-leaf arg unwrapper
- * (`./boolean-args.ts`).
+ * (`../boolean-args.ts`).
  *
  * `_unwrapBooleanLeafArg` is the test-only re-export of the
- * module-private helper used by `isClean` and `hasStagedChanges` to
+ * module-private helper used by `isClean`, `hasStagedChanges`,
+ * `isForcePush`, and `hasRecursiveForce` to
  * accept the schema-advertised bare and spread shapes. End-to-end
  * coverage exists via the predicate handler tests; the direct tests
  * pin malformed-input branches the engine has trouble driving.

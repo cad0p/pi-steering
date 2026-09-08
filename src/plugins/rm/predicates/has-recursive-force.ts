@@ -12,6 +12,7 @@
  */
 
 import { definePredicate } from "../../../define-predicate.ts";
+import { unwrapBooleanLeafArg } from "../../../helpers/boolean-args.ts";
 import { RM_FORCE_FLAG, RM_RECURSIVE_FLAG } from "../descriptors.ts";
 
 /**
@@ -38,16 +39,9 @@ import { RM_FORCE_FLAG, RM_RECURSIVE_FLAG } from "../descriptors.ts";
 export const hasRecursiveForce = definePredicate<
   boolean | { value: boolean; onUnknown?: "allow" | "block" }
 >((args, ctx) => {
-  // Bare (`true` / `false`) or spread (`{ value, onUnknown? }`)
-  // boolean-leaf shapes; malformed → false (fail-closed contract
-  // mirrored from the git plugin's `unwrapBooleanLeafArg`).
-  const expected =
-    typeof args === "boolean"
-      ? args
-      : args !== null && typeof args === "object"
-        ? (args as { value?: unknown }).value
-        : undefined;
-  if (typeof expected !== "boolean") return false;
+  // Shared boolean-leaf unwrap (see `src/helpers/boolean-args.ts`); malformed → false (fail-closed).
+  const expected = unwrapBooleanLeafArg(args);
+  if (expected === undefined) return false;
   const input = ctx.input;
   if (input?.tool !== "bash") return false;
   const cmd = ctx.command;

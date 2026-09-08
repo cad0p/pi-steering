@@ -2,11 +2,12 @@
 // Part of pi-steering.
 
 /**
- * Shared boolean-leaf argument unwrapping for the git plugin's
- * boolean predicates (`isClean`, `hasStagedChanges`).
+ * Shared internal boolean-leaf argument unwrapping for boolean
+ * predicates (`isClean`, `hasStagedChanges`, `isForcePush`,
+ * `hasRecursiveForce`).
  *
- * Extracted verbatim from the predicates bulk file during the per-item
- * layout refactor — both boolean handlers accept the same bare / spread
+ * Promoted here from the git plugin during the issue #117 command-
+ * filter work — four boolean handlers accept the same bare / spread
  * shapes and share this single unwrap implementation.
  */
 
@@ -24,7 +25,8 @@
  * to do with that (typically `return false`, mirroring the existing
  * pattern-unwrap fail-closed contract).
  *
- * Used by {@link isClean} and {@link hasStagedChanges}; both ship
+ * Used by {@link isClean}, {@link hasStagedChanges},
+ * {@link isForcePush}, and {@link hasRecursiveForce}; all ship
  * with `PredicateShape<boolean>` in the registry so the bare/spread
  * shape is identical at the type level too.
  *

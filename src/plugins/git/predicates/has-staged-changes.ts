@@ -5,8 +5,8 @@
  * `when.hasStagedChanges` predicate handler for the git plugin.
  */
 
+import { unwrapBooleanLeafArg } from "../../../helpers/boolean-args.ts";
 import type { PredicateHandler } from "../../../schema.ts";
-import { unwrapBooleanLeafArg } from "../helpers/boolean-args.ts";
 import { getStagedChanges } from "../helpers/git-ops.ts";
 import { cwdIsWalkerUnknown } from "../helpers/pattern-args.ts";
 
@@ -43,8 +43,7 @@ export const hasStagedChanges: PredicateHandler<
   boolean | { value: boolean; onUnknown?: "allow" | "block" }
 > = async (args, ctx) => {
   if (cwdIsWalkerUnknown(ctx)) return "unknown";
-  // Schema's `PredicateShape<boolean>` auto-detects spreadBase to
-  // `{ value: boolean; onUnknown? }`; unwrap consumes `value:` only.
+  // SpreadBase auto-detects to `{ value: boolean }` (`onUnknown:` is a framework-applied modifier); unwrap consumes `value:` only.
   // Authors attach modifiers via `{ value: true, onUnknown: "allow" }`;
   // the engine reads any `onUnknown:` sibling via readLeafOnUnknown
   // and projects the handler's `"unknown"` returns under that policy

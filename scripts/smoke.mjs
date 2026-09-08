@@ -204,21 +204,23 @@ async function main() {
     };
     const userRuleConfig = `import gitPlugin from ${JSON.stringify(distPlugin("git"))};
 import rmPlugin from ${JSON.stringify(distPlugin("rm"))};
-import asyncPlugin from ${JSON.stringify(distPlugin("async"))};
 
 export default {
   // v2 override policy is fail-closed (defaultNoOverride defaults to
   // true) — the harness exercises the override path, so it opts in
   // explicitly, mirroring a real v2 config that uses overrides.
   defaultNoOverride: false,
-  plugins: [gitPlugin, rmPlugin, asyncPlugin],
+  plugins: [gitPlugin, rmPlugin],
   disabledRules: ["no-main-commit", "no-main-commit-github"],
   rules: [
     {
       name: "test-no-force-push",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\\\b.*push\\\\b.*--force",
+      command: "git",
+      when: {
+        subcommand: "push",
+        flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] },
+      },
       reason: "blocked by smoke-test rule",
     },
   ],

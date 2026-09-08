@@ -548,8 +548,7 @@ describe("git plugin: isClean spread form drives through readLeafOnUnknown", () 
           {
             name: "deploy-requires-clean",
             tool: "bash",
-            field: "command",
-            pattern: /^npm\s+run\s+deploy\b/,
+            command: "npm",
             reason: "Working tree dirty.",
             when: { isClean: { value: false, onUnknown: "allow" } },
           },
@@ -599,8 +598,7 @@ describe("git plugin: isClean spread form drives through readLeafOnUnknown", () 
           {
             name: "deploy-requires-clean",
             tool: "bash",
-            field: "command",
-            pattern: /^npm\s+run\s+deploy\b/,
+            command: "npm",
             reason: "Working tree dirty.",
             when: { isClean: { value: false, onUnknown: "allow" } },
           },
@@ -673,8 +671,7 @@ describe("git plugin: README equivalence — isClean: false vs not: { isClean: t
           {
             name: "deploy-requires-clean-positive",
             tool: "bash",
-            field: "command",
-            pattern: /^npm\s+run\s+deploy\b/,
+            command: "npm",
             reason: "Working tree must be clean.",
             when: { isClean: false },
           },
@@ -707,8 +704,7 @@ describe("git plugin: README equivalence — isClean: false vs not: { isClean: t
           {
             name: "deploy-requires-clean-not",
             tool: "bash",
-            field: "command",
-            pattern: /^npm\s+run\s+deploy\b/,
+            command: "npm",
             reason: "Working tree must be clean.",
             when: { not: { isClean: true } },
           },

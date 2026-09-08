@@ -10,6 +10,7 @@ import type {
 } from "../index.ts";
 import type { CLIFlag, PredicateWord } from "../schema.ts";
 import {
+  bundleHasShort,
   getAllFlagValues,
   getFlagValue,
   hasEnvAssignment,
@@ -760,5 +761,57 @@ describe("command facade: package-root surface pin (#101; #110 entries)", () => 
   it("root INFO_FLAGS is the minimal safe default set", async () => {
     const root = await import("../index.ts");
     assert.deepEqual([...root.INFO_FLAGS], ["--help", "--version"]);
+  });
+});
+
+describe("bundleHasShort (issue #117)", () => {
+  it("matches bool-short letters inside bundles", () => {
+    assert.equal(
+      bundleHasShort([W("-Rf")], [{ aliases: ["-R"], takesValue: false }], new Set()),
+      true,
+    );
+    assert.equal(
+      bundleHasShort([W("-Rf")], [{ aliases: ["-f"], takesValue: false }], new Set()),
+      true,
+    );
+    assert.equal(
+      bundleHasShort([W("-Rf")], [{ aliases: ["-x"], takesValue: false }], new Set()),
+      false,
+    );
+  });
+
+  it("longs never bundle-match", () => {
+    assert.equal(
+      bundleHasShort(
+        [W("--recursive")],
+        [{ aliases: ["-r"], takesValue: false }],
+        new Set(),
+      ),
+      false,
+    );
+  });
+
+  it("truncates at the first glue letter (lead-letter rule)", () => {
+    // -Rfoo with R declared: R consumes "foo" as its value, so f is
+    // NOT present — only R counts.
+    assert.equal(
+      bundleHasShort([W("-Rfoo")], [{ aliases: ["-R"], takesValue: false }], new Set(["R"])),
+      true,
+    );
+    assert.equal(
+      bundleHasShort([W("-Rfoo")], [{ aliases: ["-f"], takesValue: false }], new Set(["R"])),
+      false,
+    );
+    // -xRfoo: xR present (glue at R, inclusive), f still absent.
+    assert.equal(
+      bundleHasShort([W("-xRfoo")], [{ aliases: ["-x"], takesValue: false }], new Set(["R"])),
+      true,
+    );
+  });
+
+  it("ignores non-short tokens and empty letter sets", () => {
+    assert.equal(bundleHasShort([W("push"), W("--force")], [{ aliases: ["-f"], takesValue: false }], new Set()), false);
+    assert.equal(bundleHasShort([W("-Rf")], [], new Set()), false);
+    assert.equal(bundleHasShort(undefined, [{ aliases: ["-f"], takesValue: false }], new Set()), false);
   });
 });

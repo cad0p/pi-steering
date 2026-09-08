@@ -116,8 +116,7 @@ function gitRule(when: TopLevelWhenClause): Rule {
   return {
     name: "no-push",
     tool: "bash",
-    field: "command",
-    pattern: "^git\\b",
+    command: "git",
     reason: "no push",
     when,
   };
@@ -1236,8 +1235,7 @@ describe("argv leaves: plugin collision parity (explicit branch wins)", () => {
           {
             name: "no-push",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b",
+            command: "git",
             reason: "no push",
             when: { cwd: /./ },
           },
@@ -1330,8 +1328,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
           {
             name: "no-pr-merge",
             tool: "bash",
-            field: "command",
-            pattern: "^gh\\b",
+            command: "gh",
             reason: "no merge",
             when: { subcommand: "pr" },
           },
@@ -1363,8 +1360,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
           {
             name: "no-build",
             tool: "bash",
-            field: "command",
-            pattern: "^go\\b",
+            command: "go",
             reason: "no build",
             when: { subcommand: "build" },
           },
@@ -1399,8 +1395,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
           {
             name: "no-s3-ls",
             tool: "bash",
-            field: "command",
-            pattern: "^aws\\b",
+            command: "aws",
             reason: "no ls",
             when: {
               subcommand: {
@@ -1462,8 +1457,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
           {
             name: "no-git",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b",
+            command: "git",
             reason: "no git",
           },
         ],
@@ -1527,8 +1521,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     const ghRule = (when: TopLevelWhenClause): Rule => ({
       name: "no-pr",
       tool: "bash",
-      field: "command",
-      pattern: "^gh\\b",
+      command: "gh",
       reason: "no pr",
       when,
     });
@@ -1576,8 +1569,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-sub",
             tool: "bash",
-            field: "command",
-            pattern: "^mycli\\b",
+            command: "mycli",
             reason: "no sub",
             when: { subcommand: "push" },
           },
@@ -1597,8 +1589,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-sub",
             tool: "bash",
-            field: "command",
-            pattern: "^mycli\\b",
+            command: "mycli",
             reason: "no sub",
             when: { subcommand: "push" },
           },
@@ -1632,8 +1623,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-mycli",
             tool: "bash",
-            field: "command",
-            pattern: "^mycli\\b",
+            command: "mycli",
             reason: "no mycli",
             when: {
               condition: (ctx) => ctx.command.positionals().length > 0,
@@ -1652,8 +1642,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-sub",
             tool: "bash",
-            field: "command",
-            pattern: "^mycli\\b",
+            command: "mycli",
             reason: "no sub",
             when: { not: { subcommand: "push" } },
           },
@@ -1919,8 +1908,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-git",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b",
+            command: "git",
             reason: "no git",
           },
         ],
@@ -1942,8 +1930,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-push",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b",
+            command: "git",
             reason: "no push",
           },
         ],
@@ -1962,8 +1949,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-push",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b",
+            command: "git",
             reason: "no push",
             when: { subcommand: "push" },
           },

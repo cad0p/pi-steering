@@ -13,27 +13,54 @@
  * draft to ready.
  *
  * Scope note: the rule is additive. Since issue #72 nothing is
- * engine-injected — the rm / async declarations below restore the
- * classic filesystem + loop rails; drop them if you want THIS PACK
- * ONLY. The git plugin isn't declared here, so its rules stay inert.
+ * engine-injected — the rm declaration below restores the classic
+ * filesystem rail; drop it if you want THIS PACK ONLY. The git plugin
+ * isn't declared here, so its rules stay inert.
+ *
+ * gh facts: the real `gh` CLI table is owned by pi-steering-github#61
+ * (not landed). Until then this pack declares a minimal synthetic
+ * `gh` table (`draft`, plus `repo` so `gh -R <repo> pr create` keeps
+ * its subcommand routed) — both entries are real `gh` flags. Swap in
+ * the owning plugin when it lands.
  */
 
-import { defineConfig } from "@cad0p/pi-steering";
-import asyncPlugin from "@cad0p/pi-steering/plugins/async";
+import { defineConfig, type Plugin } from "@cad0p/pi-steering";
 import rmPlugin from "@cad0p/pi-steering/plugins/rm";
 
+/**
+ * Minimal synthetic `gh` facts (placeholder for pi-steering-github#61).
+ */
+const ghFacts = {
+  name: "gh-facts",
+  cliDescriptors: {
+    gh: {
+      flags: {
+        draft: { aliases: ["--draft"], takesValue: false },
+        repo: { aliases: ["-R", "--repo"], takesValue: true },
+      },
+    },
+  },
+} as const satisfies Plugin;
+
 export default defineConfig({
-  plugins: [rmPlugin, asyncPlugin],
+  plugins: [rmPlugin, ghFacts],
   rules: [
     {
       name: "pr-create-must-be-draft",
       tool: "bash",
-      field: "command",
-      pattern: "^gh\\s+pr\\s+create\\b",
-      // `unless` short-circuits the rule: if the command ALSO
-      // matches the unless pattern, the rule does NOT fire. Here it
-      // means "block gh pr create UNLESS --draft is also present".
-      unless: "--draft\\b",
+      command: "gh",
+      // `subcommand: { pattern: ["pr", "create"], depth: 2 }` routes
+      // the two-token subcommand; `not: { flag: ... }` inverts the
+      // `--draft` presence check ("block UNLESS --draft is present").
+      // The old `unless: "--draft\\b"` string hack migrates to this
+      // `not: { flag: }` form (the `requires:` / `unless:` Pattern
+      // restriction follows the gh table; see the README).
+      when: {
+        subcommand: { pattern: ["pr", "create"], depth: 2 },
+        not: {
+          flag: { anyOf: [{ aliases: ["--draft"], takesValue: false }] },
+        },
+      },
       reason:
         "PRs must be created as drafts. Mark the PR ready for review only after a human has reviewed the diff. Use `gh pr ready <number>` to flip from draft to ready.",
     },

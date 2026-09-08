@@ -266,6 +266,34 @@ export function buildEvaluator(
     ruleSources.set(rule, resolved.rulePluginOwners[rule.name] ?? "user");
   }
 
+  // Issue #117 build-time shape guard: every bash rule's `command`
+  // entries must be well-formed (one non-empty whitespace-free
+  // basename per entry — `command: "git commit"` is illegal). This
+  // runs once at build (not per ref). Unknown basenames are NOT
+  // rejected here: they surface as the fail-closed rule-tagged
+  // `MissingDescriptorError` block (with remedy) on the first MATCHED
+  // evaluation — the `arityOf` throw contract is unchanged (§5), and
+  // unrouted / nameless refs never reach it (routing first,
+  // resolution second). An empty array is NOT a throw: it never
+  // matches (mirrors the empty-`anyOf` invalid rule).
+  {
+    const checkBashCommand = (rule: Rule): void => {
+      if (rule.tool !== "bash") return;
+      const source = ruleSources.get(rule) ?? "user";
+      const cmds = Array.isArray(rule.command)
+        ? rule.command
+        : [rule.command];
+      for (const cmd of cmds) {
+        if (typeof cmd !== "string" || cmd.length === 0 || /\s/.test(cmd)) {
+          throw new Error(
+            `[pi-steering] rule "${rule.name}"@${source} has an invalid command entry ${JSON.stringify(cmd)} — command: takes one basename per entry (e.g. "git", never "git commit").`,
+          );
+        }
+      }
+    };
+    for (const rule of allRules) checkBashCommand(rule);
+  }
+
   // Effective walker registry — single source of truth shared with
   // the observer-dispatcher's watch surface (see
   // `internal/walk-registry.ts` for the builtin-fallback contract).
@@ -780,8 +808,23 @@ async function runPredicateChain(
     }
   };
   try {
-    // Pattern-miss is the common case; exit before allocating ctx.
-    if (!matchesPattern(rule.pattern, cand.target)) return null;
+    if (rule.tool === "bash") {
+      // Exact-equality first filter (issue #117): routing, never
+      // regex, never substring, no text touch. Mismatch exits before
+      // ctx alloc (the same cheap-first position `pattern` occupied).
+      // Nameless refs (`basename === undefined` — bare `VAR=x`
+      // chains) never match: no throw (carve-out preserved). An empty
+      // array never matches (mirrors the empty-`anyOf` invalid rule).
+      const cmds = Array.isArray(rule.command)
+        ? rule.command
+        : [rule.command];
+      const basename = cand.input.basename;
+      if (basename === undefined || !cmds.includes(basename)) return null;
+    } else if (!matchesPattern(rule.pattern, cand.target)) {
+      // Write / edit rules keep `pattern` as their whole mechanism.
+      // Pattern-miss is the common case; exit before allocating ctx.
+      return null;
+    }
 
     // Per-ref facade binding via the hoisted `arityOf` (issue #110): resolve
     // the descriptor for this ref's basename once per tool_call (cached),
@@ -867,8 +910,10 @@ async function runPredicateChain(
  *
  * Evaluation order (short-circuits on first failure):
  *
- *   1. `pattern`   — required; if no match we exit before allocating
- *                     the predicate context.
+ *   1. Tool filter — bash: exact `command:` basename equality vs
+ *                     the ref (routing first, resolution second);
+ *                     write/edit: `pattern` match. A miss exits
+ *                     before allocating the predicate context.
  *   2. `requires`  — optional AND.
  *   3. `unless`    — optional exemption.
  *   4. `when`      — clause tree (`cwd`, `not`, `condition`, plugin

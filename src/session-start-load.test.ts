@@ -496,8 +496,7 @@ describe("session_start: throws on diagnostics", () => {
 						rules: [{
 							name: "dup",
 							tool: "bash",
-							field: "command",
-							pattern: /^never-a$/,
+							command: "never",
 							reason: "from pa",
 						}],
 					},
@@ -506,8 +505,7 @@ describe("session_start: throws on diagnostics", () => {
 						rules: [{
 							name: "dup",
 							tool: "bash",
-							field: "command",
-							pattern: /^never-b$/,
+							command: "never",
 							reason: "from pb",
 						}],
 					},
@@ -536,8 +534,7 @@ describe("session_start: throws on diagnostics", () => {
 					{
 						name: "dup",
 						tool: "bash",
-						field: "command",
-						pattern: /^never-user$/,
+						command: "never",
 						reason: "inline user rule",
 					},
 				],
@@ -547,8 +544,7 @@ describe("session_start: throws on diagnostics", () => {
 						rules: [{
 							name: "dup",
 							tool: "bash",
-							field: "command",
-							pattern: /^never-plugin$/,
+							command: "never",
 							reason: "from pa",
 						}],
 					},
@@ -691,8 +687,7 @@ describe("session_start: aggregated render snapshot", () => {
 						rules: [{
 							name: "dup",
 							tool: "bash",
-							field: "command",
-							pattern: /^never-a$/,
+							command: "never",
 							reason: "from plugin-a",
 						}],
 					},
@@ -702,8 +697,7 @@ describe("session_start: aggregated render snapshot", () => {
 						rules: [{
 							name: "dup",
 							tool: "bash",
-							field: "command",
-							pattern: /^never-b$/,
+							command: "never",
 							reason: "from plugin-b",
 						}],
 					},
@@ -946,24 +940,26 @@ describe("session_start: per-cwd rebuild", () => {
     writeSteeringSingleFileConfig(
       dirA,
       `export default {
+				plugins: [{ name: "echo-facts", cliDescriptors: { echo: {} } }],
 				rules: [{
 					name: "no-a-probe",
 					tool: "bash",
-					field: "command",
-					pattern: /^echo A_PROBE$/,
+					command: "echo",
 					reason: "blocked by dirA rule",
+					when: { subcommand: "A_PROBE" },
 				}],
 			};`,
     );
     writeSteeringSingleFileConfig(
       dirB,
       `export default {
+				plugins: [{ name: "echo-facts", cliDescriptors: { echo: {} } }],
 				rules: [{
 					name: "no-b-probe",
 					tool: "bash",
-					field: "command",
-					pattern: /^echo B_PROBE$/,
+					command: "echo",
 					reason: "blocked by dirB rule",
+					when: { subcommand: "B_PROBE" },
 				}],
 			};`,
     );

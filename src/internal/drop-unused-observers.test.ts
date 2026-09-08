@@ -21,8 +21,7 @@ function mkRuleWithMissing(name: string, event: string, since?: string): Rule {
   return {
     name,
     tool: "bash",
-    field: "command",
-    pattern: /^x/,
+    command: "x",
     when: {
       missing: since
         ? { event, in: "agent_loop", since }
@@ -37,8 +36,7 @@ function mkRuleNoMissing(name: string): Rule {
   return {
     name,
     tool: "bash",
-    field: "command",
-    pattern: /^x/,
+    command: "x",
     reason: "test",
   };
 }

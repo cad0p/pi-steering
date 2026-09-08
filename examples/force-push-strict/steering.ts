@@ -18,22 +18,25 @@
  * disable-and-replace idiom — dropping a shipped rule via
  * `disabledRules` and installing your own rule under a new name —
  * which is the mechanism you'd use to customize (or loosen) any
- * shipped rule. Its rule pattern mirrors the sealed one.
+ * shipped rule. Its routing + leaves mirror the sealed rule.
  *
  * Shape:
  *
  *   - `plugins: [gitPlugin]` declares the shipping plugin — since
  *     issue #72 nothing is engine-injected, so the rules only exist
  *     if the plugin is declared (and its names only typo-check if it
- *     is).
+ *     is). The declaration also supplies the git CLI facts the
+ *     replacement rule's `subcommand:` / `flag:` leaves resolve
+ *     against.
  *   - `disabledRules: ["no-force-push"]` drops the plugin's rule so
  *     ours owns the block message (otherwise its message would win
  *     on `git push --force`).
- *   - `no-force-push-strict` fires on `--force` (any suffix, any
- *     position), bundled short flags (`-f`, `-uf`, `-fu`, `-nfv`),
- *     leading-`+` refspecs (`git push origin +main`), and `--mirror`.
- *     Matches the same pre-subcommand flag patterns as the sealed
- *     rule (`git -C /path push --force`,
+ *   - `no-force-push-strict` fires on `--force` (any position),
+ *     `--force-with-lease`, `--force-if-includes`, bundled short
+ *     flags (`-f`, `-uf`, `-fu`, `-nfv`), leading-`+` refspecs
+ *     (`git push origin +main`), and `--mirror`. The `subcommand:
+ *     "push"` leaf keeps the pre-subcommand flag coverage of the
+ *     sealed rule (`git -C /path push --force`,
  *     `git -c key=val push --force`, `git --git-dir=/x push -f`).
  *
  * Scope note: the git plugin's `no-main-commit` also fires once the
@@ -41,8 +44,25 @@
  * `disabledRules: ["no-force-push", "no-main-commit"]`.
  */
 
-import { defineConfig } from "@cad0p/pi-steering";
+import {
+  defineConfig,
+  type PredicateContext,
+} from "@cad0p/pi-steering";
 import gitPlugin from "@cad0p/pi-steering/plugins/git";
+
+/**
+ * Mirrors the sealed `no-force-push` entries (`git push -h`): one
+ * entry per spelling — token matching is exact, so `--force` does
+ * not cover `--force-with-lease`. Keep in sync with the plugin rule
+ * when the push force surface grows.
+ */
+const FORCE_FLAG_ENTRIES = [
+  { aliases: ["--force"], takesValue: false },
+  { aliases: ["-f"], takesValue: false },
+  { aliases: ["--force-with-lease"], takesValue: false },
+  { aliases: ["--force-if-includes"], takesValue: false },
+  { aliases: ["--mirror"], takesValue: false },
+] as const;
 
 export default defineConfig({
   plugins: [gitPlugin],
@@ -56,12 +76,21 @@ export default defineConfig({
     {
       name: "no-force-push-strict",
       tool: "bash",
-      field: "command",
-      // Mirrors the SEALED plugins/git no-force-push pattern
-      // (issue #65): --force* via word boundary, bundled shorts,
-      // leading-+ refspecs, --mirror.
-      pattern:
-        "^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+push\\b.*(?:--force\\b|\\s-[A-Za-z]*f[A-Za-z]*(?:\\s|$)|\\s\\+[^\\s:]+(?::\\S*)?(?:\\s|$)|--mirror\\b)",
+      command: "git",
+      // Mirrors the SEALED plugins/git no-force-push routing (issue
+      // #65): `subcommand: "push"` plus the force-signal OR (flag
+      // forms via the facade, leading-`+` refspecs via positional
+      // scan — `+main` is a positional, not flag-shaped).
+      when: {
+        subcommand: "push",
+        condition: (ctx: PredicateContext) =>
+          ctx.command.hasFlagOrBundle(FORCE_FLAG_ENTRIES) ||
+          (Array.isArray(ctx.input.args) &&
+            ctx.input.args.some((w) => {
+              const v = w?.value ?? "";
+              return v.length > 1 && v[0] === "+" && v[1] !== ":";
+            })),
+      },
       reason:
         "No force pushes of any kind, including --force-with-lease. Create a new commit, or reset + re-commit via a non-force path.",
     },

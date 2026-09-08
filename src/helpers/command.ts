@@ -37,6 +37,7 @@ import type { Word } from "@cad0p/unbash-walker";
 import { EMPTY_ARITY, type ResolvedArity } from "../arity.ts";
 import type { CLIFlag, PredicateToolInput } from "../schema.ts";
 import {
+  bundleHasShort,
   getAllFlagValues,
   getFlagValue,
   hasEnvAssignment,
@@ -72,9 +73,28 @@ export interface SteeringCommand {
    * attached `flag=value` token, glued `-X<rest>` via bound glue).
    * Delegates to `hasFlag` with the bound argv words through the
    * `boundEntryViews` adapter (entries select spellings; bound arity
-   * decides consumption/glue).
+   * decides consumption/glue). Deliberately bundle-BLIND for bool
+   * shorts (pinned contract — a bool letter inside `-uf` does NOT
+   * count); use {@link hasFlagOrBundle} when bundles must count.
    */
   hasFlag(flag: CLIFlag | readonly CLIFlag[]): boolean;
+
+  /**
+   * `true` if the command carries any listed flag entry in ANY form:
+   * everything {@link hasFlag} matches, PLUS bool-short membership
+   * inside short bundles (`-Rf` counts for `-R` / `-f`) with
+   * table-glue truncation (a glue letter consumes the remainder as
+   * its value, so `-Rfoo` with `R` declared counts for `R` but never
+   * for `f` — the lead-letter rule, #115). Agrees with the `flag:`
+   * leaf's presence scan; `hasFlag` stays blind by pinned contract.
+   *
+   * Reach for this (not `hasFlag`) in named predicates / rule
+   * `condition:`s that must see bundled bool shorts — e.g. the
+   * `rm` plugin's `hasRecursiveForce` (`-Rf`) or push-force guards
+   * (`-uf`). Delegates to `hasFlag` plus `bundleHasShort` with the
+   * bound argv words and the bound table-derived glue set.
+   */
+  hasFlagOrBundle(flag: CLIFlag | readonly CLIFlag[]): boolean;
 
   /**
    * Value of the LAST occurrence of any listed flag entry, or `null`
@@ -190,6 +210,9 @@ export function commandFromInput(
   const consuming = new Set<string>(bound.valueConsumingFlags);
   return {
     hasFlag: (flag) => hasFlag(args, boundEntryViews(flag, bound)),
+    hasFlagOrBundle: (flag) =>
+      hasFlag(args, boundEntryViews(flag, bound)) ||
+      bundleHasShort(args, flag, bound.gluedShorts),
     getFlagValue: (flags) => getFlagValue(args, boundEntryViews(flags, bound)),
     getAllFlagValues: (flags) =>
       getAllFlagValues(args, boundEntryViews(flags, bound)),

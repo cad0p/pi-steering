@@ -201,6 +201,62 @@ export function hasFlag(
 }
 
 /**
+ * Bundle-aware single-short presence over argv words (issue #117).
+ *
+ * `true` when any short-token word (`-xyz` — longs never bundle)
+ * contains a queried single-char-short alias letter in its PRESENT
+ * prefix: the token body truncated at the first table-declared glue
+ * letter (`gluedShorts`), since a glue letter consumes the remainder
+ * as its value (lead-letter rule, #115 — e.g. `-Rfoo` with `R`
+ * declared presents `R`, never `f`; `-xRfoo` presents `xR`).
+ * Undeclared letters never glue, so the full body is present and any
+ * listed letter matches (`-uf` presents both `u` and `f`).
+ *
+ * Covers ONLY the bundle form — exact tokens, attached
+ * `--flag=value`, and glued `-X<rest>` are `hasFlag`'s job. The
+ * `flag:` leaf's bundle branch is the canonical twin (see
+ * `flagPresent` in `evaluator-internals/predicates.ts`); this export
+ * exists so named predicates / rule `condition:`s can agree with
+ * the leaf without reimplementing the truncation. Quote-aware
+ * (reads `.value` first, falls back to `.text`).
+ */
+export function bundleHasShort(
+  args: readonly Word[] | undefined,
+  flag: CLIFlag | readonly CLIFlag[],
+  gluedShorts: ReadonlySet<string>,
+): boolean {
+  const entries = validEntries(flag);
+  const shortLetters = new Set<string>();
+  for (const entry of entries) {
+    for (const alias of entry.aliases) {
+      if (isSingleCharShort(alias)) shortLetters.add(alias[1]!);
+    }
+  }
+  if (shortLetters.size === 0) return false;
+  for (const w of iterWords(args)) {
+    const token = wordValue(w);
+    if (token.length < 2 || token[0] !== "-" || token[1] === "-") {
+      continue;
+    }
+    let body = token.slice(1);
+    const eq = body.indexOf("=");
+    if (eq !== -1) body = body.slice(0, eq);
+    let end = body.length;
+    for (let j = 0; j < body.length; j++) {
+      if (gluedShorts.has(body[j]!)) {
+        end = j + 1;
+        break;
+      }
+    }
+    const present = body.slice(0, end);
+    for (const letter of shortLetters) {
+      if (present.includes(letter)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Value associated with the LAST occurrence of any listed flag entry
  * in `args`, or `null` if the flag is absent or present-but-valueless.
  *

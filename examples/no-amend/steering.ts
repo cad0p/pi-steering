@@ -13,31 +13,38 @@
  * amend rewrites the SHA, which breaks reviewers' cross-push diff
  * tracking).
  *
- * Scope note: the rule is additive and independent of the git plugin
- * (plain pattern, no predicates). The rm / async declarations below
- * restore the classic filesystem + loop rails post-#72; drop them if
- * you want THIS RULE ONLY.
+ * Scope note: the rule is additive and independent of the git plugin's
+ * rails (plain routing + leaves, no predicates) — but it still
+ * DECLARES the git plugin, because routing to `git` requires git's
+ * CLI facts (the descriptor table the `subcommand:` / `flag:` leaves
+ * resolve against). Declaring it also activates the git rails
+ * (`no-force-push`, `no-hard-reset`, commit-on-main); the rm
+ * declaration below restores the classic filesystem rail; drop either
+ * if you want THIS RULE ONLY (and route nowhere else).
  */
 
 import { defineConfig } from "@cad0p/pi-steering";
-import asyncPlugin from "@cad0p/pi-steering/plugins/async";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import rmPlugin from "@cad0p/pi-steering/plugins/rm";
 
 export default defineConfig({
-  plugins: [rmPlugin, asyncPlugin],
+  plugins: [gitPlugin, rmPlugin],
   rules: [
     {
       name: "no-amend",
       tool: "bash",
-      field: "command",
-      // Mirrors the pre-subcommand flag slot used by the git
-      // plugin's no-force-push so `git -C /path commit --amend`,
-      // `git -c key=val commit --amend`, and
-      // `git --git-dir=/x commit --amend` are all caught.
-      pattern:
-        "^git\\b(?:\\s+-{1,2}[A-Za-z]\\S*(?:\\s+\\S+)?)*\\s+commit\\b.*--amend\\b",
+      command: "git",
+      // `subcommand: "commit"` routes the commit slot (the git
+      // descriptor's consuming-flag arity keeps `git -C /path commit
+      // --amend`, `git -c key=val commit --amend`, and
+      // `git --git-dir=/x commit --amend` routed); `--amend` is
+      // `--help`-pinned (`git commit -h`).
+      when: {
+        subcommand: "commit",
+        flag: { anyOf: [{ aliases: ["--amend"], takesValue: false }] },
+      },
       reason:
-        "Don't rewrite history with --amend. Create a new commit instead. If you need to fix the last commit's message, do it in a follow-up commit \u2014 PR reviewers track diffs across pushes and amend confuses that.",
+        "Don't rewrite history with --amend. Create a new commit instead. If you need to fix the last commit's message, do it in a follow-up commit — PR reviewers track diffs across pushes and amend confuses that.",
     },
   ],
 });

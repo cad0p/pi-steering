@@ -51,9 +51,6 @@
  *                                          predicates
  *   - `NO_CHECKOUT_IN_CHAIN`            — branch-tracker fall-through
  *                                          sentinel
- *   - `GIT_COMMIT_PATTERN`              — shared `git commit` regex
- *                                          source used by both
- *                                          commit-on-main rules
  *   - `PROTECTED_BRANCH_PATTERN`         — shared protected-branch
  *                                          regex (main / master /
  *                                          mainline / trunk) used by
@@ -296,10 +293,7 @@ export {
   getUpstream,
   getWorkingTreeClean,
 } from "./helpers/git-ops.ts";
-export {
-  GIT_COMMIT_PATTERN,
-  PROTECTED_BRANCH_PATTERN,
-} from "./helpers/patterns.ts";
+export { PROTECTED_BRANCH_PATTERN } from "./helpers/patterns.ts";
 export {
   branch,
   type WalkerStringResult,

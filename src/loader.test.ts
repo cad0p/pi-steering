@@ -893,8 +893,7 @@ describe("loader: buildConfig", () => {
         {
           name: "inner",
           tool: "bash",
-          field: "command",
-          pattern: /^x/,
+          command: "x",
           reason: "r",
         },
       ],
@@ -904,8 +903,7 @@ describe("loader: buildConfig", () => {
         {
           name: "outer",
           tool: "bash",
-          field: "command",
-          pattern: /^y/,
+          command: "y",
           reason: "r",
         },
       ],
@@ -924,8 +922,7 @@ describe("loader: buildConfig", () => {
         {
           name: "dup",
           tool: "bash",
-          field: "command",
-          pattern: /^INNER/,
+          command: "never",
           reason: "inner reason",
         },
       ],
@@ -935,8 +932,7 @@ describe("loader: buildConfig", () => {
         {
           name: "dup",
           tool: "bash",
-          field: "command",
-          pattern: /^OUTER/,
+          command: "never",
           reason: "outer reason",
         },
       ],
@@ -955,15 +951,13 @@ describe("loader: buildConfig", () => {
           {
             name: "dup",
             tool: "bash",
-            field: "command",
-            pattern: /^FIRST/,
+            command: "never",
             reason: "first-wins",
           },
           {
             name: "dup",
             tool: "bash",
-            field: "command",
-            pattern: /^SECOND/,
+            command: "never",
             reason: "dropped",
           },
         ],
@@ -1193,15 +1187,13 @@ describe("loader: buildConfig", () => {
           {
             name: "dup",
             tool: "bash",
-            field: "command",
-            pattern: /^FIRST/,
+            command: "never",
             reason: "first",
           },
           {
             name: "dup",
             tool: "bash",
-            field: "command",
-            pattern: /^SECOND/,
+            command: "never",
             reason: "second",
           },
         ],
@@ -1230,8 +1222,7 @@ describe("loader: buildConfig", () => {
           {
             name: "user",
             tool: "bash",
-            field: "command",
-            pattern: /u/,
+            command: "never",
             reason: "u",
           },
         ],
@@ -1241,8 +1232,7 @@ describe("loader: buildConfig", () => {
           {
             name: "user",
             tool: "bash",
-            field: "command",
-            pattern: /b/,
+            command: "never",
             reason: "outer",
           },
         ],
@@ -1309,7 +1299,7 @@ describe("loader: loadSteeringConfig", () => {
     writeConfig(
       join(cwd, ".pi", "steering.ts"),
       configModule(
-        `{ rules: [{ name: "r", tool: "bash", field: "command", pattern: "^git", reason: "r" }] }`,
+        `{ rules: [{ name: "r", tool: "bash", command: "never", reason: "r" }] }`,
       ),
     );
     const { config: merged, diagnostics } = await loadSteeringConfig(cwd);
@@ -1328,13 +1318,13 @@ describe("loader: loadSteeringConfig", () => {
     writeConfig(
       join(cwd, ".pi", "steering.ts"),
       configModule(
-        `{ rules: [{ name: "dup", tool: "bash", field: "command", pattern: /^PROJECT/, reason: "project" }] }`,
+        `{ rules: [{ name: "dup", tool: "bash", command: "never", reason: "project" }] }`,
       ),
     );
     writeConfig(
       join(tmp, ".pi", "agent", "steering", "index.ts"),
       configModule(
-        `{ rules: [{ name: "dup", tool: "bash", field: "command", pattern: /^GLOBAL/, reason: "global" }] }`,
+        `{ rules: [{ name: "dup", tool: "bash", command: "never", reason: "global" }] }`,
       ),
     );
     const { config: merged, diagnostics } = await loadSteeringConfig(cwd);
@@ -1354,8 +1344,8 @@ describe("loader: loadSteeringConfig", () => {
       join(cwd, ".pi", "steering", "index.ts"),
       configModule(
         `{ rules: [
-					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
-					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+					{ name: "dup", tool: "bash", command: "never", reason: "first" },
+					{ name: "dup", tool: "bash", command: "never", reason: "second" },
 				] }`,
       ),
     );
@@ -1434,7 +1424,7 @@ describe("loader: loadSteeringConfig", () => {
       join(cwd, ".pi", "steering.ts"),
       configModule(
         `{ rules: [
-					{ name: "phony] BAD", tool: "bash", field: "command", pattern: /^never$/, reason: "r" },
+					{ name: "phony] BAD", tool: "bash", command: "never", reason: "r" },
 				] }`,
       ),
     );
@@ -1464,7 +1454,7 @@ describe("loader: loadSteeringConfig", () => {
 						{ name: "pb", trackers: { branch: { initial: "?", unknown: "unknown", modifiers: {}, subshellSemantics: "isolated" } } },
 					],
 					rules: [
-						{ name: "phony] BAD", tool: "bash", field: "command", pattern: /^never$/, reason: "r" },
+						{ name: "phony] BAD", tool: "bash", command: "never", reason: "r" },
 					],
 				}`,
       ),

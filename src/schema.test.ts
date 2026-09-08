@@ -35,28 +35,52 @@ import type {
 } from "./schema.ts";
 
 describe("schema: shape smoke tests", () => {
-  it("Rule accepts a minimal bash rule with a string pattern", () => {
+  it("Rule accepts a minimal bash rule with command:", () => {
     const rule: Rule = {
       name: "test",
       tool: "bash",
-      field: "command",
-      pattern: "^git push --force",
+      command: "git",
       reason: "nope",
     };
     assert.equal(rule.name, "test");
   });
 
-  it("Rule accepts RegExp in pattern / requires / unless", () => {
+  it("Rule rejects `pattern:` on bash rules (removed, issue #117)", () => {
     const rule: Rule = {
       name: "regex-rule",
       tool: "bash",
-      field: "command",
+      command: "git",
+      // @ts-expect-error — bash rules carry no `pattern` (write/edit only).
       pattern: /^git push/,
       requires: /--force/,
       unless: /--force-with-lease/,
       reason: "nope",
     };
-    assert.ok(rule.pattern instanceof RegExp);
+    assert.ok(rule.requires instanceof RegExp);
+  });
+
+  it("Rule rejects `field:` on bash rules (absorbed by command:, issue #117)", () => {
+    const rule: Rule = {
+      name: "field-rule",
+      tool: "bash",
+      command: "git",
+      // @ts-expect-error — bash rules carry no `field`.
+      field: "command",
+      reason: "nope",
+    };
+    assert.equal(rule.name, "field-rule");
+  });
+
+  it("Rule accepts RegExp in requires / unless (transient allowlist)", () => {
+    const rule: Rule = {
+      name: "regex-rule",
+      tool: "bash",
+      command: "git",
+      requires: /--force/,
+      unless: /--force-with-lease/,
+      reason: "nope",
+    };
+    assert.ok(rule.requires instanceof RegExp);
   });
 
   it("Rule accepts PredicateFn in requires / unless", () => {
@@ -64,8 +88,7 @@ describe("schema: shape smoke tests", () => {
     const rule: Rule = {
       name: "fn-rule",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       requires: always,
       unless: async (ctx) => ctx.tool === "bash",
       reason: "nope",
@@ -154,8 +177,7 @@ describe("schema: shape smoke tests", () => {
         {
           name: "r",
           tool: "bash",
-          field: "command",
-          pattern: /^x/,
+          command: "x",
           reason: "n",
         },
       ],
@@ -190,16 +212,14 @@ describe("schema: shape smoke tests", () => {
     const inline: Rule = {
       name: "inline-obs",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "x",
       reason: "r",
       observer: { name: "o", onResult: () => {} },
     };
     const byName: Rule<"o"> = {
       name: "by-name",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "x",
       reason: "r",
       observer: "o",
     };
@@ -211,8 +231,7 @@ describe("schema: shape smoke tests", () => {
     const rule: Rule = {
       name: "self-marker",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "x",
       reason: "r",
       writes: ["cr-attempted"],
       onFire: (ctx) => {

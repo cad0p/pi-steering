@@ -36,9 +36,8 @@ export default defineConfig({
     {
       name: "no-push-when-dirty",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push\\b",
-      when: { isClean: false },
+      command: "git",
+      when: { subcommand: "push", isClean: false },
       reason: "Stash or commit your working changes before pushing.",
     },
   ],
@@ -188,9 +187,8 @@ Blocks direct commits to protected branches (`main`, `master`,
 {
   name: "no-main-commit",
   tool: "bash",
-  field: "command",
-  pattern: GIT_COMMIT_PATTERN,
-  when: { branch: PROTECTED_BRANCH_PATTERN },
+  command: "git",
+  when: { subcommand: "commit", branch: PROTECTED_BRANCH_PATTERN },
   reason: "Don't commit directly to a protected branch...",
   noOverride: true,
 }
@@ -205,11 +203,10 @@ Still catches `git -C /path commit`, `sh -c 'git
 commit'`, and — thanks to the branch tracker — `git checkout main
 && git commit`.
 
-The pattern is shared with `no-main-commit-github` via the
-exported `GIT_COMMIT_PATTERN` constant in `helpers/patterns.ts` (re-exported
-from `pi-steering/plugins/git`), so a regex change to one rule is
-physically forced onto the other (a unit test pins each rule's
-`pattern` field against the constant by value).
+The routing is `command: "git"` + `subcommand: "commit"` on both
+rules (the old shared `GIT_COMMIT_PATTERN` regex was deleted with
+bash `pattern:` in issue #117 — routing is exact basename equality
+now, so the two rules can't drift apart by construction).
 
 The protected-branch list is likewise shared via the exported
 `PROTECTED_BRANCH_PATTERN` constant (also re-exported from
@@ -224,7 +221,7 @@ constant; both rules pick it up.
 ### `no-main-commit-github`
 
 Specialization of `no-main-commit` for github.com clones. Same
-pattern + protected-branch list, plus a `remote: /github\.com[/:]/`
+routing + protected-branch list, plus a `remote: /github\.com[/:]/`
 clause; the reason text emits PR-flow guidance (`gh pr merge`)
 instead of the generic feature-branch reminder, plus a safety
 reminder against unsolicited PR merges or ready-for-review flips.
@@ -233,9 +230,9 @@ reminder against unsolicited PR merges or ready-for-review flips.
 {
   name: "no-main-commit-github",
   tool: "bash",
-  field: "command",
-  pattern: GIT_COMMIT_PATTERN, // shared with no-main-commit
+  command: "git",
   when: {
+    subcommand: "commit",
     branch: PROTECTED_BRANCH_PATTERN, // shared with no-main-commit
     remote: /github\.com[/:]/,
   },
@@ -287,8 +284,8 @@ export default defineConfig({
 ```ts
 // 2. Disable + replace with a freshly-named user rule whose
 //    `reason` text points your agents at an internal skill /
-//    runbook. Spread the original to inherit `pattern`, `when:`,
-//    `tool`, `field`, and `noOverride` — only override the field
+//    runbook. Spread the original to inherit `command`, `when:`,
+//    `tool`, and `noOverride` — only override the field
 //    you actually want to change. No `when:` changes → no
 //    walker-unknown-cwd interactions to reason about.
 import { defineConfig } from "@cad0p/pi-steering";
@@ -488,7 +485,7 @@ src/plugins/git/
 │   ├── git-ops.ts            # raw git query helpers (getBranch, ...)
 │   ├── pattern-args.ts       # shared pattern-arg unwrapping helpers
 │   ├── boolean-args.ts       # shared boolean-leaf arg unwrapping
-│   └── patterns.ts           # GIT_COMMIT_PATTERN / PROTECTED_BRANCH_PATTERN
+│   └── patterns.ts           # PROTECTED_BRANCH_PATTERN
 ├── predicates/               # one handler per `when.<key>` slot (+ tests)
 │   ├── branch.ts
 │   ├── upstream.ts
@@ -497,6 +494,8 @@ src/plugins/git/
 │   ├── is-clean.ts
 │   └── remote.ts
 └── rules/                    # one file per rule (+ tests)
+    ├── no-force-push.ts
+    ├── no-hard-reset.ts
     ├── no-main-commit.ts
     └── no-main-commit-github.ts
 ```
@@ -523,10 +522,11 @@ without reimplementing them:
   directly can match this sentinel to know they need to fall back
   to a shell-out (vs. `"unknown"`, where the tracker observed an
   unresolvable checkout).
-- `GIT_COMMIT_PATTERN` — the bash-command regex source matching
-  `git commit` (with optional pre-subcommand flag slots). Reuse
-  in plugin rules that want to share applicability with the
-  shipped commit-on-main rules.
+- `PROTECTED_BRANCH_PATTERN` — the shared protected-branch
+  regex (`main` / `master` / `mainline` / `trunk`). Reuse in plugin
+  rules that want to share applicability with the shipped
+  commit-on-main rules (routing itself is `command: "git"` +
+  `subcommand: "commit"` — no regex needed).
 
 Example import:
 
@@ -534,6 +534,6 @@ Example import:
 import {
   walkerString,
   NO_CHECKOUT_IN_CHAIN,
-  GIT_COMMIT_PATTERN,
+  PROTECTED_BRANCH_PATTERN,
 } from "@cad0p/pi-steering/plugins/git";
 ```

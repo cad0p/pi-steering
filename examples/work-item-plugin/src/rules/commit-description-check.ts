@@ -66,9 +66,9 @@ export function markDescriptionReviewed(
 export const commitDescriptionCheck = {
   name: "commit-description-check",
   tool: "bash",
-  field: "command",
-  pattern: /^git\s+commit\b/,
+  command: "git",
   when: {
+    subcommand: "commit",
     missing: { event: DESCRIPTION_REVIEWED_EVENT, in: "agent_loop" },
   },
   reason:

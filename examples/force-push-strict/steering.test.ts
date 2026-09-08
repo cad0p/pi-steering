@@ -7,7 +7,7 @@
  * Scope: README drift guard. Asserts that `steering.ts` compiles
  * (covered by `tsc --noEmit` in the typecheck script) and that the
  * resolved config has the expected shape. Full behavioral coverage
- * (every pattern, every wrapper form) lives in the engine's own test
+ * (every flag form, every wrapper form) lives in the engine's own test
  * suite, not here.
  */
 

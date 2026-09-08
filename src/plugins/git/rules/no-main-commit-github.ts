@@ -7,10 +7,7 @@
  */
 
 import type { Rule } from "../../../schema.ts";
-import {
-  GIT_COMMIT_PATTERN,
-  PROTECTED_BRANCH_PATTERN,
-} from "../helpers/patterns.ts";
+import { PROTECTED_BRANCH_PATTERN } from "../helpers/patterns.ts";
 import { walkerString } from "../predicates/branch.ts";
 import { NO_CHECKOUT_IN_CHAIN } from "../trackers/branch-tracker.ts";
 
@@ -67,18 +64,20 @@ import { NO_CHECKOUT_IN_CHAIN } from "../trackers/branch-tracker.ts";
  * asserting a specific protected branch the engine hasn't
  * confirmed.
  *
- * Pattern is shared with `noMainCommit` via the exported
- * {@link GIT_COMMIT_PATTERN} constant so the two rules' bash-
- * command applicability stays byte-equal as the family evolves.
+ * Routing is shared with {@link noMainCommit} via the same
+ * `command: "git"` + `subcommand: "commit"` pair, so the two rules'
+ * bash-command applicability stays byte-equal as the family evolves.
  *
  * @see {@link noMainCommit}
  */
 export const noMainCommitGithub = {
   name: "no-main-commit-github",
   tool: "bash",
-  field: "command",
-  pattern: GIT_COMMIT_PATTERN,
+  command: "git",
+  // Routing is `command: "git"` + `subcommand: "commit"` (the
+  // old `GIT_COMMIT_PATTERN` anchor, deleted with bash `pattern:`).
   when: {
+    subcommand: "commit",
     branch: PROTECTED_BRANCH_PATTERN,
     // Intentional fail-OPEN — falls through to the generic
     // `noMainCommit` rule when origin can't be resolved.

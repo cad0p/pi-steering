@@ -409,3 +409,46 @@ describe("commandFromInput totality + COPY", () => {
     assert.equal(cmd.hasEnvAssignment("A"), true);
   });
 });
+
+describe("hasFlagOrBundle (issue #117)", () => {
+  it("sees bundled bool shorts the blind hasFlag misses", () => {
+    const cmd = bashCmd(S("-Rf"), undefined, {
+      recursive: { aliases: ["-r", "-R", "--recursive"], takesValue: false },
+      force: { aliases: ["-f", "--force"], takesValue: false },
+    });
+    assert.equal(
+      cmd.hasFlag({ aliases: ["-R"], takesValue: false }),
+      false,
+      "hasFlag stays bundle-blind (pinned contract)",
+    );
+    assert.equal(
+      cmd.hasFlagOrBundle({ aliases: ["-R"], takesValue: false }),
+      true,
+    );
+    assert.equal(
+      cmd.hasFlagOrBundle({ aliases: ["-f"], takesValue: false }),
+      true,
+    );
+    assert.equal(
+      cmd.hasFlagOrBundle({ aliases: ["-x"], takesValue: false }),
+      false,
+    );
+  });
+
+  it("truncates at table glue (lead-letter rule through the facade)", () => {
+    const cmd = bashCmd(S("-Rfoo"), undefined, {
+      repo: { aliases: ["-R"], takesValue: true },
+    });
+    assert.equal(cmd.hasFlagOrBundle({ aliases: ["-R"], takesValue: false }), true);
+    assert.equal(cmd.hasFlagOrBundle({ aliases: ["-f"], takesValue: false }), false);
+  });
+
+  it("still matches exact and attached forms", () => {
+    const cmd = bashCmd(S("--force", "--mirror=x"), undefined, {
+      force: { aliases: ["--force"], takesValue: false },
+      mirror: { aliases: ["--mirror"], takesValue: false },
+    });
+    assert.equal(cmd.hasFlagOrBundle({ aliases: ["--force"], takesValue: false }), true);
+    assert.equal(cmd.hasFlagOrBundle({ aliases: ["--mirror"], takesValue: false }), true);
+  });
+});

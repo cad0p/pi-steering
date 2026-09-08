@@ -8,6 +8,10 @@
  *
  * Registers (in the terms of `Plugin`):
  *
+ *   - `predicates`         - `hasRecursiveForce`, the
+ *                             recursive-AND-force-AND-rooted-at-`/`
+ *                             core of `no-rm-rf-slash`. See the
+ *                             per-item file under `./predicates/`.
  *   - `rules` - `no-rm-rf-slash`, the recursive-force-delete-from-root
  *     guard. Non-overridable (`noOverride: true`) — inherent
  *     destructiveness, no inline override escape hatch; users opt out
@@ -32,9 +36,47 @@
  * terse default export assembling them. Copy-adapt liberally.
  */
 
-import type { Plugin, Rule } from "../../schema.ts";
-import { RM_CLI_DESCRIPTOR } from "./descriptors.ts";
+import type {
+  AnyPredicateHandler,
+  Plugin,
+  PredicateShape,
+  Rule,
+} from "../../schema.ts";
+import { RM_CLI_DESCRIPTOR, RM_FORCE_FLAG, RM_RECURSIVE_FLAG } from "./descriptors.ts";
+import { hasRecursiveForce } from "./predicates/has-recursive-force.ts";
 import { noRmRfSlash } from "./rules/no-rm-rf-slash.ts";
+
+declare global {
+  /**
+   * rmPlugin's typed-predicate registry. Each entry declares the
+   * predicate's `bare` value type and (optionally) an explicit
+   * `spreadBase` (see `PredicateShape` in `schema.ts`).
+   *
+   * @see PredicateShape, DefaultSpreadBase, PredicateModifiers in
+   *      `schema.ts` for the full registry contract.
+   */
+  interface PiSteeringPredicates {
+    /**
+     * `when.hasRecursiveForce` — match `rm` refs carrying BOTH the
+     * recursive and the force flag AND targeting `/`. Boolean leaf;
+     * spreadBase auto-detects to `{ value: boolean }`.
+     */
+    hasRecursiveForce: PredicateShape<boolean>;
+  }
+}
+
+/**
+ * Predicate handlers the rm plugin registers under
+ * `Plugin.predicates`. Keys become the `when.<key>` slots rule authors
+ * see.
+ *
+ * Typed as `Record<string, AnyPredicateHandler>` to match
+ * {@link Plugin.predicates} at the registry boundary — each handler's
+ * concrete argument shape is preserved in its own module.
+ */
+export const predicates: Record<string, AnyPredicateHandler> = {
+  hasRecursiveForce,
+};
 
 /**
  * Rules shipped by the rm plugin.
@@ -53,8 +95,9 @@ export const rules = [noRmRfSlash] as const satisfies readonly Rule[];
  */
 const rmPlugin = {
   name: "rm",
-  rules,
   cliDescriptors: { rm: RM_CLI_DESCRIPTOR },
+  predicates,
+  rules,
 } as const satisfies Plugin;
 
 /**
@@ -69,4 +112,6 @@ export const RM_PLUGIN_NAME: "rm" = rmPlugin.name;
 
 export default rmPlugin;
 
+export { RM_CLI_DESCRIPTOR, RM_FORCE_FLAG, RM_RECURSIVE_FLAG } from "./descriptors.ts";
+export { hasRecursiveForce } from "./predicates/has-recursive-force.ts";
 export { noRmRfSlash };

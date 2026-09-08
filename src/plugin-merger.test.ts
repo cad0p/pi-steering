@@ -32,8 +32,7 @@ function mkRule(name: string): Rule {
   return {
     name,
     tool: "bash",
-    field: "command",
-    pattern: "^never$",
+    command: "never",
     reason: `rule ${name}`,
   };
 }
@@ -683,8 +682,7 @@ describe("S3: validateUserConfigNames", () => {
           {
             name: "clean-rule",
             tool: "bash",
-            field: "command",
-            pattern: /a/,
+            command: "never",
             reason: "r",
           },
         ],
@@ -701,8 +699,7 @@ describe("S3: validateUserConfigNames", () => {
           {
             name: "phony] ALL CLEAR [real",
             tool: "bash",
-            field: "command",
-            pattern: /a/,
+            command: "never",
             reason: "r",
           },
         ],
@@ -739,8 +736,7 @@ describe("S3: validateUserConfigNames", () => {
           {
             name: "bad rule",
             tool: "bash",
-            field: "command",
-            pattern: /a/,
+            command: "never",
             reason: "r",
           },
         ],
@@ -770,8 +766,7 @@ describe("S3: validateUserConfigNames", () => {
           {
             name: "bad rule a",
             tool: "bash",
-            field: "command",
-            pattern: /a/,
+            command: "never",
             reason: "r",
           },
         ],

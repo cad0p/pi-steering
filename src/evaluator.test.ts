@@ -206,8 +206,7 @@ function captureWarnings(): string[] & { restore: () => void } {
 const NO_FORCE_PUSH: Rule = {
   name: "no-force-push",
   tool: "bash",
-  field: "command",
-  pattern: "\\bgit\\s+push\\b.*--force(?!-with-lease)",
+  command: "git",
   reason: "no force push",
 };
 
@@ -285,14 +284,24 @@ describe("buildEvaluator: bash basics", () => {
     assert.ok(res && res.block === true);
   });
 
-  it("accepts RegExp pattern (not just string)", async () => {
+  it("write rules accept RegExp pattern (not just string)", async () => {
+    // Bash routing is exact-equality (no regex); RegExp patterns live
+    // on write/edit rules (their mechanism is untouched).
     const rule: Rule = {
-      ...NO_FORCE_PUSH,
-      pattern: /\bgit\s+push\b.*--force(?!-with-lease)/,
+      name: "no-etc",
+      tool: "write",
+      field: "path",
+      pattern: /^\/etc\//,
+      reason: "no etc writes",
     };
     const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
     const res = await evaluator.evaluate(
-      bashEvent("git push --force"),
+      {
+        type: "tool_call",
+        toolCallId: "t1",
+        toolName: "write",
+        input: { path: "/etc/hosts", content: "x" },
+      },
       makeCtx("/repo"),
       0,
     );
@@ -317,8 +326,7 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
     const rule: Rule = {
       name: "req-fn",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "req-fn",
       requires: async (ctx) => {
         seen.push(ctx);
@@ -371,8 +379,7 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
     const rule: Rule = {
       name: "unl-fn",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "unl-fn",
       unless: async (ctx) => {
         seen.push(ctx);
@@ -415,8 +422,7 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
     const rule: Rule = {
       name: "req-throws",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "req-throws",
       requires: () => {
         throw new Error("boom-requires");
@@ -458,8 +464,7 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
     const rule: Rule = {
       name: "req-rejects",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "req-rejects",
       requires: async () => {
         throw new Error("boom-requires-async");
@@ -516,8 +521,7 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
       const rule: Rule = {
         name,
         tool: "bash",
-        field: "command",
-        pattern: "^git\\s+push",
+        command: "git",
         reason: name,
         unless,
       };
@@ -574,8 +578,7 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
         const rule: Rule = {
           name,
           tool: "bash",
-          field: "command",
-          pattern: "^git\\s+push",
+          command: "git",
           reason: name,
           ...makeClause(),
         };
@@ -605,8 +608,7 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
     const base: Rule = {
       name: "pat",
       tool: "bash",
-      field: "command",
-      pattern: "\\bgit\\s+push\\b",
+      command: "git",
       reason: "pat",
     };
     // requires-Pattern non-match → skip.
@@ -664,8 +666,7 @@ describe("buildEvaluator: when.cwd", () => {
     const rule: Rule = {
       name: "no-amend-personal",
       tool: "bash",
-      field: "command",
-      pattern: "\\bgit\\s+commit\\b.*--amend",
+      command: "git",
       reason: "no amend personal",
       when: { cwd: "/personal/" },
     };
@@ -688,8 +689,7 @@ describe("buildEvaluator: when.cwd", () => {
     const rule: Rule = {
       name: "block-unknown-cwd",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "blocks on unknown cwd",
       when: { cwd: { pattern: "/never-matches/", onUnknown: "block" } },
     };
@@ -720,8 +720,7 @@ describe("buildEvaluator: when.cwd", () => {
     const rule: Rule = {
       name: "dont-block-on-unknown",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "would block, but onUnknown allows",
       when: { cwd: { pattern: "/never-matches/", onUnknown: "allow" } },
     };
@@ -745,8 +744,7 @@ describe("buildEvaluator: when.cwd", () => {
     const rule: Rule = {
       name: "default-block-on-unknown",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "default-block",
       when: { cwd: { pattern: "/never-matches/" } },
     };
@@ -784,8 +782,7 @@ describe("buildEvaluator: when.cwd", () => {
     const rule: Rule = {
       name: "capitalization-typo-fail-closed",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "typo defense",
       when: {
         cwd: {
@@ -834,8 +831,7 @@ describe("buildEvaluator: when.cwd", () => {
     const ruleBlock: Rule = {
       name: "no-main-commit",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+commit\\b",
+      command: "git",
       reason: "no commit on main",
       when: { branch: { pattern: "^main$", onUnknown: "block" } },
     };
@@ -879,8 +875,7 @@ describe("buildEvaluator: when.cwd", () => {
     const rule: Rule = {
       name: "block-rm-in-pkg",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "no rm inside the package",
       when: { cwd: "/ws/pkg" },
     };
@@ -898,8 +893,7 @@ describe("buildEvaluator: when.cwd", () => {
     const rule: Rule = {
       name: "workspace-only",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "only allowed in /workspace",
       when: { cwd: /\/workspace/ },
     };
@@ -920,8 +914,7 @@ describe("buildEvaluator: when.cwd", () => {
     const rule: Rule = {
       name: "in-s-only",
       tool: "bash",
-      field: "command",
-      pattern: "^cmd\\b",
+      command: "cmd",
       reason: "only allowed at /s",
       when: { cwd: "^/s$" },
     };
@@ -959,8 +952,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "vault-only",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "vault paths",
       when: { cwd: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//] },
     };
@@ -977,8 +969,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "vault-only",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "vault paths",
       when: { cwd: [/\/Goldmine\//, /\/\.cache\/napkin-distill\//] },
     };
@@ -1002,8 +993,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "vault-only-shorthand",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "vault paths",
       when: { cwd: [/^\/work\//, /^\/Goldmine\//] },
     };
@@ -1031,8 +1021,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "mixed-arr-unknown",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "mixed arr unknown",
       when: { cwd: [/\/foo\//, 123] as unknown as RegExp[] },
     };
@@ -1053,8 +1042,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "single-elem",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "single elem",
       when: { cwd: [/^\/work$/] },
     };
@@ -1077,8 +1065,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "empty-arr",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "empty arr",
       when: { cwd: [] as RegExp[] },
     };
@@ -1104,8 +1091,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "mixed-arr",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "mixed arr",
       when: { cwd: [/\/work\//, 123] as unknown as RegExp[] },
     };
@@ -1126,8 +1112,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "vault-allow-unknown",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "vault",
       when: {
         cwd: {
@@ -1153,8 +1138,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "vault-block-unknown",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "vault",
       when: {
         cwd: {
@@ -1178,8 +1162,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "vault-known",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "vault",
       when: {
         cwd: {
@@ -1211,16 +1194,14 @@ describe("buildEvaluator: when.cwd array form", () => {
     const withArray: Rule = {
       name: "shorthand-array",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "r",
       when: { cwd: [/^\/work\/proj$/] },
     };
     const withSingle: Rule = {
       name: "shorthand-single",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "r",
       when: { cwd: /^\/work\/proj$/ },
     };
@@ -1264,8 +1245,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "obj-mixed",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "obj mixed",
       when: {
         cwd: {
@@ -1297,8 +1277,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "obj-bad-scalar",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "obj bad scalar",
       when: {
         cwd: { pattern: 123 as unknown as RegExp },
@@ -1326,8 +1305,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "obj-mixed-unknown",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "obj mixed unknown",
       when: {
         cwd: {
@@ -1358,8 +1336,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "empty-arr-unknown",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "empty arr unknown",
       when: { cwd: [] as RegExp[] },
     };
@@ -1384,8 +1361,7 @@ describe("buildEvaluator: when.cwd array form", () => {
     const rule: Rule = {
       name: "bad-scalar-unknown",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "bad scalar unknown",
       when: { cwd: 123 as unknown as RegExp },
     };
@@ -1424,8 +1400,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "cr-needs-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "sync first",
       when: { missing: { event: "ws-sync-done", in: "agent_loop" } },
     };
@@ -1443,8 +1418,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "cr-needs-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "sync first",
       when: { missing: { event: "ws-sync-done", in: "agent_loop" } },
     };
@@ -1460,8 +1434,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "cr-needs-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "sync first",
       when: { missing: { event: "ws-sync-done", in: "agent_loop" } },
     };
@@ -1478,8 +1451,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "once-per-session",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "once-per-session",
       when: { missing: { event: "welcome-shown", in: "session" } },
     };
@@ -1495,8 +1467,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "once-per-session",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "once-per-session",
       when: { missing: { event: "welcome-shown", in: "session" } },
     };
@@ -1513,8 +1484,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "no-cr-twice",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "no-cr-twice",
       when: {
         not: { missing: { event: "cr-attempted", in: "agent_loop" } },
@@ -1535,8 +1505,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "no-cr-twice",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "no-cr-twice",
       when: {
         not: { missing: { event: "cr-attempted", in: "agent_loop" } },
@@ -1555,8 +1524,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "bad",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "bad",
       // @ts-expect-error — deliberately malformed for runtime check
       when: { missing: "not-an-object" },
@@ -1596,8 +1564,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "legacy-turn",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "legacy",
       // @ts-expect-error — "turn" is the removed PoC scope name
       when: { missing: { event: "ws-sync-done", in: "turn" } },
@@ -1632,8 +1599,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "typo",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "typo",
       // @ts-expect-error — camelCase is not a valid scope
       when: { missing: { event: "ws-sync-done", in: "agentLoop" } },
@@ -1673,8 +1639,7 @@ describe("buildEvaluator: when.missing", () => {
     const rule: Rule = {
       name: "cr-needs-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "sync first",
       when: { missing: { event: "legacy", in: "agent_loop" } },
     };
@@ -1712,8 +1677,7 @@ describe("buildEvaluator: when.missing.since (temporal ordering)", () => {
     const rule: Rule = {
       name: "needs-fresh-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "sync first",
       when: {
         missing: {
@@ -1746,8 +1710,7 @@ describe("buildEvaluator: when.missing.since (temporal ordering)", () => {
     const rule: Rule = {
       name: "needs-fresh-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "sync first",
       when: {
         missing: {
@@ -1780,8 +1743,7 @@ describe("buildEvaluator: when.missing.since (temporal ordering)", () => {
     const rule: Rule = {
       name: "needs-fresh-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "sync first",
       when: {
         missing: {
@@ -1812,8 +1774,7 @@ describe("buildEvaluator: when.missing.since (temporal ordering)", () => {
     const rule: Rule = {
       name: "needs-fresh-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "sync first",
       when: {
         missing: {
@@ -1839,8 +1800,7 @@ describe("buildEvaluator: when.missing.since (temporal ordering)", () => {
     const rule: Rule = {
       name: "needs-fresh-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "sync first",
       when: {
         missing: {
@@ -1873,8 +1833,7 @@ describe("buildEvaluator: when.missing.since (temporal ordering)", () => {
     const rule: Rule = {
       name: "needs-fresh-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "sync first",
       when: {
         missing: {
@@ -1911,8 +1870,7 @@ describe("buildEvaluator: when.missing.since (temporal ordering)", () => {
     const rule: Rule = {
       name: "needs-fresh-welcome",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "welcome",
       when: {
         missing: {
@@ -1939,8 +1897,7 @@ describe("buildEvaluator: when.missing.since (temporal ordering)", () => {
     const rule: Rule = {
       name: "bad-since",
       tool: "bash",
-      field: "command",
-      pattern: "^cr\\b",
+      command: "cr",
       reason: "bad",
       when: {
         missing: {
@@ -2000,8 +1957,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.missing", () => 
   const crNeedsSync: Rule = {
     name: "cr-needs-sync",
     tool: "bash",
-    field: "command",
-    pattern: /^cr\b/,
+    command: "cr",
     reason: "sync first",
     when: { missing: { event: SYNC_DONE_EVENT, in: "agent_loop" } },
   };
@@ -2218,8 +2174,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.missing", () => 
     const ruleWithSince: Rule = {
       name: "cr-needs-fresh-sync",
       tool: "bash",
-      field: "command",
-      pattern: /^cr\b/,
+      command: "cr",
       reason: "sync first",
       when: {
         missing: {
@@ -2519,8 +2474,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.missing", () => 
     const rule: Rule = {
       name: "cr-since-y-blocks",
       tool: "bash",
-      field: "command",
-      pattern: /^cr\b/,
+      command: "cr",
       reason: "X is stale (Y written after)",
       when: {
         missing: {
@@ -2568,8 +2522,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.missing", () => 
     const rule: Rule = {
       name: "cr-since-absent-allows",
       tool: "bash",
-      field: "command",
-      pattern: /^cr\b/,
+      command: "cr",
       reason: "X is stale (Y written after)",
       when: {
         missing: {
@@ -2636,8 +2589,7 @@ describe("buildEvaluator: `&&`-chain speculative allow via when.missing", () => 
     const rule: Rule = {
       name: "cr-since-y-allows-reversed",
       tool: "bash",
-      field: "command",
-      pattern: /^cr\b/,
+      command: "cr",
       reason: "X is stale (Y written after)",
       when: {
         missing: {
@@ -2688,8 +2640,7 @@ describe("buildEvaluator: when.missing with in='tool_call'", () => {
     const rule: Rule = {
       name: "cr-needs-chained-sync",
       tool: "bash",
-      field: "command",
-      pattern: /^cr\b/,
+      command: "cr",
       reason: "sync must be chained directly before cr",
       when: {
         missing: { event: EVENT, in: "tool_call" },
@@ -2727,8 +2678,7 @@ describe("buildEvaluator: when.missing with in='tool_call'", () => {
     const rule: Rule = {
       name: "cr-needs-chained-sync",
       tool: "bash",
-      field: "command",
-      pattern: /^cr\b/,
+      command: "cr",
       reason: "sync must be chained directly before cr",
       when: {
         missing: { event: EVENT, in: "tool_call" },
@@ -2770,8 +2720,7 @@ describe("buildEvaluator: when.missing with in='tool_call'", () => {
     const rule: Rule = {
       name: "cr-needs-chained-sync",
       tool: "bash",
-      field: "command",
-      pattern: /^cr\b/,
+      command: "cr",
       reason: "sync must be chained directly before cr",
       when: {
         missing: { event: EVENT, in: "tool_call" },
@@ -2827,8 +2776,7 @@ describe("buildEvaluator: when.missing with in='tool_call'", () => {
     const rule: Rule = {
       name: "cr-x-since-y-tc",
       tool: "bash",
-      field: "command",
-      pattern: /^cr\b/,
+      command: "cr",
       reason: "X stale (Y written after)",
       when: {
         missing: { event: EVENT_X, in: "tool_call", since: EVENT_Y },
@@ -2856,8 +2804,7 @@ describe("buildEvaluator: when.not + when.condition", () => {
     const rule: Rule = {
       name: "push-outside-mainline",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "push outside mainline",
       when: { not: { cwd: "/mainline/" } },
     };
@@ -2883,8 +2830,7 @@ describe("buildEvaluator: when.not + when.condition", () => {
     const rule: Rule = {
       name: "cond-rule",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "cond",
       when: {
         condition: (ctx) => {
@@ -2926,8 +2872,7 @@ describe("buildEvaluator: when multi-key AND + short-circuit", () => {
     const rule: Rule = {
       name: "multi-key",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "multi-key",
       // `cwd` key is declared first: Object.entries iterates in
       // insertion order, so cwd is evaluated before condition. This
@@ -2988,8 +2933,7 @@ describe("buildEvaluator: when multi-key AND + short-circuit", () => {
     const rule: Rule = {
       name: "not-multi-key",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "not-multi-key",
       when: {
         not: {
@@ -3059,8 +3003,7 @@ describe("buildEvaluator: not-block trinary + Kleene AND composition", () => {
     return {
       name,
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: name,
       when,
     };
@@ -3407,8 +3350,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "r",
       when: { tri: "x" } as unknown as NonNullable<Rule["when"]>, // bare — no leaf-level onUnknown:
     };
@@ -3428,8 +3370,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "r",
       when: {
         tri: { value: "x", onUnknown: "allow" } as any,
@@ -3452,8 +3393,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "r",
       when: { tri: "x" } as unknown as NonNullable<Rule["when"]>,
     };
@@ -3477,8 +3417,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "r",
       when: { not: { tri: "x" } } as unknown as NonNullable<Rule["when"]>,
     };
@@ -3501,8 +3440,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "r",
       when: { tri: "x" } as unknown as NonNullable<Rule["when"]>,
     };
@@ -3531,8 +3469,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "r",
       when: { tri: "x" } as unknown as NonNullable<Rule["when"]>,
     };
@@ -3554,8 +3491,7 @@ describe("buildEvaluator: outer-leaf trinary projection via onUnknown", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "r",
       when: { tri: "x" } as unknown as NonNullable<Rule["when"]>,
     };
@@ -3586,8 +3522,7 @@ describe("buildEvaluator: empty-clause validation at config-resolve", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r",
       when: {},
     };
@@ -3605,8 +3540,7 @@ describe("buildEvaluator: empty-clause validation at config-resolve", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r",
       when: { not: {} },
     };
@@ -3620,8 +3554,7 @@ describe("buildEvaluator: empty-clause validation at config-resolve", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r",
       when: { not: { onUnknown: "block" } as any },
     };
@@ -3635,8 +3568,7 @@ describe("buildEvaluator: empty-clause validation at config-resolve", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r",
       when: { not: { cwd: "/github/" } },
     };
@@ -3652,8 +3584,7 @@ describe("buildEvaluator: empty-clause validation at config-resolve", () => {
         {
           name: "plugin-empty",
           tool: "bash",
-          field: "command",
-          pattern: "^git",
+          command: "git",
           reason: "plugin",
           when: {},
         },
@@ -3669,8 +3600,7 @@ describe("buildEvaluator: empty-clause validation at config-resolve", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r",
       when: { onUnknown: "block" } as unknown as NonNullable<Rule["when"]>,
     };
@@ -3696,8 +3626,7 @@ describe("buildEvaluator: plugin predicates", () => {
     const rule: Rule = {
       name: "p-rule",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "p",
       when: { commitsAhead: { wrt: "origin/main", eq: 1 } },
     };
@@ -3724,8 +3653,7 @@ describe("buildEvaluator: plugin predicates", () => {
     const rule: Rule = {
       name: "bad-when",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "bad",
       when: { totallyMadeUp: /whatever/ } as unknown as NonNullable<
         Rule["when"]
@@ -3769,8 +3697,7 @@ describe("buildEvaluator: Rule.onFire", () => {
     const rule: Rule = {
       name: "f",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "f",
       onFire: (ctx) => {
         order.push("onFire");
@@ -3797,8 +3724,7 @@ describe("buildEvaluator: Rule.onFire", () => {
     const rule: Rule = {
       name: "f",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "f",
       when: { cwd: "/mainline/" },
       onFire: () => {
@@ -3820,8 +3746,7 @@ describe("buildEvaluator: Rule.onFire", () => {
     const rule: Rule = {
       name: "f",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "f",
       noOverride: false,
       onFire: () => {
@@ -3845,8 +3770,7 @@ describe("buildEvaluator: Rule.onFire", () => {
     const rule: Rule = {
       name: "f",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "f",
       onFire: () => {
         called = true;
@@ -3868,8 +3792,7 @@ describe("buildEvaluator: Rule.onFire", () => {
     const rule: Rule = {
       name: "f",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "f",
       onFire: async (ctx) => {
         await new Promise((r) => setImmediate(r));
@@ -3894,8 +3817,7 @@ describe("buildEvaluator: Rule.onFire", () => {
     const rule: Rule = {
       name: "bad-onfire-sync",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "bad",
       onFire: () => {
         throw new Error("boom-sync");
@@ -3929,8 +3851,7 @@ describe("buildEvaluator: Rule.onFire", () => {
     const rule: Rule = {
       name: "bad-onfire-async",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "bad",
       onFire: async () => {
         await Promise.resolve();
@@ -3970,8 +3891,7 @@ describe("buildEvaluator: Rule.onFire", () => {
     const ruleA: Rule = {
       name: "a",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "ra",
       onFire: () => {
         throw new Error("a-boom");
@@ -3980,8 +3900,7 @@ describe("buildEvaluator: Rule.onFire", () => {
     const ruleB: Rule = {
       name: "b",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "rb",
       onFire: () => {
         bCalled = true;
@@ -4022,8 +3941,7 @@ describe("buildEvaluator: Rule.onFire", () => {
     const rule: Rule = {
       name: "f",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "f",
       noOverride: false,
       onFire: () => {
@@ -4052,8 +3970,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
     const rule: Rule = {
       name: "dyn-reason",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: (ctx) => {
         invoked = true;
         seenCwd = ctx.cwd;
@@ -4079,8 +3996,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
     const rule: Rule = {
       name: "async-reason",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: async (ctx) => {
         await new Promise((r) => setTimeout(r, 1));
         return `async at ${ctx.cwd}`;
@@ -4103,8 +4019,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
     const rule: Rule = {
       name: "overridable-dyn",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: () => "dynamic body",
       noOverride: false,
     };
@@ -4130,8 +4045,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
       const rule: Rule = {
         name: "broken-reason",
         tool: "bash",
-        field: "command",
-        pattern: "^rm\\b",
+        command: "rm",
         reason: () => {
           throw new Error("boom");
         },
@@ -4176,8 +4090,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
       const rule: Rule = {
         name: "async-broken",
         tool: "bash",
-        field: "command",
-        pattern: "^rm\\b",
+        command: "rm",
         reason: async () => {
           throw new Error("async boom");
         },
@@ -4213,8 +4126,7 @@ describe("buildEvaluator: Rule.reason function form", () => {
     const rule: Rule = {
       name: "cwd-reporter",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: (ctx) => {
         const cwd = ctx.walkerState?.["cwd"] as string;
         return cwd === "unknown"
@@ -4245,8 +4157,7 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
     const rule: Rule = {
       name: "single-line",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "a single-line body",
       noOverride: true,
     };
@@ -4267,8 +4178,7 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
     const rule: Rule = {
       name: "multi-para",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "first paragraph.\n\nsecond paragraph.",
       noOverride: true,
     };
@@ -4291,8 +4201,7 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
     const rule: Rule = {
       name: "single-newline",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "line one\nline two",
       noOverride: true,
     };
@@ -4317,8 +4226,7 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
     const rule: Rule = {
       name: "multi-para-overridable",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "first.\n\nsecond.",
       noOverride: false,
     };
@@ -4352,8 +4260,7 @@ describe("buildEvaluator: formatReason paragraph-aware tag separator", () => {
     const rule: Rule = {
       name: "crlf-multi-para",
       tool: "bash",
-      field: "command",
-      pattern: "^rm\\b",
+      command: "rm",
       reason: "first paragraph.\r\n\r\nsecond paragraph.",
       noOverride: true,
     };
@@ -4526,15 +4433,13 @@ describe("buildEvaluator: override comments", () => {
     const ruleA: Rule = {
       name: "rule-a",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "a",
     };
     const ruleB: Rule = {
       name: "rule-b",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "b",
     };
     const evaluator = buildEvaluator(
@@ -4590,8 +4495,7 @@ describe("buildEvaluator: override comments", () => {
     const overridableRule: Rule = {
       name: "no-force-push",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push\\s+--force",
+      command: "git",
       reason: "no force",
       noOverride: false,
     };
@@ -4600,8 +4504,7 @@ describe("buildEvaluator: override comments", () => {
     const canaryRule: Rule = {
       name: "canary",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "canary",
       when: {
         missing: { event: "steering-override", in: "agent_loop" },
@@ -4650,16 +4553,14 @@ describe("buildEvaluator: override comments", () => {
     const overridableRule: Rule = {
       name: "no-force-push",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push\\s+--force",
+      command: "git",
       reason: "no force",
       noOverride: false,
     };
     const canaryRule: Rule = {
       name: "canary",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "canary",
       when: { missing: { event: "steering-override", in: "session" } },
     };
@@ -4824,15 +4725,13 @@ describe("buildEvaluator: rule ordering (config before plugin)", () => {
     const userRule: Rule = {
       name: "user-rule",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "user",
     };
     const pluginRule: Rule = {
       name: "plugin-rule",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "plugin",
     };
     const plugin: Plugin = { name: "p", rules: [pluginRule] };
@@ -4862,24 +4761,21 @@ describe("buildEvaluator: walker reuse + exec cache", () => {
       {
         name: "r1",
         tool: "bash",
-        field: "command",
-        pattern: "^ls",
+        command: "ls",
         reason: "1",
         when: { cwd: "^/tmp/A$" },
       },
       {
         name: "r2",
         tool: "bash",
-        field: "command",
-        pattern: "^ls",
+        command: "ls",
         reason: "2",
         when: { cwd: "^/tmp/B$" },
       },
       {
         name: "r3",
         tool: "bash",
-        field: "command",
-        pattern: "^echo",
+        command: "echo",
         reason: "3",
         when: { cwd: "^/tmp/B$" },
       },
@@ -4910,8 +4806,7 @@ describe("buildEvaluator: walker reuse + exec cache", () => {
     const r1: Rule = {
       name: "r1",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r1",
       when: {
         condition: async (ctx) => {
@@ -4923,8 +4818,7 @@ describe("buildEvaluator: walker reuse + exec cache", () => {
     const r2: Rule = {
       name: "r2",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r2",
       when: {
         condition: async (ctx) => {
@@ -4961,8 +4855,7 @@ describe("buildEvaluator: walker reuse + exec cache", () => {
     const rule: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r",
       when: {
         condition: async (ctx) => {
@@ -4996,8 +4889,7 @@ describe("buildEvaluator: walker reuse + exec cache", () => {
     const rule: Rule = {
       name: "exec-shape",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "shape",
       when: {
         condition: async (ctx) => {
@@ -5045,8 +4937,7 @@ describe("buildEvaluator: walker reuse + exec cache", () => {
     const rule: Rule = {
       name: "cwd-key",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "cwd-key",
       when: {
         condition: async (ctx) => {
@@ -5071,8 +4962,7 @@ describe("buildEvaluator: findEntries", () => {
     const rule: Rule = {
       name: "turn-state-rule",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "must have read-first",
       when: {
         condition: (ctx) => {
@@ -5125,8 +5015,7 @@ describe("buildEvaluator: findEntries", () => {
     const rule: Rule = {
       name: "memo-ref",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "memo-ref",
       when: {
         condition: (ctx) => {
@@ -5170,8 +5059,7 @@ describe("buildEvaluator: findEntries", () => {
     const rule: Rule = {
       name: "s2-single-rule",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "s2 single",
       when: {
         condition: (ctx) => {
@@ -5199,8 +5087,7 @@ describe("buildEvaluator: findEntries", () => {
     const ruleA: Rule = {
       name: "a",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "a fires",
       writes: ["A-fired"],
       onFire: (ctx) => ctx.appendEntry("A-fired", {}),
@@ -5208,8 +5095,7 @@ describe("buildEvaluator: findEntries", () => {
     const ruleB: Rule = {
       name: "b",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "b fires only if A has not fired this loop",
       when: { missing: { event: "A-fired", in: "agent_loop" } },
     };
@@ -5245,8 +5131,7 @@ describe("buildEvaluator: findEntries", () => {
     const overridable: Rule = {
       name: "overridable",
       tool: "bash",
-      field: "command",
-      pattern: /^git\s+push/,
+      command: "git",
       reason: "overridable",
       noOverride: false,
     };
@@ -5259,8 +5144,7 @@ describe("buildEvaluator: findEntries", () => {
     const gate: Rule = {
       name: "override-gate",
       tool: "bash",
-      field: "command",
-      pattern: /^git\s+push/,
+      command: "git",
       reason: "gate",
       when: {
         missing: { event: "steering-override", in: "agent_loop" },
@@ -5305,8 +5189,7 @@ describe("buildEvaluator: appendEntry auto-tags with _agentLoopIndex", () => {
     const rule: Rule = {
       name: "tag-object",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "tag-object",
       when: {
         condition: (ctx) => {
@@ -5327,8 +5210,7 @@ describe("buildEvaluator: appendEntry auto-tags with _agentLoopIndex", () => {
     const rule: Rule = {
       name: "tag-prim",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "tag-prim",
       when: {
         condition: (ctx) => {
@@ -5374,8 +5256,7 @@ describe("buildEvaluator: appendEntry auto-tags with _agentLoopIndex", () => {
     const rule: Rule = {
       name: "tag-nonplain",
       tool: "bash",
-      field: "command",
-      pattern: "^echo",
+      command: "echo",
       reason: "tag-nonplain",
       when: {
         condition: (ctx) => {
@@ -5444,8 +5325,7 @@ describe("buildEvaluator: defaults", () => {
     const rule: Rule = {
       name: "f",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "f",
     };
     const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
@@ -5516,8 +5396,7 @@ describe("buildEvaluator: plugin-shipped rules", () => {
     const rule: Rule = {
       name: "my-rule",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "user said so",
     };
     const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
@@ -5562,15 +5441,13 @@ describe("buildEvaluator: plugin-shipped rules", () => {
     const pluginRule: Rule = {
       name: "same",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "plugin",
     };
     const userRule: Rule = {
       name: "same",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "user",
     };
     const plugin: Plugin = { name: "p", rules: [pluginRule] };
@@ -5600,15 +5477,13 @@ describe("buildEvaluator: plugin-shipped rules", () => {
     const pluginRule: Rule = {
       name: "same",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "plugin",
     };
     const userRule: Rule = {
       name: "same",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push",
+      command: "git",
       reason: "user",
     };
     const plugin: Plugin = { name: "p", rules: [pluginRule] };
@@ -5648,8 +5523,7 @@ describe("buildEvaluator: plugin-shipped rules", () => {
         {
           name: "dup",
           tool: "bash",
-          field: "command",
-          pattern: "^git\\s+push",
+          command: "git",
           reason: "first",
         },
       ],
@@ -5660,8 +5534,7 @@ describe("buildEvaluator: plugin-shipped rules", () => {
         {
           name: "dup",
           tool: "bash",
-          field: "command",
-          pattern: "^git\\s+push",
+          command: "git",
           reason: "second",
         },
       ],
@@ -5702,8 +5575,7 @@ describe("buildEvaluator: PredicateToolInput.basename + args", () => {
     const rule: Rule = {
       name: "peek",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "git",
       reason: "peek",
       when: {
         condition: (ctx) => {
@@ -5747,8 +5619,7 @@ describe("buildEvaluator: PredicateToolInput.basename + args", () => {
     const rule: Rule = {
       name: "multi",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: ["git", "ls"],
       reason: "multi",
       when: {
         condition: (ctx) => {
@@ -5853,8 +5724,7 @@ describe("buildEvaluator: PredicateToolInput.basename + args", () => {
     const rule: Rule = {
       name: "peek",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "git",
       reason: "peek",
       when: {
         condition: (ctx) => {
@@ -5896,8 +5766,7 @@ describe("buildEvaluator: PredicateToolInput.basename + args", () => {
     const rule: Rule = {
       name: "peek",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "git",
       reason: "peek",
       when: {
         condition: (ctx) => {
@@ -5931,8 +5800,7 @@ describe("buildEvaluator: PredicateToolInput.envAssignments", () => {
     return {
       name: "peek-env",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: ["git", "aws", "run-me", "sudo"],
       reason: "peek-env",
       when: {
         condition: (ctx) => {
@@ -6101,8 +5969,7 @@ describe("buildEvaluator: PredicateContext.walkerState.env", () => {
     return {
       name: "peek-env",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: ["cmd", "git"],
       reason: "peek-env",
       when: {
         condition: (ctx) => {
@@ -6172,8 +6039,7 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
     const rule: Rule = {
       name: "irrelevant",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "git",
       reason: "n/a",
     };
     const evaluator = buildEvaluator({ rules: [rule] }, resolve(), makeHost());
@@ -6237,8 +6103,7 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
     const ruleA: Rule = {
       name: "a-throws",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "git",
       reason: "a-throws",
       when: {
         condition: () => {
@@ -6295,8 +6160,7 @@ describe("buildEvaluator: top-level engine failures (S1)", () => {
     const pluginRule: Rule = {
       name: "bad-plugin-rule",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "anything",
       reason: "bad",
       when: {
         condition: () => {
@@ -6346,8 +6210,7 @@ describe("buildEvaluator: user rule-name validation (S3)", () => {
     const rule: Rule = {
       name: "phony] ALL CLEAR [real",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "git",
       reason: "bad",
     };
     assert.throws(
@@ -6360,8 +6223,7 @@ describe("buildEvaluator: user rule-name validation (S3)", () => {
     const rule: Rule = {
       name: "2026-critical_rule",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "git",
       reason: "ok",
     };
     assert.doesNotThrow(() =>
@@ -6401,8 +6263,7 @@ describe("buildEvaluator: when.missing.notIn (scope subtraction)", () => {
   const descCheck: Rule = {
     name: "cr-desc-check",
     tool: "bash",
-    field: "command",
-    pattern: /^cr\b/,
+    command: "cr",
     reason: "diff first, in a prior tool_call",
     when: {
       missing: {
@@ -6483,8 +6344,7 @@ describe("buildEvaluator: when.missing.notIn (scope subtraction)", () => {
   const priorLoopRule: Rule = {
     name: "prior-loop-needed",
     tool: "bash",
-    field: "command",
-    pattern: /^cr\b/,
+    command: "cr",
     reason: "must have been recorded in a prior loop",
     when: {
       missing: {
@@ -6532,8 +6392,7 @@ describe("buildEvaluator: when.missing.notIn (scope subtraction)", () => {
     const ruleWithSince: Rule = {
       name: "cr-desc-check-since",
       tool: "bash",
-      field: "command",
-      pattern: /^cr\b/,
+      command: "cr",
       reason: "stale after invalidator",
       when: {
         missing: {
@@ -6577,8 +6436,7 @@ describe("buildEvaluator: when.missing.notIn (scope subtraction)", () => {
     ({
       name: "bad-rule",
       tool: "bash",
-      field: "command",
-      pattern: /^cr\b/,
+      command: "cr",
       reason: "x",
       when: {
         missing: {
@@ -6652,18 +6510,18 @@ describe("buildEvaluator: exemption registry", () => {
   const COMMIT_RULE: Rule = {
     name: "no-main-commit",
     tool: "bash",
-    field: "command",
-    pattern: "^git\\s+commit\\b",
+    command: "git",
     reason: "no commit",
+    when: { subcommand: "commit" },
   };
 
   it("exempted rule does not fire; evaluation continues to the next rule", async () => {
     const pushRule: Rule = {
       name: "no-push",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\s+push\\b",
+      command: "git",
       reason: "no push",
+      when: { subcommand: "push" },
     };
     const evaluator = buildEvaluator(
       {
@@ -7127,8 +6985,7 @@ describe("buildEvaluator: exemption registry", () => {
         {
           name: "dup",
           tool: "bash",
-          field: "command",
-          pattern: "^rm\\b",
+          command: "rm",
           reason: "plugin dup",
         },
       ],
@@ -7140,8 +6997,7 @@ describe("buildEvaluator: exemption registry", () => {
           {
             name: "dup",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\s+commit\\b",
+            command: "git",
             reason: "user dup",
           },
         ],
@@ -7244,8 +7100,7 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
     return {
       name: "peek-resolved",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: ["echo", "gh", "git", "run-me"],
       reason: "peek-resolved",
       when: {
         condition: (ctx) => {
@@ -7311,20 +7166,34 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
     assert.equal(ps.rawText, "<(perl -0777 -pe '<BODY_STRIP>' \"$BODY\")");
   });
 
-  it("acceptance e2e: pattern rule fires on the resolved --title value", async () => {
-    // The title is written literally, so the keyword pattern fires on
-    // the resolved command surface (`command` now carries resolved
-    // values — see the chain-assigned variant below for the
-    // resolution-dependent case).
+  // Test-local: does the ref's resolved `--title` value contain
+  // `closes #N`? Reads `.text` (TEXT-mode resolved surface) so the
+  // assertions below pin resolution, not raw source.
+  function resolvedTitleCloses(ctx: PredicateContext): boolean {
+    const args = ctx.input.args;
+    if (!Array.isArray(args)) return false;
+    for (let i = 0; i < args.length; i++) {
+      if ((args[i]?.value ?? "") === "--title") {
+        const next = args[i + 1];
+        return /closes #\d+/.test(next?.text ?? "");
+      }
+    }
+    return false;
+  }
+
+  it("acceptance e2e: condition fires on the resolved --title value", async () => {
+    // The title is written literally, so the condition fires on the
+    // resolved args surface (see the chain-assigned variant below for
+    // the resolution-dependent case).
     const evaluator = buildEvaluator(
       {
         rules: [
           {
             name: "title-keyword",
             tool: "bash",
-            field: "command",
-            pattern: "closes #\\d+",
+            command: "gh",
             reason: "title keyword",
+            when: { condition: (ctx) => resolvedTitleCloses(ctx) },
           },
         ],
       },
@@ -7552,10 +7421,10 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
     assert.equal(ps.rawText, "<(perl -0777 -pe '<BODY_STRIP>' \"$BODY\")");
   });
 
-  it("command field resolves: pattern fires on a chain-assigned $T title", async () => {
+  it("command field resolves: condition fires on a chain-assigned $T title", async () => {
     // Resolution-dependent: the RAW command text contains `"$T"` —
-    // the keyword pattern `closes #\d+` only matches because `command`
-    // carries the resolved title value. Chain form: the bare
+    // the condition only matches because the args surface carries the
+    // resolved title value. Chain form: the bare
     // assignment persists into the next ref's walker env (prefix form
     // would NOT — one-shot for the direct child's env only — so this
     // pin must stay in chain shape to test what its name claims).
@@ -7566,13 +7435,12 @@ describe("buildEvaluator: resolved-by-default Word.text (issue #51)", () => {
           {
             name: "title-keyword-resolved",
             tool: "bash",
-            field: "command",
-            pattern: "closes #\\d+",
+            command: "gh",
             reason: "title keyword",
             when: {
               condition: (ctx) => {
                 seen.push(ctx);
-                return true;
+                return resolvedTitleCloses(ctx);
               },
             },
           },
@@ -7703,8 +7571,7 @@ describe("buildEvaluator: speculative allow with plugin env tracker (issue #54)"
   const needsSeen: Rule = {
     name: "needs-probe-seen",
     tool: "bash",
-    field: "command",
-    pattern: /^finalize\b/,
+    command: "finalize",
     reason: "probe first",
     when: { missing: { event: PROBE_SEEN, in: "agent_loop" } },
   };
@@ -7784,8 +7651,7 @@ describe("arityOf hoisting (issue #110)", () => {
           {
             name: "no-gh-r",
             tool: "bash",
-            field: "command",
-            pattern: "^gh\\b",
+            command: "gh",
             reason: "no gh R",
             when: {
               flag: {
@@ -7813,8 +7679,7 @@ describe("arityOf hoisting (issue #110)", () => {
           {
             name: "no-foo",
             tool: "bash",
-            field: "command",
-            pattern: "^foo\\b",
+            command: "foo",
             reason: "no foo",
             when: {
               flag: {

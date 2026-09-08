@@ -517,7 +517,7 @@ describe("BuiltInWhenLeaves: shape pin", () => {
       when: {
         not: {
           subcommand: {
-            pattern: "push",
+            anyOf: ["push"],
             // @ts-expect-error: leaf-level onUnknown forbidden inside not:
             onUnknown: "allow",
           },
@@ -551,7 +551,7 @@ describe("BuiltInWhenLeaves: shape pin", () => {
       reason: "x",
       when: {
         not: {
-          subcommand: { pattern: ["s3", "ls"], depth: 2 },
+          subcommand: { anyOf: [["s3", "ls"]] },
           flag: {
             anyOf: [{ aliases: ["-f"], takesValue: false }],
           },

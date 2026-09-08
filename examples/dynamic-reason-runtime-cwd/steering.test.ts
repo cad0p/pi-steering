@@ -71,7 +71,7 @@ describe("example: dynamic-reason-runtime-cwd", () => {
     // composition. See README "Why isClean: false over not: { isClean: true }".
     const rule = getDeployRule();
     assert.deepEqual(rule.when, {
-      subcommand: { pattern: ["run", "deploy"], depth: 2 },
+      subcommand: ["run", "deploy"],
       isClean: false,
     });
   });

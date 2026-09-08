@@ -116,8 +116,7 @@ describe("schema: shape smoke tests", () => {
     };
     const spread: TopLevelWhenClause = {
       subcommand: {
-        pattern: ["s3", "ls"],
-        depth: 2,
+        anyOf: [["s3", "ls"], "push"],
         onUnknown: "block",
       },
     };

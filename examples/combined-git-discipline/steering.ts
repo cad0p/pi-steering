@@ -81,7 +81,7 @@ export default defineConfig({
       tool: "bash",
       command: "gh",
       when: {
-        subcommand: { pattern: ["pr", "create"], depth: 2 },
+        subcommand: ["pr", "create"],
         not: {
           flag: { anyOf: [ghFlags.draft] },
         },

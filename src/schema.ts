@@ -404,20 +404,25 @@ export type SubcommandPattern = string | RegExp;
 
 /**
  * Spread form shared by {@link SubcommandLeaf} (outer) and
- * {@link SubcommandLeafInner} (inner): `{ pattern, depth? }`. In spread
- * form an array `pattern` MUST have `length === depth` (positional
- * sequence); bare arrays (no spread) are OR-of-matches at the default
- * depth 1 instead.
+ * {@link SubcommandLeafInner} (inner): `{ anyOf }` — the explicit OR,
+ * mirroring the {@link FlagSpreadBase} leaf. Each member is a single
+ * {@link SubcommandPattern} (one-word match) or a positional sequence
+ * of them (`["pr", "create"]` matches `gh pr create ...` — the
+ * member's length IS the extraction width, inferred per member).
+ *
+ * There is deliberately NO `depth` key: arrays always mean positional
+ * sequence, so the width is never declared twice. `{ anyOf: ["pr",
+ * "push"] }` fires on either one-word subcommand; `{ anyOf:
+ * [["pr", "create"], ["repo", "create"]] }` fires on either
+ * two-word sequence. Members may mix widths.
  */
 export interface SubcommandSpreadBase {
-  /** Single pattern or positional sequence (`length === depth`). */
-  pattern: SubcommandPattern | SubcommandPattern[];
   /**
-   * How many positional tokens make up the subcommand. Default 1.
-   * `aws s3 ls` / `kubectl get pods` want 2. `0` extracts nothing →
-   * `"unknown"` → default `"block"` (fail-closed).
+   * OR over members: each a single pattern or a positional sequence.
+   * Non-empty; every member a `string | RegExp` or a non-empty
+   * all-`string | RegExp` array.
    */
-  depth?: number;
+  anyOf: readonly (SubcommandPattern | readonly SubcommandPattern[])[];
   /**
    * Arity resolves ONLY via the CLI-descriptor registry by basename
    * (issue #107): flags that consume the following token (`-C`, `-c`,
@@ -582,7 +587,7 @@ export interface CLIDescriptor {
  * ## ARGV leaves (`subcommand:` / `flag:`)
  *
  * The spread forms differ the same way (`subcommand:`'s
- * `{ pattern, depth, onUnknown? }` and `flag:`'s
+ * `{ anyOf, onUnknown? }` and `flag:`'s
  * `{ anyOf, onUnknown? }` drop
  * `onUnknown?:` inside `not:`). Named leaf types below keep the
  * Outer/Inner declarations in lockstep: {@link SubcommandLeaf} /
@@ -732,16 +737,19 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
    * Bare `string` = EXACT equality (`"push"` does NOT match
    * `"pushback"`) — deliberately NOT the regex-source semantics of
    * {@link Pattern}-typed leaves like `cwd:`. `RegExp` = test
-   * against the extracted word. Bare array = OR-of-matches at the
-   * default depth 1 (any member matching the first subcommand word
-   * fires). Spread form `{ pattern, depth?, onUnknown? }` covers
-   * multi-word runs (`aws s3 ls`, `kubectl get
-   * pods`): the array length MUST equal `depth` (positional
-   * sequence — `["s3", "ls"]` at `depth: 2`); a non-array pattern
-   * with `depth > 1`, a length≠depth array, an empty array, or
-   * non-`string | RegExp` members are invalid and the leaf evaluates
-   * to `false` (rule skips, `cwd`-style fail-skip). `depth: 0`
-   * extracts nothing → `"unknown"` → default `"block"` (fail-closed).
+   * against the extracted word. Bare array = positional sequence
+   * (`["pr", "create"]` matches `gh pr create ...` — length IS
+   * the extraction width, inferred). Spread form `{ anyOf,
+   * onUnknown? }` is the explicit OR, mirroring the `flag:` leaf:
+   * `{ anyOf: ["pr", "push"] }` fires on either one-word
+   * subcommand; `{ anyOf: [["pr", "create"], ["repo",
+   * "create"]] }` fires on either two-word sequence (members may
+   * mix widths; extraction width is per-member). Malformed leaves
+   * (empty array, empty `anyOf`, non-`string | RegExp` members,
+   * non-sequence `anyOf` members, missing `anyOf`, the deleted
+   * `{ pattern, depth }` shape) evaluate to `false` (rule skips,
+   * `cwd`-style fail-skip). There is no zero-width unknown shape:
+   * `command:` alone with no `subcommand:` leaf is the unfiltered form.
    *
    * Consuming-flag arity resolves ONLY via the CLI-descriptor registry
    * by basename (issue #107): `git -C DIR` / `-c <key>=<value>` skip

@@ -56,7 +56,7 @@ import type {
  *   tool: "bash",
  *   command: "npm",
  *   when: {
- *     subcommand: { pattern: ["run", "deploy"], depth: 2 },
+ *     subcommand: ["run", "deploy"],
  *     isClean: false,
  *   },
  *   reason: (ctx) => {

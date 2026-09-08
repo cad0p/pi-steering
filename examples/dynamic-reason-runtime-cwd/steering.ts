@@ -51,7 +51,7 @@ const deployRequiresCleanTree = {
   name: "deploy-requires-clean-tree",
   tool: "bash",
   command: "npm",
-  // `subcommand: { pattern: ["run", "deploy"], depth: 2 }` routes
+  // `subcommand: ["run", "deploy"]` routes
   // the two-token subcommand (the old `/^npm\\s+run\\s+deploy\\b/`
   // anchor). npm facts are synthetic-minimal until an npm table
   // owns them: `prefix` keeps `npm --prefix <dir> run deploy`
@@ -67,7 +67,7 @@ const deployRequiresCleanTree = {
   // "Why isClean: false over not: { isClean: true }" for the full
   // truth table.
   when: {
-    subcommand: { pattern: ["run", "deploy"], depth: 2 },
+    subcommand: ["run", "deploy"],
     isClean: false,
   },
   reason: (ctx) => {

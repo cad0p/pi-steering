@@ -55,14 +55,14 @@ export default defineConfig({
       name: "pr-create-must-be-draft",
       tool: "bash",
       command: "gh",
-      // `subcommand: { pattern: ["pr", "create"], depth: 2 }` routes
+      // `subcommand: ["pr", "create"]` routes
       // the two-token subcommand; `not: { flag: ... }` inverts the
       // `--draft` presence check ("block UNLESS --draft is present").
       // The old `unless: "--draft\\b"` string hack migrates to this
       // `not: { flag: }` form (the `requires:` / `unless:` Pattern
       // restriction follows the gh table; see the README).
       when: {
-        subcommand: { pattern: ["pr", "create"], depth: 2 },
+        subcommand: ["pr", "create"],
         not: {
           flag: { anyOf: [ghFlags.draft] },
         },

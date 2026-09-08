@@ -479,19 +479,16 @@ const EXPECTED_ASYNC_HITS: readonly string[] = [
   "README.md :: The deleted `async` plugin's `no-long-running-commands` availability rail has no honest home yet (its CLI tables were never verified \u2014 see the restoration follow-up, issue [#120](https://github.com/cad0p/pi-steering/issues/120)).",
 ];
 
+const EXPECTED_DEPTH_HITS: readonly string[] = [
+  "src/evaluator-internals/predicates.ts :: depth: width,",
+  "src/walker-reexports.test.ts :: depth: 1,",
+];
+
 const EXPECTED_PATTERN_HITS: readonly string[] = [
-  'README.md :: - **`subcommand`** \u2014 rule fires only when the command\'s extracted subcommand matches. Bare `string` = EXACT equality (`"push"` \u2260 `"pushback"`, deliberately not `cwd:`\'s regex-source semantics); `RegExp` = test; bare array = OR at depth 1; spread `{ pattern, depth?, onUnknown? }` covers multi-word runs (`{ pattern: ["s3", "ls"], depth: 2 }` \u2014 array length must equal `depth`). Consuming-flag arity resolves ONLY via the CLI-descriptor registry by basename (`Plugin.cliDescriptors` \u2014 e.g. bare `subcommand: "push"` already extracts `push` from `git -C /x push` via the git plugin\'s declared descriptor, so the plugin must be declared for the match). No descriptor for the ref\'s basename \u2192 the engine throws `MissingDescriptorError` and blocks with an actionable reason (declare the descriptor, or `{ "<basename>": {} }` for explicit strict) \u2014 absent descriptors are loud, never silent. `null` extraction (all-flags, trailing consuming flag, after-only shapes like `go -v build`, non-bash tools) \u2192 `"unknown"` \u2192 `onUnknown:` (default `"block"`, fail-closed).',
   "README.md :: // SpreadBase auto-detects to `{ pattern: Bare }` via",
   "README.md :: Emits a `defineConfig({...})` module using JSON-literal rendering. Write/edit rule patterns come across verbatim; `requires` / `unless` / override semantics are preserved. Bash rules do NOT round-trip (`pattern:` was removed \u2014 rewrite as `command:` + `when:` leaves in TypeScript). Plugins, observers, and function-valued predicates are rejected \u2014 those features only exist in the TypeScript shape and must be authored directly.",
   "README.md :: pattern: RegExp;",
   'README.md :: | { pattern: Pattern | Pattern[]; onUnknown?: "allow" | "block" };',
-  'examples/combined-git-discipline/steering.ts :: subcommand: { pattern: ["pr", "create"], depth: 2 },',
-  'examples/draft-prs-only/README.md :: - `command: "gh"` + `subcommand: { pattern: ["pr", "create"], depth: 2 }` \u2014 fires on any `gh pr create` invocation.',
-  'examples/draft-prs-only/steering.ts :: // `subcommand: { pattern: ["pr", "create"], depth: 2 }` routes',
-  'examples/draft-prs-only/steering.ts :: subcommand: { pattern: ["pr", "create"], depth: 2 },',
-  'examples/dynamic-reason-runtime-cwd/steering.test.ts :: subcommand: { pattern: ["run", "deploy"], depth: 2 },',
-  'examples/dynamic-reason-runtime-cwd/steering.ts :: // `subcommand: { pattern: ["run", "deploy"], depth: 2 }` routes',
-  'examples/dynamic-reason-runtime-cwd/steering.ts :: subcommand: { pattern: ["run", "deploy"], depth: 2 },',
   "examples/work-item-plugin/src/index.ts :: *       - Invalidation-sentinel pattern: observer writes",
   'examples/work-item-plugin/src/predicates/work-item-format.test.ts :: "not-an-object" as unknown as { pattern: RegExp },',
   "examples/work-item-plugin/src/predicates/work-item-format.test.ts :: pattern: /\\[PROJ-\\d+\\]/,",
@@ -575,6 +572,20 @@ describe("zero-literal pins (issue #123)", () => {
     // docs — any resurrection fails here. Note: the name is spelled
     // only in this scanner's regex, and this file is skipped above.
     assert.deepEqual(scanRepo(/hasFlagOrBundle/), []);
+  });
+
+  it("the deleted subcommand depth key stays deleted (allowlisted walker-API lines only)", () => {
+    // Pre-1.0 breaking: arrays always mean positional sequence
+    // (length IS the extraction width, inferred) and OR goes through
+    // the explicit `{ anyOf: [...] }` spread — no `depth` key exists
+    // on the rule surface anymore. The only surviving `depth:`
+    // spellings repo-wide are the external walker's
+    // `locateSubcommandRun` call-site option plus its direct unit
+    // pin. Any new hit fails here — write a sequence or an anyOf
+    // instead. The `-` guard keeps `defense-in-depth` prose out of
+    // the scan while still catching `depth:` keys, `"depth":` JSON
+    // spellings, and `depth :` spacings.
+    assert.deepEqual(scanRepo(/(?<![\w.-])depth\s*:/), EXPECTED_DEPTH_HITS);
   });
 
   it("condition: never appears in examples (named predicates only)", () => {

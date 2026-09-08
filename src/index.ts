@@ -226,6 +226,7 @@ export type {
   AnyPredicateHandler,
   BaseRule,
   BashRule,
+  Basename,
   BuiltInWhenLeaves,
   BuiltInWhenLeavesInner,
   BuiltInWhenLeavesOuter,

@@ -1389,6 +1389,47 @@ export interface BaseRule<
 }
 
 /**
+ * Union of CLI basenames declared by a `plugins` tuple (issue #117).
+ *
+ * Projects `keyof` each plugin's `cliDescriptors` map across the tuple —
+ * the same tuple-walking shape as {@link AllRuleNames} (see
+ * `define-config.ts`), but over descriptor keys instead of rule names.
+ * `defineConfig` threads this through as the `Cmd` parameter of
+ * {@link BashRule}, so `command: "gti"` (undeclared) is a compile
+ * error while declared basenames (plugin-shipped + inline-literal
+ * `cliDescriptors` keys in the same `plugins:` tuple) are accepted.
+ *
+ * Widening escape (same caveat family as the exemption universe): a
+ * bare `: Plugin` annotation widens `cliDescriptors` to
+ * `Record<string, CLIDescriptor>`, whose key union is `string` — the
+ * constraint goes permissive ("can't verify" means "skip", never a
+ * false-positive). The runtime backstop (unknown `command` basename
+ * throws loud at evaluator build) covers the widened path.
+ *
+ * Defaults to `never` (no plugins): with no descriptors in scope every
+ * `command:` literal is rejected — mirroring `AllObserverNames`, where
+ * any string `observer:` reference is an error when nothing is
+ * registered. Pass no argument for the unconstrained (`string`) form.
+ */
+type PluginBasenames<PL> = PL extends Plugin
+  ? PL["cliDescriptors"] extends infer D
+    ? [D] extends [undefined]
+      ? never
+      : Extract<keyof NonNullable<D>, string>
+    : never
+  : never;
+
+export type Basename<P extends readonly Plugin[] = never> = [P] extends [
+  never,
+]
+  ? string
+  : P extends readonly [infer First, ...infer Rest]
+    ?
+        | PluginBasenames<First>
+        | (Rest extends readonly Plugin[] ? Basename<Rest> : never)
+    : never;
+
+/**
  * Bash rule: gates pi's `bash` tool.
  *
  * `field` is constrained to `"command"` - the evaluator always runs
@@ -1407,9 +1448,28 @@ export interface BaseRule<
 export interface BashRule<
   ObsName extends string = string,
   Writes extends string = string,
+  Cmd extends string = string,
 > extends BaseRule<ObsName, Writes> {
   tool: "bash";
   field: "command";
+  /**
+   * Exact basename first filter (issue #117) — routing, not matching.
+   *
+   * ADDITIVE in this step (optional; `pattern:` still the enforced
+   * filter): the follow-up deletion makes it required, deletes
+   * `pattern` + `field` from this variant, and enforces exact
+   * equality vs the walker-ref basename in the evaluator. Authors
+   * can adopt it early; the engine ignores it until then.
+   *
+   * Singular key, union type (schema's dominant `X | X[]` idiom): a
+   * single {@link Basename} or a `readonly` array of them (plain OR —
+   * one name = one `disabledRules` / exemption / override entry, NOT
+   * shared leaves; leaves stay per-ref AND under arrays). At
+   * `defineConfig` sites `Cmd` narrows to the descriptor-key union
+   * across the `plugins` tuple (plugin-shipped + inline-literal
+   * `cliDescriptors` keys), so `command: "gti"` is a compile error.
+   */
+  command?: Cmd | readonly Cmd[];
 }
 
 /**
@@ -1469,8 +1529,9 @@ export interface EditRule<
 export type Rule<
   ObsName extends string = string,
   Writes extends string = string,
+  Cmd extends string = string,
 > =
-  | BashRule<ObsName, Writes>
+  | BashRule<ObsName, Writes, Cmd>
   | WriteRule<ObsName, Writes>
   | EditRule<ObsName, Writes>;
 

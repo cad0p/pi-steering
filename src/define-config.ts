@@ -26,6 +26,7 @@
  *   - `AllWrites<P, R, Inline>`      — for `Rule.when.missing.event`.
  *   - `AllRuleNames<P, R>`           — for `config.disabledRules`.
  *   - `AllPluginNames<P>`            — for `config.disabledPlugins`.
+ *   - `AllBasenames<P>`              — for bash-rule `command` (issue #117).
  *   - `PluginExemptionsCheck<P, R>`  — for plugin-shipped `exemptions`
  *     targets (cross-checked against the same rule-name universe as
  *     user-written `exemptions` / `disabledRules`).
@@ -38,6 +39,7 @@
  */
 
 import type {
+  Basename,
   BuiltInWhenLeavesOuter,
   Exemption,
   Observer,
@@ -142,6 +144,25 @@ export type AllPluginNames<P extends readonly Plugin[]> = ProjectField<
   P,
   "name"
 >;
+
+/**
+ * Extract the union of CLI basenames declared via `cliDescriptors`
+ * keys across the `plugins` tuple (issue #117).
+ *
+ * Used to constrain {@link Rule} `command` on bash rules so typos
+ * surface as compile errors (`command: "gti"` with only `git` / `rm`
+ * descriptors in scope is rejected). Plugin-shipped tables and
+ * inline-literal plugin `cliDescriptors` keys in the same `plugins:`
+ * tuple both contribute; a widened `: Plugin` element contributes
+ * `string` ("can't verify" means "skip" — the runtime backstop in
+ * `buildEvaluator` throws loud on unknown `command` basenames at
+ * build time to cover that path).
+ *
+ * Falls back to `never` when no plugin declares a descriptor — any
+ * `command:` literal without a declared table is then a compile
+ * error (correct: nothing routes without facts).
+ */
+export type AllBasenames<P extends readonly Plugin[]> = Basename<P>;
 
 // ---------------------------------------------------------------------------
 // AllRuleNames — union of rule `.name` literals across plugins + user rules.
@@ -317,7 +338,8 @@ export interface DefineConfigInput<
   Inline extends readonly Observer[],
   R extends readonly Rule<
     AllObserverNames<P, Inline>,
-    AllWrites<P, R, Inline>
+    AllWrites<P, R, Inline>,
+    AllBasenames<P>
   >[],
 > extends SteeringConfig {
   disabledRules?: readonly AllRuleNames<P, R>[];
@@ -427,7 +449,8 @@ export function defineConfig<
   const Inline extends readonly Observer[] = [],
   const R extends readonly Rule<
     AllObserverNames<P, Inline>,
-    AllWrites<P, R, Inline>
+    AllWrites<P, R, Inline>,
+    AllBasenames<P>
   >[] = [],
 >(
   config: DefineConfigInput<P, Inline, R> & PluginExemptionsCheck<P, R>,

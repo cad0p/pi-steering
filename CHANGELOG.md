@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - *(core)* Positional argv view + registry-only arity (closes #107)
 - *(core)* Per-binary flag table ({aliases, takesValue}) (closes #110)
 - *(core)* Derive bundle matching from the flag table, remove `bundleAware` (closes #115)
+- *(core)* Command-first bash filter (closes #117) (closes #75) (closes #123)
 
 ### 🐛 Bug Fixes
 

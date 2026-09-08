@@ -12,7 +12,10 @@
  */
 
 import { definePredicate } from "../../../define-predicate.ts";
-import { unwrapBooleanLeafArg } from "../../../helpers/boolean-args.ts";
+import {
+  type BooleanLeafArgs,
+  unwrapBooleanLeafArg,
+} from "../../../helpers/boolean-args.ts";
 import { RM_FORCE_FLAG, RM_RECURSIVE_FLAG } from "../descriptors.ts";
 
 /**
@@ -36,19 +39,19 @@ import { RM_FORCE_FLAG, RM_RECURSIVE_FLAG } from "../descriptors.ts";
  *      that declares the bare / spreadBase shape this handler
  *      dispatches on.
  */
-export const hasRecursiveForce = definePredicate<
-  boolean | { value: boolean; onUnknown?: "allow" | "block" }
->((args, ctx) => {
-  // Shared boolean-leaf unwrap (see `src/helpers/boolean-args.ts`); malformed → false (fail-closed).
-  const expected = unwrapBooleanLeafArg(args);
-  if (expected === undefined) return false;
-  const input = ctx.input;
-  if (input?.tool !== "bash") return false;
-  const cmd = ctx.command;
-  if (!cmd.hasFlag(RM_RECURSIVE_FLAG)) return false;
-  if (!cmd.hasFlag(RM_FORCE_FLAG)) return false;
-  const words = input.args;
-  if (!Array.isArray(words)) return false;
-  const rooted = words.some((w) => (w?.value ?? "") === "/");
-  return rooted === expected;
-});
+export const hasRecursiveForce = definePredicate<BooleanLeafArgs>(
+  (args, ctx) => {
+    // Shared boolean-leaf unwrap (see `src/helpers/boolean-args.ts`); malformed → false (fail-closed).
+    const expected = unwrapBooleanLeafArg(args);
+    if (expected === undefined) return false;
+    const input = ctx.input;
+    if (input?.tool !== "bash") return false;
+    const cmd = ctx.command;
+    if (!cmd.hasFlag(RM_RECURSIVE_FLAG)) return false;
+    if (!cmd.hasFlag(RM_FORCE_FLAG)) return false;
+    const words = input.args;
+    if (!Array.isArray(words)) return false;
+    const rooted = words.some((w) => (w?.value ?? "") === "/");
+    return rooted === expected;
+  },
+);

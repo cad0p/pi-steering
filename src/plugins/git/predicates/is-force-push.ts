@@ -14,7 +14,10 @@
  */
 
 import { definePredicate } from "../../../define-predicate.ts";
-import { unwrapBooleanLeafArg } from "../../../helpers/boolean-args.ts";
+import {
+  type BooleanLeafArgs,
+  unwrapBooleanLeafArg,
+} from "../../../helpers/boolean-args.ts";
 import type { PredicateWord } from "../../../schema.ts";
 import { GIT_CLI_DESCRIPTOR } from "../descriptors.ts";
 
@@ -57,9 +60,7 @@ function hasLeadingPlusRefspec(words: readonly PredicateWord[]): boolean {
  *      that declares the bare / spreadBase shape this handler
  *      dispatches on.
  */
-export const isForcePush = definePredicate<
-  boolean | { value: boolean; onUnknown?: "allow" | "block" }
->((args, ctx) => {
+export const isForcePush = definePredicate<BooleanLeafArgs>((args, ctx) => {
   // Shared boolean-leaf unwrap (see `src/helpers/boolean-args.ts`); malformed → false (fail-closed).
   const expected = unwrapBooleanLeafArg(args);
   if (expected === undefined) return false;

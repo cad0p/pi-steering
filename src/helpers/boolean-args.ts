@@ -12,6 +12,18 @@
  */
 
 /**
+ * Canonical argument shape for boolean-leaf predicates.
+ *
+ * This mirrors what the registry's `PredicateShape<boolean>` accepts
+ * at leaf level (bare + `{ value }` spread + framework-applied
+ * `onUnknown` modifier); the handler treats `onUnknown:` as opaque
+ * (engine's `readLeafOnUnknown` owns projection).
+ */
+export type BooleanLeafArgs =
+  | boolean
+  | { value: boolean; onUnknown?: "allow" | "block" };
+
+/**
  * Unwrap the boolean payload from a {@link PredicateShape}<boolean>
  * argument. Plugin-author API for boolean predicates: accepts the
  * bare form (`true` / `false`) and the spread form

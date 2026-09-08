@@ -46,6 +46,7 @@
  */
 
 import {
+  type BooleanLeafArgs,
   defineConfig,
   definePredicate,
   type Plugin,
@@ -89,9 +90,7 @@ declare global {
  * closure. A name carries its own unit tests and a registry entry;
  * an inline closure carries neither.
  */
-const isForcePushSignal = definePredicate<
-  boolean | { value: boolean; onUnknown?: "allow" | "block" }
->((args, ctx) => {
+const isForcePushSignal = definePredicate<BooleanLeafArgs>((args, ctx) => {
   // Shared public boolean-leaf unwrap (bare `boolean` |
   // `{ value, onUnknown? }` spread; malformed → undefined → false
   // fail-closed). Imported from the package root like any external

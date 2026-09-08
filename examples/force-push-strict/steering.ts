@@ -115,7 +115,14 @@ export default defineConfig({
       // #65): `subcommand: "push"` plus the named force-signal via
       // `requires:` (see `isForcePushSignal` above — no `condition:`
       // in examples, ever).
-      requires: (ctx: PredicateContext) => isForcePushSignal(null, ctx),
+      // Unknown-safe coercion (NOT `=== true`): the engine's
+      // requires-throw contract treats unknown as SATISFIED so the
+      // remaining gates still run fail-closed — `!== false` preserves
+      // exactly that (unknown → rest evaluated → push + unknown-signal
+      // still blocks via `when.subcommand`); `=== true` would map
+      // unknown → rule skipped (fail-OPEN, wrong direction).
+      requires: (ctx: PredicateContext) =>
+        isForcePushSignal(null, ctx) !== false,
       when: {
         subcommand: "push",
       },

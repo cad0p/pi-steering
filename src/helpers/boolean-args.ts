@@ -11,17 +11,23 @@
  * shapes and share this single unwrap implementation.
  */
 
+import type { PredicateModifiers, PredicateShape } from "../schema.ts";
+
 /**
  * Canonical argument shape for boolean-leaf predicates.
  *
- * This mirrors what the registry's `PredicateShape<boolean>` accepts
- * at leaf level (bare + `{ value }` spread + framework-applied
- * `onUnknown` modifier); the handler treats `onUnknown:` as opaque
- * (engine's `readLeafOnUnknown` owns projection).
+ * DERIVED from the registry machinery — not hand-spelled: bare plus
+ * the auto-detected `{ value }` spread plus the framework-applied
+ * `onUnknown` modifier, i.e. exactly the outer-leaf composition
+ * (`OuterValue`) for `PredicateShape<boolean>`:
+ * `DefaultSpreadBase<boolean>` → `{ value: boolean }`, intersected
+ * with {@link PredicateModifiers} at the outer leaf level. The handler
+ * treats `onUnknown:` as opaque (engine's `readLeafOnUnknown` owns
+ * projection).
  */
 export type BooleanLeafArgs =
-  | boolean
-  | { value: boolean; onUnknown?: "allow" | "block" };
+  | PredicateShape<boolean>["bare"]
+  | (PredicateShape<boolean>["spreadBase"] & PredicateModifiers);
 
 /**
  * Unwrap the boolean payload from a {@link PredicateShape}<boolean>

@@ -99,6 +99,7 @@ import { branch } from "./predicates/branch.ts";
 import { commitsAhead } from "./predicates/commits-ahead.ts";
 import { hasStagedChanges } from "./predicates/has-staged-changes.ts";
 import { isClean } from "./predicates/is-clean.ts";
+import { isForcePush } from "./predicates/is-force-push.ts";
 import { remote } from "./predicates/remote.ts";
 import { upstream } from "./predicates/upstream.ts";
 import { noForcePush } from "./rules/no-force-push.ts";
@@ -194,6 +195,15 @@ declare global {
       number,
       { eq?: number; gt?: number; lt?: number; wrt?: string }
     >;
+
+    /**
+     * `when.isForcePush` — match `git push` refs carrying ANY force
+     * signal (`--force` / `-f` / `--force-with-lease` /
+     * `--force-if-includes` / `--mirror`, bundled shorts included,
+     * or a leading-`+` refspec). Boolean leaf; spreadBase
+     * auto-detects to `{ value: boolean }`.
+     */
+    isForcePush: PredicateShape<boolean>;
   }
 }
 
@@ -214,6 +224,7 @@ export const predicates: Record<string, AnyPredicateHandler> = {
   commitsAhead,
   hasStagedChanges,
   isClean,
+  isForcePush,
   remote,
 };
 
@@ -305,6 +316,7 @@ export {
 } from "./predicates/commits-ahead.ts";
 export { hasStagedChanges } from "./predicates/has-staged-changes.ts";
 export { isClean } from "./predicates/is-clean.ts";
+export { isForcePush } from "./predicates/is-force-push.ts";
 export { remote } from "./predicates/remote.ts";
 export { upstream } from "./predicates/upstream.ts";
 // Named re-exports for consumers that want to pick pieces (e.g. a

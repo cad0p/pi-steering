@@ -24,9 +24,8 @@ import { RM_FORCE_FLAG, RM_RECURSIVE_FLAG } from "../descriptors.ts";
  *   - `when: { hasRecursiveForce: false }` - inverted (rare).
  *
  * Flag presence reads through the bound `ctx.command` facade
- * (`hasFlagOrBundle` — the bundle-aware variant, since `hasFlag`
- * itself is bundle-blind by pinned contract): table glue handles
- * bundles like `-Rf`.
+ * (`hasFlag` — the table-derived variant agreeing with the `flag:`
+ * leaf, issue #123): table glue handles bundles like `-Rf`.
  * `ctx.input.args` values for a word whose resolved value is exactly
  * `"/"` (quote-aware — `'/'` still counts; `/tmp` never does).
  * Non-bash tools carry no `args` → `false` (never unknown: absence
@@ -52,8 +51,8 @@ export const hasRecursiveForce = definePredicate<
   const input = ctx.input;
   if (input?.tool !== "bash") return false;
   const cmd = ctx.command;
-  if (!cmd.hasFlagOrBundle(RM_RECURSIVE_FLAG)) return false;
-  if (!cmd.hasFlagOrBundle(RM_FORCE_FLAG)) return false;
+  if (!cmd.hasFlag(RM_RECURSIVE_FLAG)) return false;
+  if (!cmd.hasFlag(RM_FORCE_FLAG)) return false;
   const words = input.args;
   if (!Array.isArray(words)) return false;
   const rooted = words.some((w) => (w?.value ?? "") === "/");

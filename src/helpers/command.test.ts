@@ -7,12 +7,7 @@ import type { Word } from "@cad0p/unbash-walker";
 import { resolveDescriptor } from "../arity.ts";
 import type { CLIFlag, PredicateToolInput } from "../schema.ts";
 import { commandFromInput, type SteeringCommand } from "./command.ts";
-import {
-  getFlagValue,
-  hasEnvAssignment,
-  hasFlag,
-  isInfoOnly,
-} from "./flags.ts";
+import { getFlagValue, hasEnvAssignment, isInfoOnly } from "./flags.ts";
 
 /** Minimal Word for tests — tests don't exercise the walker, just the facade. */
 function W(value: string, text?: string): Word {
@@ -342,13 +337,17 @@ describe("SteeringCommand.positionals (issue #107)", () => {
 });
 
 describe("SteeringCommand delegation", () => {
-  it("hasFlag / getFlagValue / hasEnvAssignment / isInfoOnly match the bare mechanism", () => {
+  it("getFlagValue / hasEnvAssignment / isInfoOnly match the bare mechanism; hasFlag is the shared table-derived scan", () => {
     const args = [PW("--profile"), PW("dev"), PW("--profile=prod")];
     const env = [W("AWS_PROFILE=dev")];
     const table = { profile: C("--profile") };
     const cmd = bashCmd(args, env, table);
+    // Facade `hasFlag` runs the shared `flagPresenceScan` (issue #123) —
+    // the SAME code path as the `when.flag` leaf — not the bare
+    // entry-based mechanism, so the two can disagree on bundles and
+    // consumed values. On this exact-token fixture they coincide.
+    assert.equal(cmd.hasFlag(B("--profile")), true);
     const views = [{ aliases: ["--profile"], takesValue: true }];
-    assert.equal(cmd.hasFlag(B("--profile")), hasFlag(args, views));
     assert.equal(cmd.getFlagValue(C("--profile")), getFlagValue(args, views));
     assert.equal(
       cmd.hasEnvAssignment("AWS_PROFILE"),
@@ -410,43 +409,65 @@ describe("commandFromInput totality + COPY", () => {
   });
 });
 
-describe("hasFlagOrBundle (issue #117)", () => {
-  it("sees bundled bool shorts the blind hasFlag misses", () => {
+describe("SteeringCommand.hasFlag derives bundles (issue #123)", () => {
+  it("-uf counts for -f (bundled bool shorts are present)", () => {
+    const cmd = bashCmd(S("-uf"), undefined, {
+      u: B("-u"),
+      force: B("-f"),
+    });
+    assert.equal(cmd.hasFlag({ aliases: ["-f"], takesValue: false }), true);
+    assert.equal(cmd.hasFlag({ aliases: ["-u"], takesValue: false }), true);
+    assert.equal(cmd.hasFlag({ aliases: ["-x"], takesValue: false }), false);
+  });
+
+  it("sees bundled bool shorts (-Rf counts for -R and -f)", () => {
     const cmd = bashCmd(S("-Rf"), undefined, {
       recursive: { aliases: ["-r", "-R", "--recursive"], takesValue: false },
       force: { aliases: ["-f", "--force"], takesValue: false },
     });
-    assert.equal(
-      cmd.hasFlag({ aliases: ["-R"], takesValue: false }),
-      false,
-      "hasFlag stays bundle-blind (pinned contract)",
-    );
-    assert.equal(
-      cmd.hasFlagOrBundle({ aliases: ["-R"], takesValue: false }),
-      true,
-    );
-    assert.equal(
-      cmd.hasFlagOrBundle({ aliases: ["-f"], takesValue: false }),
-      true,
-    );
-    assert.equal(
-      cmd.hasFlagOrBundle({ aliases: ["-x"], takesValue: false }),
-      false,
-    );
+    assert.equal(cmd.hasFlag({ aliases: ["-R"], takesValue: false }), true);
+    assert.equal(cmd.hasFlag({ aliases: ["-f"], takesValue: false }), true);
+    assert.equal(cmd.hasFlag({ aliases: ["-x"], takesValue: false }), false);
   });
 
-  it("truncates at table glue (lead-letter rule through the facade)", () => {
+  it("truncates at table glue (-Rfoo counts R, never f)", () => {
     const cmd = bashCmd(S("-Rfoo"), undefined, {
       repo: { aliases: ["-R"], takesValue: true },
     });
+    assert.equal(cmd.hasFlag({ aliases: ["-R"], takesValue: false }), true);
+    assert.equal(cmd.hasFlag({ aliases: ["-f"], takesValue: false }), false);
+  });
+
+  it("keeps the non-glued prefix present (-xRfoo counts x and R, never f)", () => {
+    const cmd = bashCmd(S("-xRfoo"), undefined, {
+      xray: B("-x"),
+      repo: { aliases: ["-R"], takesValue: true },
+    });
+    assert.equal(cmd.hasFlag(B("-x")), true);
+    assert.equal(cmd.hasFlag({ aliases: ["-R"], takesValue: false }), true);
+    assert.equal(cmd.hasFlag({ aliases: ["-f"], takesValue: false }), false);
+  });
+
+  it("skips declared consuming-flag values by position", () => {
+    const cmd = bashCmd(S("-m", "-f"), undefined, {
+      m: C("-m"),
+      force: B("-f"),
+    });
+    // `-f` is `-m`'s value here, not a flag — position-skipped.
+    assert.equal(cmd.hasFlag(B("-f")), false);
+    // The consuming flag itself IS present.
+    assert.equal(cmd.hasFlag(B("-m")), true);
+  });
+
+  it("longs never bundle-match", () => {
+    const cmd = bashCmd(S("--force"), undefined, {
+      force: { aliases: ["-f", "--force"], takesValue: false },
+    });
     assert.equal(
-      cmd.hasFlagOrBundle({ aliases: ["-R"], takesValue: false }),
+      cmd.hasFlag({ aliases: ["--force"], takesValue: false }),
       true,
     );
-    assert.equal(
-      cmd.hasFlagOrBundle({ aliases: ["-f"], takesValue: false }),
-      false,
-    );
+    assert.equal(cmd.hasFlag({ aliases: ["-f"], takesValue: false }), false);
   });
 
   it("still matches exact and attached forms", () => {
@@ -455,12 +476,17 @@ describe("hasFlagOrBundle (issue #117)", () => {
       mirror: { aliases: ["--mirror"], takesValue: false },
     });
     assert.equal(
-      cmd.hasFlagOrBundle({ aliases: ["--force"], takesValue: false }),
+      cmd.hasFlag({ aliases: ["--force"], takesValue: false }),
       true,
     );
     assert.equal(
-      cmd.hasFlagOrBundle({ aliases: ["--mirror"], takesValue: false }),
+      cmd.hasFlag({ aliases: ["--mirror"], takesValue: false }),
       true,
     );
+  });
+
+  it("malformed spellings select nothing (leaf fail-skip parity)", () => {
+    const cmd = bashCmd(S("-foo"), undefined, {});
+    assert.equal(cmd.hasFlag({ aliases: ["-foo"], takesValue: false }), false);
   });
 });

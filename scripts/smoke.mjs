@@ -202,7 +202,7 @@ async function main() {
       }
       return entry;
     };
-    const userRuleConfig = `import gitPlugin from ${JSON.stringify(distPlugin("git"))};
+    const userRuleConfig = `import gitPlugin, { GIT_CLI_DESCRIPTOR } from ${JSON.stringify(distPlugin("git"))};
 import rmPlugin from ${JSON.stringify(distPlugin("rm"))};
 
 export default {
@@ -219,7 +219,7 @@ export default {
       command: "git",
       when: {
         subcommand: "push",
-        flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] },
+        flag: { anyOf: [GIT_CLI_DESCRIPTOR.flags.force] },
       },
       reason: "blocked by smoke-test rule",
     },

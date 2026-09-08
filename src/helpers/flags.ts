@@ -201,6 +201,112 @@ export function hasFlag(
 }
 
 /**
+ * Table-derived flag-presence scan — the ONE code path behind BOTH the
+ * `when.flag` leaf and the bound `SteeringCommand.hasFlag` facade (issue
+ * #123: the split is gone — `hasFlag` itself derives bundles, and the
+ * bundle-only facade twin was deleted before it ever shipped). Ported verbatim from the leaf's `flagPresent` semantics
+ * (#115 derived bundles) and shared so the two surfaces cannot drift
+ * (a second copy of the scan is the drift #106 killed):
+ * exact token, attached `--flag=value` (longs only, single token),
+ * declared consuming-flag values skipped BY POSITION, short bundles
+ * always-on for single-char shorts with table-derived glue +
+ * lead-letter truncation, longs never bundle-match.
+ *
+ * Entries select SPELLINGS only (`aliases` → exact/long/short-letter
+ * sets); consumption (`valueConsumingFlags`) and glue (`gluedShorts`)
+ * ALWAYS come from the caller's bound `ResolvedArity` — never from a
+ * passed entry's `takesValue`. Non-string aliases are skipped (both
+ * callers pre-filter: the leaf validates, the facade adapts); `args`
+ * `undefined` (non-bash tools on the bare path) reads absent.
+ *
+ * Word reading is `.value ?? .text ?? .rawText` (stringified) — the
+ * leaf's `scanWordText` contract, kept here so the shared scan is
+ * exact down to intractable words (see `scanWordText` in
+ * `evaluator-internals/predicates.ts`, retained for the subcommand
+ * path).
+ */
+export function flagPresenceScan(
+  args: readonly Word[] | undefined,
+  anyOf: readonly CLIFlag[],
+  valueConsumingFlags: ReadonlySet<string>,
+  gluedShorts: ReadonlySet<string> = new Set(),
+): boolean {
+  const spellings = new Set<string>();
+  const longs = new Set<string>();
+  const shortLetters = new Set<string>();
+  for (const entry of anyOf) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const aliases = (entry as { aliases?: unknown }).aliases;
+    if (!Array.isArray(aliases)) continue;
+    for (const alias of aliases) {
+      if (typeof alias !== "string") continue;
+      spellings.add(alias);
+      if (alias.startsWith("--")) longs.add(alias);
+      else if (isSingleCharShort(alias)) shortLetters.add(alias[1]!);
+    }
+  }
+  if (args === undefined) return false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === undefined) continue; // bounds-guard; unreachable while i < length
+    const token = presenceWordText(arg);
+    // Exact token match (covers separate-form consuming flags too —
+    // the flag itself IS present; only its value is skipped).
+    if (spellings.has(token)) return true;
+    // Attached `--flag=value`: match the name half against the long
+    // spellings; single token, consumes nothing further.
+    if (token.startsWith("--") && token.includes("=")) {
+      if (longs.has(token.slice(0, token.indexOf("=")))) return true;
+      continue;
+    }
+    // Declared consuming flag: skip its value BY POSITION.
+    if (valueConsumingFlags.has(token)) {
+      i += 1;
+      continue;
+    }
+    // Short bundles (`-uf`), always on for single-char-short aliases
+    // (longs never match here). Glue derivation runs FIRST: the first
+    // letter in the derived glue set glues the remainder, so only the
+    // non-glued prefix is present (`-Rfoo` with `R` declared presents
+    // `R`, never `f`; `-xRfoo` presents `xR`). Undeclared letters never
+    // glue — over-presence fires fail-closed, fixed with a table row.
+    if (token.length > 1 && token[0] === "-" && token[1] !== "-") {
+      let body = token.slice(1);
+      const eq = body.indexOf("=");
+      if (eq !== -1) body = body.slice(0, eq);
+      let end = body.length;
+      for (let j = 0; j < body.length; j++) {
+        if (gluedShorts.has(body[j]!)) {
+          end = j + 1;
+          break;
+        }
+      }
+      const present = body.slice(0, end);
+      for (const letter of shortLetters) {
+        if (present.includes(letter)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Leaf-parity word read for {@link flagPresenceScan}: `.value ?? .text
+ * ?? .rawText`, stringified — byte-equal to the leaf's `scanWordText`
+ * so intractable (rawText-only) words resolve identically on both
+ * paths. Private: the sibling `wordValue` stays `.value ?? .text` for
+ * the entry-based value helpers (unchanged semantics).
+ */
+function presenceWordText(w: Word | undefined): string {
+  if (w === undefined) return "";
+  const v = w as { value?: unknown; text?: unknown; rawText?: unknown };
+  const form = v.value ?? v.text ?? v.rawText ?? "";
+  return typeof form === "string" ? form : String(form);
+}
+
+/**
  * Bundle-aware single-short presence over argv words (issue #117).
  *
  * `true` when any short-token word (`-xyz` — longs never bundle)

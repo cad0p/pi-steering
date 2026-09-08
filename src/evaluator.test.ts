@@ -3644,12 +3644,11 @@ describe("buildEvaluator: plugin predicates", () => {
     assert.deepEqual(seenArgs, [{ wrt: "origin/main", eq: 1 }]);
   });
 
-  it("isolates an unknown when.<key> throw as 'rule did not fire' (S1)", async () => {
-    // UnknownPredicateError is still the right thing to throw from
-    // inside the predicate dispatcher (it names the offending key so
-    // operators can locate the typo / missing plugin). S1 catches it
-    // at the evaluator boundary so the raw error message doesn't leak
-    // back to the agent via pi's tool-result shim.
+  it("rejects an unknown when.<key> at load naming rule + key (issue #75 layer 1)", async () => {
+    // UnknownPredicateError used to escape the dispatcher into the
+    // per-rule catch-and-skip (warn + "rule did not fire" — silent
+    // fail-open). Since #75 the key check runs at config-resolve time:
+    // static configs can no longer reach the runtime projection.
     const rule: Rule = {
       name: "bad-when",
       tool: "bash",
@@ -3659,30 +3658,71 @@ describe("buildEvaluator: plugin predicates", () => {
         Rule["when"]
       >,
     };
-    const warnings = captureWarnings();
-    try {
-      const evaluator = buildEvaluator(
-        { rules: [rule] },
-        resolve(),
-        makeHost(),
-      );
-      const result = await evaluator.evaluate(
-        bashEvent("git status"),
-        makeCtx("/r"),
-        0,
-      );
-      assert.equal(result, undefined);
-      assert.ok(
-        warnings.some((w) =>
-          /predicate threw for rule "bad-when"@user.*unknown when\.totallyMadeUp/.test(
-            w,
-          ),
+    assert.throws(
+      () => buildEvaluator({ rules: [rule] }, resolve(), makeHost()),
+      /rule "bad-when"\.when names unknown predicate "totallyMadeUp".*Install the plugin that provides "totallyMadeUp"/,
+    );
+  });
+
+  it("rejects unknown keys inside not: blocks and exemption clauses at load", async () => {
+    const nested: Rule = {
+      name: "bad-not",
+      tool: "bash",
+      command: "git",
+      reason: "bad",
+      when: { not: { totallyMadeUp: true } } as unknown as NonNullable<
+        Rule["when"]
+      >,
+    };
+    assert.throws(
+      () => buildEvaluator({ rules: [nested] }, resolve(), makeHost()),
+      /rule "bad-not"\.when\.not names unknown predicate "totallyMadeUp"/,
+    );
+    const guard: Rule = {
+      name: "guarded",
+      tool: "bash",
+      command: "git",
+      reason: "guard",
+      when: { subcommand: "push" },
+    };
+    assert.throws(
+      () =>
+        buildEvaluator(
+          {
+            rules: [guard],
+            exemptions: [
+              {
+                rule: "guarded",
+                when: { totallyMadeUp: true } as unknown as NonNullable<
+                  Rule["when"]
+                >,
+              },
+            ],
+          },
+          resolve(),
+          makeHost(),
         ),
-        `no matching warning in:\n${warnings.join("\n")}`,
-      );
-    } finally {
-      warnings.restore();
-    }
+      /exemption for rule "guarded"\.when names unknown predicate "totallyMadeUp"/,
+    );
+  });
+
+  it("rejects unknown keys in plugin-shipped rules naming the owning plugin", async () => {
+    const badPlugin: Plugin = {
+      name: "bad-plugin",
+      rules: [
+        {
+          name: "shipped-bad",
+          tool: "bash",
+          command: "git",
+          reason: "bad",
+          when: { totallyMadeUp: true } as unknown as NonNullable<Rule["when"]>,
+        },
+      ],
+    };
+    assert.throws(
+      () => buildEvaluator({ rules: [] }, resolve([badPlugin]), makeHost()),
+      /rule "shipped-bad"\.when names unknown predicate "totallyMadeUp".*in plugin "bad-plugin"/,
+    );
   });
 });
 
@@ -6760,7 +6800,19 @@ describe("buildEvaluator: exemption registry", () => {
     }
   });
 
-  it("an unknown predicate key inside an exemption does not exempt (per-exemption catch)", async () => {
+  it("an exemption whose predicate throws does not exempt (per-exemption catch)", async () => {
+    // Unknown KEYS never reach the exemption catch anymore (issue #75
+    // layer 1 rejects them at load); the per-exemption catch still
+    // guards THROWING handlers — pinned here with a registered
+    // predicate that throws.
+    const throwingPlugin: Plugin = {
+      name: "throwing",
+      predicates: {
+        alwaysThrows: () => {
+          throw new Error("boom");
+        },
+      },
+    };
     const warnings = captureWarnings();
     try {
       const evaluator = buildEvaluator(
@@ -6770,12 +6822,12 @@ describe("buildEvaluator: exemption registry", () => {
             {
               rule: "no-main-commit",
               when: {
-                noSuchPredicate: true,
+                alwaysThrows: true,
               } as unknown as TopLevelWhenClause<string>,
             },
           ],
         },
-        resolve(),
+        resolve([throwingPlugin]),
         makeHost(),
       );
       const res = await evaluator.evaluate(
@@ -6786,7 +6838,9 @@ describe("buildEvaluator: exemption registry", () => {
       assert.ok(res && res.block === true, "guard still fires");
       assert.ok(
         warnings.some((w) =>
-          /exemption for rule "no-main-commit" threw/.test(w),
+          /Rule "no-main-commit"@exemption: when\.alwaysThrows handler threw/.test(
+            w,
+          ),
         ),
         `expected a warn log labelling the exemption, got: ${JSON.stringify(warnings)}`,
       );

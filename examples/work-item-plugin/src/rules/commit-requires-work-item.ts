@@ -31,6 +31,7 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
+import { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
 
 export const commitRequiresWorkItem = {
   name: "commit-requires-work-item",
@@ -43,7 +44,9 @@ export const commitRequiresWorkItem = {
   // `no-main-commit` rule in the package shows the production form.
   when: {
     subcommand: "commit",
-    flag: { anyOf: [{ aliases: ["-m", "--message"], takesValue: true }] },
+    // `-m` / `--message` referenced BY VARIABLE from the owning
+    // plugin's table (never a hand-built literal in the rule).
+    flag: { anyOf: [GIT_CLI_DESCRIPTOR.flags.message] },
     // Invert the predicate: fire when the work-item tag is MISSING.
     not: {
       // The plugin-registered `workItemFormat` predicate — see

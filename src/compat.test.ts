@@ -143,6 +143,28 @@ describe("compat: fromJSON happy paths", () => {
     assert.equal(rule.when?.cwd, "^/workplace");
   });
 
+  it("rejects non-cwd when keys at conversion (issue #75 compat path)", () => {
+    // JSON cannot express plugin predicates, `not:`, or `condition:` —
+    // an unknown key never survives conversion, so the compat path
+    // meets the same validation bar as the TS load-time key check.
+    assert.throws(
+      () =>
+        fromJSON({
+          rules: [
+            {
+              name: "typo",
+              tool: "write",
+              field: "path",
+              pattern: "^foo",
+              reason: "x",
+              when: { totallyMadeUp: true },
+            },
+          ],
+        }),
+      /JSON config cannot express `when\.totallyMadeUp`.*\(at <root>\.rules\[0\]\.when\.totallyMadeUp\)/,
+    );
+  });
+
   it("golden: example fixture used by the v1 JSON loader tests round-trips", () => {
     // Mirrors the shape of the fixture at
     // `src/loader.test.ts` — using a

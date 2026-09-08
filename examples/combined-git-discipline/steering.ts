@@ -35,21 +35,27 @@
  */
 
 import { defineConfig, type Plugin } from "@cad0p/pi-steering";
-import gitPlugin from "@cad0p/pi-steering/plugins/git";
+import gitPlugin, { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
 import rmPlugin from "@cad0p/pi-steering/plugins/rm";
 
 /**
  * Minimal synthetic `gh` facts (placeholder for pi-steering-github#61).
  * See ../draft-prs-only/steering.ts for the entry rationale.
+ *
+ * One declaration, two uses: the `ghFlags` table feeds
+ * `cliDescriptors` below AND the `flag:` leaves reference its entries
+ * by variable (never hand-built literals in rules).
  */
+const ghFlags = {
+  draft: { aliases: ["--draft"], takesValue: false },
+  repo: { aliases: ["-R", "--repo"], takesValue: true },
+} as const;
+
 const ghFacts = {
   name: "gh-facts",
   cliDescriptors: {
     gh: {
-      flags: {
-        draft: { aliases: ["--draft"], takesValue: false },
-        repo: { aliases: ["-R", "--repo"], takesValue: true },
-      },
+      flags: ghFlags,
     },
   },
 } as const satisfies Plugin;
@@ -65,7 +71,7 @@ export default defineConfig({
       command: "git",
       when: {
         subcommand: "commit",
-        flag: { anyOf: [{ aliases: ["--amend"], takesValue: false }] },
+        flag: { anyOf: [GIT_CLI_DESCRIPTOR.flags.amend] },
       },
       reason:
         "Don't rewrite history with --amend. Create a new commit instead.",
@@ -77,7 +83,7 @@ export default defineConfig({
       when: {
         subcommand: { pattern: ["pr", "create"], depth: 2 },
         not: {
-          flag: { anyOf: [{ aliases: ["--draft"], takesValue: false }] },
+          flag: { anyOf: [ghFlags.draft] },
         },
       },
       reason:

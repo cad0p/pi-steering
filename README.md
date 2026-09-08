@@ -88,7 +88,9 @@ Create `.pi/steering/index.ts` at your project root:
 
 ```ts
 import { defineConfig } from "@cad0p/pi-steering";
-import gitPlugin from "@cad0p/pi-steering/plugins/git";
+import gitPlugin, {
+  GIT_CLI_DESCRIPTOR,
+} from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
   // The git plugin declares git's argv facts (which flags consume
@@ -103,7 +105,9 @@ export default defineConfig({
       command: "git",
       when: {
         subcommand: "push",
-        flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] },
+        // Entries always come from the owning plugin's table — never
+        // hand-build literals in rules.
+        flag: { anyOf: [GIT_CLI_DESCRIPTOR.flags.force] },
       },
       reason:
         "Force pushes rewrite remote history. Create a new commit instead, or ask the user to run one manually.",

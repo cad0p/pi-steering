@@ -78,6 +78,7 @@ import {
   matchesPattern,
   matchesPatternOrFn,
   validateExemptionWhenClauseShape,
+  validateWhenClauseKeys,
   validateWhenClauseShape,
 } from "./evaluator-internals/predicates.ts";
 import {
@@ -205,6 +206,50 @@ export function buildEvaluator(
   }
   for (const rule of resolved.rules) {
     validateWhenClauseShape(rule.when, `rule "${rule.name}".when`);
+  }
+
+  // Issue #75 layer 1 (primary): unknown-predicate keys fail LOUD at
+  // config-resolve time instead of silently disabling the rule at
+  // runtime. Every `when:` leaf key must be a built-in or resolve
+  // against the merged predicate registry — inline rules, shipped
+  // rules, and exemption clauses alike. Static configs can no longer
+  // reach the runtime unknown-key projection below; only direct
+  // `evaluateWhen` callers (SDK embedders, tests) can.
+  {
+    const known = new Set(Object.keys(resolved.predicates));
+    for (const rule of config.rules ?? []) {
+      validateWhenClauseKeys(
+        rule.when,
+        `rule "${rule.name}".when`,
+        known,
+        "user",
+      );
+    }
+    for (const rule of resolved.rules) {
+      const owner = resolved.rulePluginOwners[rule.name] ?? "plugin";
+      validateWhenClauseKeys(
+        rule.when,
+        `rule "${rule.name}".when`,
+        known,
+        `plugin "${owner}"`,
+      );
+    }
+    for (const exemption of config.exemptions ?? []) {
+      validateWhenClauseKeys(
+        exemption.when,
+        `exemption for rule "${exemption.rule}".when`,
+        known,
+        "user",
+      );
+    }
+    for (const exemption of resolved.exemptions ?? []) {
+      validateWhenClauseKeys(
+        exemption.when,
+        `exemption for rule "${exemption.rule}".when`,
+        known,
+        "plugin",
+      );
+    }
   }
 
   // S3 defense-in-depth for exemption target names (direct-caller
@@ -769,6 +814,11 @@ type CandidateOutcome = ToolCallEventResult | "no-fire" | "overridden";
  * from every catch (loud-block passthrough wins over projection).
  * Evaluation continues with the next rule.
  *
+ * Unknown predicate keys (issue #75) never reach this catch on the
+ * static-config path: `buildEvaluator` rejects them at load via
+ * `validateWhenClauseKeys`, and the dispatcher projects them to
+ * `"unknown"` (fail-closed) instead of throwing.
+ *
  * Why "does not fire" (vs "block" / "abort the whole evaluate"):
  *   - Mirrors the observer-dispatcher's per-observer isolation —
  *     one broken predicate must not poison the rest of the rule list.
@@ -788,9 +838,9 @@ async function runPredicateChain(
   // a missing descriptor is a fail-CLOSED config hole, NOT a buggy
   // predicate — swallowing it here would fail OPEN. Attach rule
   // context and rethrow to `evaluateEvent`'s top catch BEFORE any
-  // warn+project. Deliberately STRONGER than the `UnknownPredicateError`
-  // precedent (isolated to warn+skip per evaluator.test.ts
-  // "isolates an unknown when.<key> throw as 'rule did not fire'").
+  // warn+project. MDE always wins over projection (unknown predicate
+  // keys never reach here on the static-config path — rejected at load
+  // by `validateWhenClauseKeys`, projected fail-closed at runtime).
   // Single hierarchy site shared by the per-clause catches below and
   // the shared backstop catch (issue #118) — MDE always wins,
   // everything else projects. MDE never warns; it blocks loud at the
@@ -1036,8 +1086,8 @@ async function evaluateCandidate(
  *     `onUnknown: "block"` never exempts on unknown; the type-level
  *     ban (`ExemptionWhenClause`) and the load-time rejection
  *     (`validateExemptionWhenClauseShape`) are the other two layers.
- *   - Escapes `evaluateWhen` does not swallow (`UnknownPredicateError`,
- *     `evaluateMissing` shape throws, …) are caught HERE, per
+ *   - Escapes `evaluateWhen` does not swallow (`evaluateMissing`
+ *     shape throws, …) are caught HERE, per
  *     exemption — a throwing exemption predicate = "does not match"
  *     = guard fires. Warn logs label the EXEMPTION, not the target
  *     rule (`Rule "<target>"@<src>` would be misleading).

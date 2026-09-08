@@ -44,22 +44,59 @@
  * `disabledRules: ["no-force-push", "no-main-commit"]`.
  */
 
-import { defineConfig, type PredicateContext } from "@cad0p/pi-steering";
-import gitPlugin from "@cad0p/pi-steering/plugins/git";
+import {
+  defineConfig,
+  definePredicate,
+  type PredicateContext,
+} from "@cad0p/pi-steering";
+import gitPlugin, { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
 
 /**
- * Mirrors the sealed `no-force-push` entries (`git push -h`): one
- * entry per spelling — token matching is exact, so `--force` does
- * not cover `--force-with-lease`. Keep in sync with the plugin rule
- * when the push force surface grows.
+ * Force entries referenced BY VARIABLE from the owning plugin's table
+ * (never hand-built literals in rules). One entry per spelling —
+ * token matching is exact, so `--force` does not cover
+ * `--force-with-lease`. Keep in sync with the plugin rule when the
+ * push force surface grows.
  */
-const FORCE_FLAG_ENTRIES = [
-  { aliases: ["--force"], takesValue: false },
-  { aliases: ["-f"], takesValue: false },
-  { aliases: ["--force-with-lease"], takesValue: false },
-  { aliases: ["--force-if-includes"], takesValue: false },
-  { aliases: ["--mirror"], takesValue: false },
-] as const;
+const { flags: gitFlags } = GIT_CLI_DESCRIPTOR;
+
+/**
+ * Named force-push signal (ADR §13: leaf-inexpressible OR gets a
+ * name, never an inline `condition:` — `condition:` is FORBIDDEN in
+ * examples, CI-pinned). Flag forms ride the derived `hasFlag` over
+ * the table refs above; leading-`+` refspecs (`git push origin
+ * +main`) ride a positional scan (`+main` is a positional, not
+ * flag-shaped, so no `flag:` entry can express it).
+ *
+ * Wired through `requires:` — the first-class PredicateFn slot —
+ * rather than a registered `when:` leaf: single-file examples stay
+ * linear (no inline plugin object, no `declare global` augmentation
+ * for typing), and the const graduates to a registry untouched when
+ * the pack grows into a real plugin (multi-file plugins stay on
+ * registered `when:` leaves — see ../work-item-plugin). The one-line
+ * adapter bridges the arities (`definePredicate` handlers take
+ * `(args, ctx)`; `requires:` takes `(ctx)`).
+ */
+const isForcePushSignal = definePredicate<null>((_args, ctx): boolean => {
+  if (ctx.input.tool !== "bash") return false;
+  if (
+    ctx.command.hasFlag([
+      gitFlags.force,
+      gitFlags.forceShort,
+      gitFlags.forceWithLease,
+      gitFlags.forceIfIncludes,
+      gitFlags.mirror,
+    ])
+  ) {
+    return true;
+  }
+  const args = ctx.input.args;
+  if (!Array.isArray(args)) return false;
+  return args.some((w) => {
+    const v = w?.value ?? "";
+    return v.length > 1 && v[0] === "+" && v[1] !== ":";
+  });
+});
 
 export default defineConfig({
   plugins: [gitPlugin],
@@ -75,18 +112,12 @@ export default defineConfig({
       tool: "bash",
       command: "git",
       // Mirrors the SEALED plugins/git no-force-push routing (issue
-      // #65): `subcommand: "push"` plus the force-signal OR (flag
-      // forms via the facade, leading-`+` refspecs via positional
-      // scan — `+main` is a positional, not flag-shaped).
+      // #65): `subcommand: "push"` plus the named force-signal via
+      // `requires:` (see `isForcePushSignal` above — no `condition:`
+      // in examples, ever).
+      requires: (ctx: PredicateContext) => isForcePushSignal(null, ctx),
       when: {
         subcommand: "push",
-        condition: (ctx: PredicateContext) =>
-          ctx.command.hasFlagOrBundle(FORCE_FLAG_ENTRIES) ||
-          (Array.isArray(ctx.input.args) &&
-            ctx.input.args.some((w) => {
-              const v = w?.value ?? "";
-              return v.length > 1 && v[0] === "+" && v[1] !== ":";
-            })),
       },
       reason:
         "No force pushes of any kind, including --force-with-lease. Create a new commit, or reset + re-commit via a non-force path.",

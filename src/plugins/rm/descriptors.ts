@@ -58,7 +58,7 @@ export const RM_FORCE_FLAG = {
  *
  * The `recursive` + `force` entries (issue #117) back the
  * `no-rm-rf-slash` rule's `hasRecursiveForce` predicate: the
- * predicate matches through the bound facade's `hasFlagOrBundle`
+ * predicate matches through the bound facade's `hasFlag`
  * (entry spellings) with the bound table's glue set (bundle
  * truncation) — an empty `{ flags: {} }` satisfies neither. Both
  * `--help`-pinned, both shared consts with the predicate so table

@@ -664,9 +664,16 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
   };
 
   /**
-   * Escape-hatch predicate for one-off logic. Prefer plugin-registered
-   * predicates when the logic is reusable; use `condition` for
-   * genuinely local checks that don't warrant a plugin.
+   * Escape-hatch predicate for one-off logic. FORBIDDEN in examples
+   * (CI-pinned: no `condition:` key under `examples/`, any depth) —
+   * example rules compose built-in leaves, registered predicates, and
+   * the `requires:` PredicateFn slot instead (see the
+   * `force-push-strict` pack for the blessed `requires:`-wired named
+   * predicate shape). Leaf-inexpressible or reused logic gets a named
+   * `definePredicate` per ADR §13 (precedents: the rm plugin's
+   * `hasRecursiveForce`, the git plugin's `isForcePush`) — a name
+   * carries its own unit tests and a registry entry, an inline
+   * closure carries neither.
    *
    * Throws (sync or rejected promise) are caught and treated as
    * `"unknown"`. Outer-level `condition:` is bare-`PredicateFn`-typed

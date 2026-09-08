@@ -2160,4 +2160,189 @@ describe("leaf/facade agreement (issue #110)", () => {
       false,
     );
   });
+
+  it("leaf↔facade AGREEMENT pin (issue #123 — one scan, re-split impossible)", async () => {
+    // Same argv + same entries through `when.flag` and
+    // `ctx.command.hasFlag` ALWAYS agree — both delegate to the shared
+    // `flagPresenceScan`, so the facade cannot be re-split bundle-blind
+    // without tripping this matrix (including the false/false rows).
+    const rows: {
+      tokens: string[];
+      entry: CLIFlag;
+      basename: string;
+      descriptors: Record<string, CLIDescriptor>;
+    }[] = [
+      // Exact token.
+      {
+        tokens: ["push", "--force"],
+        entry: { aliases: ["--force"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Attached `--flag=value`.
+      {
+        tokens: ["--mirror=x"],
+        entry: { aliases: ["--mirror"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Declared consuming flag skips its value BY POSITION (`-f` is
+      // `-C`'s value here — absent on BOTH sides; the old blind facade
+      // reported present).
+      {
+        tokens: ["-C", "-f"],
+        entry: { aliases: ["-f"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Undeclared-letter bundle: full body present (`-uf` → `-f`).
+      {
+        tokens: ["-uf"],
+        entry: { aliases: ["-f"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Glue truncation: `-Cfoo` presents `C` (glue, takesValue) …
+      {
+        tokens: ["-Cfoo"],
+        entry: { aliases: ["-C"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // … and never what the glue consumed (`f`).
+      {
+        tokens: ["-Cfoo"],
+        entry: { aliases: ["-f"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Longs never bundle-match.
+      {
+        tokens: ["--force"],
+        entry: { aliases: ["-f"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Consuming long skips a flag-shaped value.
+      {
+        tokens: ["--git-dir", "--force"],
+        entry: { aliases: ["--force"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Absent on both sides.
+      {
+        tokens: ["push"],
+        entry: { aliases: ["--force"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // gh glued form through the synthetic table.
+      {
+        tokens: ["-Rfoo"],
+        entry: { aliases: ["-R"], takesValue: true },
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      },
+      {
+        tokens: ["-Rfoo"],
+        entry: { aliases: ["-f"], takesValue: false },
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      },
+    ];
+    for (const { tokens, entry, basename, descriptors } of rows) {
+      const args = tokens.map((t) => w(t));
+      const leaf = await fires({ flag: { anyOf: [entry] } }, args, {
+        basename,
+        descriptors,
+      });
+      const ctx = mockContext({
+        input: { tool: "bash", command: `${basename} …`, basename, args },
+        descriptors,
+      });
+      assert.equal(
+        ctx.command.hasFlag(entry),
+        leaf,
+        `leaf↔facade disagree on [${tokens.join(" ")}] × ${entry.aliases.join("/")}`,
+      );
+    }
+  });
+});
+
+describe("unknown-predicate projection (issue #75 layer 2)", () => {
+  // Defense-in-depth for direct `evaluateWhen` callers (SDK embedders,
+  // tests) that bypass the load-time key check: unregistered keys
+  // project `"unknown"` under the block-level `onUnknown:` policy —
+  // fail-closed in rule mode, no-match in exemption mode — instead of
+  // throwing into catch-and-skip (the old silent fail-open).
+  it("outer unknown key fires under the block default (and warns)", async () => {
+    const warnings: string[] = [];
+    const orig = console.warn;
+    console.warn = (msg?: unknown) => {
+      warnings.push(String(msg));
+    };
+    try {
+      assert.equal(
+        await fires(
+          { totallyMadeUp: true } as unknown as TopLevelWhenClause,
+          [w("push")],
+          { basename: "git", descriptors: GIT_DESCRIPTORS },
+        ),
+        true,
+      );
+      assert.ok(
+        warnings.some((msg) =>
+          /when\.totallyMadeUp names an unregistered predicate/.test(msg),
+        ),
+        `no matching warning in:\n${warnings.join("\n")}`,
+      );
+    } finally {
+      console.warn = orig;
+    }
+  });
+
+  it("outer unknown key skips under onUnknown allow", async () => {
+    assert.equal(
+      await fires(
+        { totallyMadeUp: true } as unknown as TopLevelWhenClause,
+        [w("push")],
+        {
+          basename: "git",
+          descriptors: GIT_DESCRIPTORS,
+          onUnknownDefault: "allow",
+        },
+      ),
+      false,
+    );
+  });
+
+  it("not: { <unknown> } projects without the not-flip", async () => {
+    assert.equal(
+      await fires(
+        { not: { totallyMadeUp: true } } as unknown as TopLevelWhenClause,
+        [w("push")],
+        { basename: "git", descriptors: GIT_DESCRIPTORS },
+      ),
+      true,
+    );
+  });
+
+  it("exemption mode still lands no-match (no S1 regression)", async () => {
+    // The exemption evaluator's ("allow", ignore-explicit) projection
+    // turns the same unknown into no-match → the target guard fires.
+    assert.equal(
+      await fires(
+        { totallyMadeUp: true } as unknown as TopLevelWhenClause,
+        [w("push")],
+        {
+          basename: "git",
+          descriptors: GIT_DESCRIPTORS,
+          onUnknownDefault: "allow",
+          ignoreExplicitModifiers: true,
+        },
+      ),
+      false,
+    );
+  });
 });

@@ -24,7 +24,7 @@
  */
 
 import { defineConfig } from "@cad0p/pi-steering";
-import gitPlugin from "@cad0p/pi-steering/plugins/git";
+import gitPlugin, { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
 import rmPlugin from "@cad0p/pi-steering/plugins/rm";
 
 export default defineConfig({
@@ -41,7 +41,9 @@ export default defineConfig({
       // `--help`-pinned (`git commit -h`).
       when: {
         subcommand: "commit",
-        flag: { anyOf: [{ aliases: ["--amend"], takesValue: false }] },
+        // `--amend` referenced BY VARIABLE from the owning plugin's
+        // table (never a hand-built literal in the rule).
+        flag: { anyOf: [GIT_CLI_DESCRIPTOR.flags.amend] },
       },
       reason:
         "Don't rewrite history with --amend. Create a new commit instead. If you need to fix the last commit's message, do it in a follow-up commit — PR reviewers track diffs across pushes and amend confuses that.",

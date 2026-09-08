@@ -33,6 +33,7 @@ import {
 } from "@cad0p/unbash-walker";
 import type { ResolvedArity } from "../arity.ts";
 import { arityOf, EMPTY_ARITY, resolveDescriptor } from "../arity.ts";
+import { flagPresenceScan } from "../helpers/flags.ts";
 import { isPattern } from "../internal/pattern-utils.ts";
 import type {
   CLIDescriptor,
@@ -341,6 +342,78 @@ function isModifierKey(key: string): boolean {
   return (MODIFIER_KEYS as readonly string[]).includes(key);
 }
 
+/**
+ * Non-registry leaf keys the engine itself dispatches (issue #75
+ * load-time key validation). `not` is the operator field (recursed
+ * into, never flagged); `onUnknown` is a modifier (skipped via
+ * {@link MODIFIER_KEYS}). Everything else must resolve against the
+ * merged predicate registry.
+ */
+const BUILT_IN_LEAF_KEYS: ReadonlySet<string> = new Set([
+  "cwd",
+  "subcommand",
+  "flag",
+  "missing",
+  "condition",
+]);
+
+/**
+ * Load-time unknown-predicate check (issue #75, layer 1 — primary).
+ *
+ * Walks a rule's (or exemption's) `when:` clause — recursing into
+ * `not:` blocks — and throws error-class on the first leaf key that
+ * is neither a built-in ({@link BUILT_IN_LEAF_KEYS} + the `not`
+ * operator, modifiers skipped) nor present in the merged predicate
+ * registry. The diagnostic names the rule path, the key, and the
+ * source layer, with an "install the plugin that provides X" hint —
+ * the twin of the `command:` strict union and the exemption-orphan
+ * error-class precedent: a predicate-key typo can no longer silently
+ * disable a guard (the runtime used to catch-and-skip the throw).
+ *
+ * Runs at config-resolve time (see `buildEvaluator`): inline rules,
+ * plugin-shipped rules, AND exemption clauses go through the same
+ * check. `block` is `undefined` (absent clause) → no-op.
+ *
+ * `known` is the merged registry key set (`Object.keys` of the
+ * resolved predicates); `source` is the owning layer for the hint
+ * (`"user"` for config-authored clauses, `plugin "<name>"` for
+ * shipped ones).
+ */
+export function validateWhenClauseKeys(
+  block: TopLevelWhenClause<string> | undefined,
+  path: string,
+  known: ReadonlySet<string>,
+  source: string,
+): void {
+  if (block === undefined) return;
+  for (const [key, value] of Object.entries(block)) {
+    if (value === undefined) continue;
+    if (isModifierKey(key)) continue;
+    if (key === "not") {
+      if (
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+      ) {
+        validateWhenClauseKeys(
+          value as TopLevelWhenClause<string>,
+          `${path}.not`,
+          known,
+          source,
+        );
+      }
+      continue;
+    }
+    if (BUILT_IN_LEAF_KEYS.has(key)) continue;
+    if (known.has(key)) continue;
+    throw new Error(
+      `[pi-steering] ${path} names unknown predicate "${key}" — ` +
+        `no plugin registered a handler for "when.${key}" in ${source}. ` +
+        `Install the plugin that provides "${key}" (or fix the typo).`,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Pattern / PredicateFn resolution
 // ---------------------------------------------------------------------------
@@ -398,17 +471,21 @@ export async function matchesPatternOrFn(
 // ---------------------------------------------------------------------------
 
 /**
- * Thrown when a {@link TopLevelWhenClause} references a predicate name that no
- * plugin has registered. The error message includes the offending key
+ * Named error for a `when:` clause referencing a predicate name that
+ * no plugin registered. The error message includes the offending key
  * so the source of the typo / missing plugin is clear at the site of
  * the rule.
+ *
+ * Retained as public API for catch-by-type callers; the engine itself
+ * no longer throws it (issue #75): static configs fail at load via
+ * {@link validateWhenClauseKeys} (rule + layer + key + install hint),
+ * and the dispatcher projects unregistered keys to `"unknown"`
+ * fail-closed at runtime instead of throwing into catch-and-skip.
  *
  * Schema-level typo detection doesn't cover this because the
  * `TopLevelWhenClause` mapped-type's index signature is deliberately
  * loose (`unknown`) — per
- * the ADR, plugin predicates can accept arbitrary arg shapes. The
- * trade-off is that we surface the error at evaluation time instead of
- * load time; the key-scoped message keeps that tolerable.
+ * the ADR, plugin predicates can accept arbitrary arg shapes.
  */
 export class UnknownPredicateError extends Error {
   readonly key: string;
@@ -880,84 +957,6 @@ function normalizeFlagLeaf(value: unknown): {
 }
 
 /**
- * Presence scan over the ref's resolved words, shared by the
- * `subcommand`-adjacent flag matching contract (issue #90; #110 entries;
- * #115 derived bundles): exact token matches, attached `--flag=value`
- * forms (no declaration needed — single token by construction),
- * declared consuming-flag values skipped BY POSITION (`i += 2`, never by
- * content), and short bundles — always on for single-char shorts, longs
- * NEVER bundle-match. Bundling derives from the descriptor table via the
- * lead-letter rule: the token's letters scan left to right; the first
- * letter in the derived glue set glues the remainder (only the non-glued
- * prefix is present); undeclared letters never glue (strict-always,
- * fail-closed — the remedy is a table row). `--` itself is a flag-shaped
- * token; post-`--` positionals are unmodelled (walker limitation) and
- * scan as ordinary tokens.
- */
-function flagPresent(
-  args: readonly Word[],
-  anyOf: readonly CLIFlag[],
-  valueConsumingFlags: ReadonlySet<string>,
-  gluedShorts: ReadonlySet<string> = new Set(),
-): boolean {
-  const spellings = new Set<string>();
-  const longs = new Set<string>();
-  const shortLetters = new Set<string>();
-  for (const entry of anyOf) {
-    for (const alias of entry.aliases) {
-      spellings.add(alias);
-      if (alias.startsWith("--")) longs.add(alias);
-      else if (alias.length === 2) shortLetters.add(alias[1]!);
-    }
-  }
-  const consuming = valueConsumingFlags;
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === undefined) continue; // bounds-guard; unreachable while i < length
-    const token = scanWordText(arg);
-    // Exact token match (covers separate-form consuming flags too —
-    // the flag itself IS present; only its value is skipped).
-    if (spellings.has(token)) return true;
-    // Attached `--flag=value`: match the name half against the long
-    // spellings; single token, consumes nothing further.
-    if (token.startsWith("--") && token.includes("=")) {
-      if (longs.has(token.slice(0, token.indexOf("=")))) return true;
-      continue;
-    }
-    // Declared consuming flag: skip its value BY POSITION.
-    if (consuming.has(token)) {
-      i += 1;
-      continue;
-    }
-    // Short bundles (`-uf`), always on for single-char-short aliases
-    // (longs never match here). Glue derivation runs FIRST: the first
-    // letter in the derived glue set glues the remainder, so only the
-    // non-glued prefix is present (`-Rfoo` with `R` declared presents
-    // `R`, never `f`; `-xRfoo` presents `xR`). Undeclared letters never
-    // glue — over-presence fires fail-closed, fixed with a table row.
-    // The token is the same resolved form the rest of the scan uses
-    // (S1), so rawText-only and all-absent words never throw.
-    if (token.length > 1 && token[0] === "-" && token[1] !== "-") {
-      let body = token.slice(1);
-      const eq = body.indexOf("=");
-      if (eq !== -1) body = body.slice(0, eq);
-      let end = body.length;
-      for (let j = 0; j < body.length; j++) {
-        if (gluedShorts.has(body[j]!)) {
-          end = j + 1;
-          break;
-        }
-      }
-      const present = body.slice(0, end);
-      for (const letter of shortLetters) {
-        if (present.includes(letter)) return true;
-      }
-    }
-  }
-  return false;
-}
-
-/**
  * Built-in `when.flag` predicate. Presence scan over `ctx.input.args`
  * (no walker extraction call — positionals and flags scan uniformly).
  * Returns a trinary {@link PredicateVerdict}: `"unknown"` ONLY when
@@ -986,7 +985,7 @@ function evaluateFlag(
       : basename !== undefined
         ? resolveDescriptor(basename, descriptors)
         : EMPTY_ARITY;
-  return flagPresent(
+  return flagPresenceScan(
     args,
     normalized.anyOf,
     arity.valueConsumingFlags,
@@ -1544,9 +1543,25 @@ async function evaluateNotBlock(
       continue;
     }
 
-    // Plugin-registered predicate. Unknown predicate → named error.
+    // Plugin-registered predicate. Unregistered keys (issue #75 layer
+    // 2, defense-in-depth) project `"unknown"` under the block-level
+    // `onUnknown:` policy instead of throwing — consistent with
+    // handler-throws, so a rule with an unknown key fails CLOSED
+    // (fires) rather than silently disappearing down the per-rule
+    // catch-and-skip. Unreachable for static configs once the
+    // load-time key check exists; still warns loudly so the missing
+    // plugin surfaces in logs.
     const handler = predicates[key];
-    if (handler === undefined) throw new UnknownPredicateError(key);
+    if (handler === undefined) {
+      console.warn(
+        `[pi-steering] Rule "${ruleName}"@${source}: when.${key} names ` +
+          `an unregistered predicate — projecting "unknown" (fail-closed ` +
+          `under the block-level onUnknown policy). Install the plugin ` +
+          `that provides "${key}" (or fix the typo).`,
+      );
+      verdicts.push("unknown");
+      continue;
+    }
     verdicts.push(
       await evaluateLeafTrinary(handler, value, ctx, ruleName, source, key),
     );
@@ -1641,10 +1656,12 @@ async function evaluateNotBlock(
  * explicit modifiers stay honored exactly as before (rule-path
  * behavior is byte-identical).
  *
- * Escapes `evaluateWhen` does NOT swallow (`UnknownPredicateError`,
- * `evaluateMissing` shape throws, …) propagate to the caller — the
- * exemption call site in the evaluator wraps the whole clause in its
- * own try/catch and treats a throw as "does not match" (S1).
+ * Escapes `evaluateWhen` does NOT swallow (`evaluateMissing` shape
+ * throws, …) propagate to the caller — the exemption call site in the
+ * evaluator wraps the whole clause in its own try/catch and treats a
+ * throw as "does not match" (S1). Unregistered predicate keys are NOT
+ * escapes anymore (issue #75): they project `"unknown"` inline,
+ * fail-closed in rule mode, no-match in exemption mode.
  */
 export async function evaluateWhen(
   when: TopLevelWhenClause<string> | undefined,
@@ -1789,8 +1806,31 @@ export async function evaluateWhen(
 
     // Plugin-registered predicate. Trinary leaf adapter awaits, narrows,
     // catches throws, then leaf-level `onUnknown:` projects to boolean.
+    // Unregistered keys (issue #75 layer 2, defense-in-depth) project
+    // `"unknown"` under the applicable `onUnknown:` policy instead of
+    // throwing — consistent with handler-throws, so a rule with an
+    // unknown key fails CLOSED in rule mode (fires) rather than
+    // silently disappearing down the per-rule catch-and-skip.
+    // Exemption mode (`onUnknownDefault: "allow"`) projects to
+    // no-match, so the guard still fires (no S1 regression). Warns
+    // loudly either way so the missing plugin surfaces in logs.
     const handler = predicates[key];
-    if (handler === undefined) throw new UnknownPredicateError(key);
+    if (handler === undefined) {
+      console.warn(
+        `[pi-steering] Rule "${ruleName}"@${source}: when.${key} names ` +
+          `an unregistered predicate — projecting "unknown" (fail-closed ` +
+          `under the block-level onUnknown policy). Install the plugin ` +
+          `that provides "${key}" (or fix the typo).`,
+      );
+      const unknownVerdict: PredicateVerdict = "unknown";
+      const onUnknown = readLeafOnUnknown(
+        value,
+        onUnknownDefault,
+        ignoreExplicitModifiers,
+      );
+      if (!projectVerdict(unknownVerdict, onUnknown)) return false;
+      continue;
+    }
     const verdict = await evaluateLeafTrinary(
       handler,
       value,

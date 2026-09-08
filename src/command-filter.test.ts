@@ -538,3 +538,119 @@ const EXPECTED_PATTERN_HITS: readonly string[] = [
   'src/plugins/git/rules/no-main-commit.ts :: *   `when: { branch: { pattern: /.../, onUnknown: "allow" } }`',
   "src/plugins/git/rules/no-main-commit.ts :: // old `GIT_COMMIT_PATTERN` anchor, deleted with bash `pattern:`).",
 ];
+
+describe("zero-literal pins (issue #123)", () => {
+  const repoRoot = join(dirname(new URL(import.meta.url).pathname), "..");
+  // Repo-wide scan (broader than the §7 SURFACE above): every code +
+  // docs + tests file. Skips build output, deps, vcs, and this pin
+  // file itself (it names the deleted shape in its own scanner +
+  // allowlists).
+  function scanRepo(re: RegExp): string[] {
+    const out: string[] = [];
+    const visit = (abs: string, rel: string): void => {
+      const st = statSync(abs);
+      if (st.isDirectory()) {
+        const base = abs.split("/").pop() ?? "";
+        if (base === "node_modules" || base === "dist" || base === ".git") {
+          return;
+        }
+        for (const entry of readdirSync(abs)) {
+          visit(join(abs, entry), rel === "" ? entry : `${rel}/${entry}`);
+        }
+        return;
+      }
+      if (rel === "src/command-filter.test.ts") return;
+      if (!/\.(ts|mts|cts|js|mjs|cjs|md|json)$/.test(abs)) return;
+      const text = readFileSync(abs, "utf8");
+      for (const line of text.split("\n")) {
+        if (re.test(line)) out.push(`${rel} :: ${line.trim()}`);
+      }
+    };
+    visit(repoRoot, "");
+    return [...new Set(out)].sort();
+  }
+
+  it("the bundle-only facade twin is fully deleted (zero hits repo-wide)", () => {
+    // Interface entry, impl, TSDoc, re-exports, call sites, pins,
+    // docs — any resurrection fails here. Note: the name is spelled
+    // only in this scanner's regex, and this file is skipped above.
+    assert.deepEqual(scanRepo(/hasFlagOrBundle/), []);
+  });
+
+  it("condition: never appears in examples (named predicates only)", () => {
+    // `condition:` is an escape hatch and MUST NOT appear in examples
+    // (copy-paste-true docs): leaf-inexpressible logic gets a named
+    // `definePredicate` wired through `requires:` (see the
+    // force-push-strict pack) or a registered `when:` leaf (see the
+    // work-item-plugin). Key-shaped matches only (`^\s*condition\s*:`)
+    // so prose mentions in comments/docs never trip the pin.
+    const out: string[] = [];
+    const visit = (abs: string, rel: string): void => {
+      const st = statSync(abs);
+      if (st.isDirectory()) {
+        const base = abs.split("/").pop() ?? "";
+        if (base === "node_modules" || base === ".git") return;
+        for (const entry of readdirSync(abs)) {
+          visit(join(abs, entry), rel === "" ? entry : `${rel}/${entry}`);
+        }
+        return;
+      }
+      if (!/\.(ts|mts|cts|js|mjs|cjs|md|json)$/.test(abs)) return;
+      const text = readFileSync(abs, "utf8");
+      for (const line of text.split("\n")) {
+        if (/^[ \t]*condition\s*:/.test(line)) {
+          out.push(`${rel} :: ${line.trim()}`);
+        }
+      }
+    };
+    visit(join(repoRoot, "examples"), "examples");
+    assert.deepEqual([...new Set(out)].sort(), []);
+  });
+
+  it("flag literals live only in tables, mechanism, docs-tables, or tests", () => {
+    // Doctrine (README dependency rule): production rules + examples
+    // reference entries BY VARIABLE from a declared table — never
+    // hand-build literals in leaves. A duplicated literal can skew
+    // from the table into silent fail-open. Allowed:
+    //   - `**/descriptors.ts` (owning-plugin tables),
+    //   - `*Facts` / `*flags` table declarations (synthetic example
+    //     facts — one declaration feeding both `cliDescriptors` and
+    //     the leaf references; enumerated line-by-line below so a
+    //     leaf literal in the same files still trips),
+    //   - core mechanism (`flags.ts` / `command.ts` adapters, schema,
+    //     arity derivation, merger normalization),
+    //   - test mechanics (`*.test.*` build entries freely),
+    //   - the README's inline-table prose (a table declaration, not
+    //     a rule leaf).
+    const hits = scanRepo(/aliases:/);
+    const PATH_ALLOW: readonly (string | RegExp)[] = [
+      /\.test\.[mc]?[tj]s$/,
+      /(^|\/)descriptors\.ts$/,
+      "src/helpers/flags.ts",
+      "src/helpers/command.ts",
+      "src/schema.ts",
+      "src/arity.ts",
+      "src/plugin-merger.ts",
+    ];
+    const LINE_ALLOW: ReadonlySet<string> = new Set([
+      'examples/draft-prs-only/steering.ts :: draft: { aliases: ["--draft"], takesValue: false },',
+      'examples/draft-prs-only/steering.ts :: repo: { aliases: ["-R", "--repo"], takesValue: true },',
+      'examples/combined-git-discipline/steering.ts :: draft: { aliases: ["--draft"], takesValue: false },',
+      'examples/combined-git-discipline/steering.ts :: repo: { aliases: ["-R", "--repo"], takesValue: true },',
+      'examples/dynamic-reason-runtime-cwd/steering.ts :: prefix: { aliases: ["--prefix"], takesValue: true },',
+      'README.md :: Bound arity is table-bound with no per-call opts (#110): the engine binds each ref\'s `arityOf(basename, descriptors, cache)` into `ctx.command`, so `getFlagValue` / `getAllFlagValues` / `positionals()` share one consumption source and cannot diverge. Unlisted flags never consume (strict always); attached `--flag=value` forms always apply; glued `-X<rest>` applies iff X derives from the table. `positionals()` is `--`-aware (everything after a bare `--` surfaces verbatim) while `when.flag` still scans post-`--` tokens as present (walker limitation, unchanged). No descriptor for the ref\'s basename → `MissingDescriptorError` block (loud); obscure binaries with no owning plugin declare via an inline plugin literal `plugins: [{ name: "my-facts", cliDescriptors: { mycli: { flags: { repo: { aliases: ["-R"], takesValue: true } } } } }]` — or `{ mycli: {} }` for explicit strict.',
+    ]);
+    const unexpected = hits.filter((hit) => {
+      const rel = hit.split(" :: ")[0] ?? "";
+      if (
+        PATH_ALLOW.some((p) =>
+          typeof p === "string" ? rel === p : p.test(rel),
+        )
+      ) {
+        return false;
+      }
+      return !LINE_ALLOW.has(hit);
+    });
+    assert.deepEqual(unexpected, []);
+  });
+});

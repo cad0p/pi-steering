@@ -10,8 +10,7 @@
  * condition): if a case flips vs. its old expectation, the routing
  * drifted during the migration. The one deliberate behavior change is
  * `--force-bar` (unknown `--force-*` suffixes no longer block —
- * token-exact matching; see the rule's `FORCE_PUSH_FLAG_ENTRIES`
- * docs).
+ * token-exact matching; see the rule's table-reference docs).
  */
 
 import assert from "node:assert/strict";
@@ -25,16 +24,21 @@ import { buildEvaluator } from "../../../evaluator.ts";
 import { resolvePlugins } from "../../../plugin-merger.ts";
 import type { Plugin, Rule } from "../../../schema.ts";
 import { GIT_CLI_DESCRIPTOR } from "../descriptors.ts";
-import { FORCE_PUSH_FLAG_ENTRIES, noForcePush } from "./no-force-push.ts";
+import { isForcePush } from "../predicates/is-force-push.ts";
+import { noForcePush } from "./no-force-push.ts";
 
 /**
  * Minimal facts plugin: the real git descriptor table without the
  * plugin's predicates / trackers, so these suites pin the rule's own
- * routing (not the git plugin's exec-backed predicates).
+ * routing (not the git plugin's exec-backed predicates) — plus the
+ * `isForcePush` predicate the rule's `when:` names (shipped rule +
+ * shipped predicate travel together; the load-time key check pins
+ * the pairing).
  */
 const gitFacts = {
   name: "git-facts",
   cliDescriptors: { git: GIT_CLI_DESCRIPTOR },
+  predicates: { isForcePush },
 } as const satisfies Plugin;
 
 function bashEvent(command: string): BashToolCallEvent {
@@ -59,19 +63,30 @@ async function blocks(command: string): Promise<boolean> {
 }
 
 describe("rules/no-force-push: routing shape", () => {
-  it("routes on command git + subcommand push + force-signal condition", () => {
+  it("routes on command git + subcommand push + registered isForcePush leaf", () => {
     assert.equal(noForcePush.command, "git");
     const when = noForcePush.when as {
       subcommand?: unknown;
-      condition?: unknown;
+      isForcePush?: unknown;
     };
     assert.equal(when.subcommand, "push");
-    assert.equal(typeof when.condition, "function");
+    // Nullary registered predicate (ADR §13) — never an inline
+    // `condition:` (banned by the examples pin; shipped rules name
+    // the concept too).
+    assert.equal(when.isForcePush, true);
+    assert.ok(!("condition" in (noForcePush.when as object)));
   });
 
-  it("force entries are --help-pinned token-exact spellings", () => {
+  it("force entries are --help-pinned token-exact spellings (table-owned)", () => {
+    const { flags: gitFlags } = GIT_CLI_DESCRIPTOR;
     assert.deepEqual(
-      FORCE_PUSH_FLAG_ENTRIES.map((e) => e.aliases),
+      [
+        gitFlags.force,
+        gitFlags.forceShort,
+        gitFlags.forceWithLease,
+        gitFlags.forceIfIncludes,
+        gitFlags.mirror,
+      ].map((e) => e.aliases),
       [
         ["--force"],
         ["-f"],

@@ -29,15 +29,21 @@ import rmPlugin from "@cad0p/pi-steering/plugins/rm";
 
 /**
  * Minimal synthetic `gh` facts (placeholder for pi-steering-github#61).
+ *
+ * One declaration, two uses: the `ghFlags` table feeds
+ * `cliDescriptors` below AND the `flag:` leaf references its entry by
+ * variable (never hand-built literals in rules).
  */
+const ghFlags = {
+  draft: { aliases: ["--draft"], takesValue: false },
+  repo: { aliases: ["-R", "--repo"], takesValue: true },
+} as const;
+
 const ghFacts = {
   name: "gh-facts",
   cliDescriptors: {
     gh: {
-      flags: {
-        draft: { aliases: ["--draft"], takesValue: false },
-        repo: { aliases: ["-R", "--repo"], takesValue: true },
-      },
+      flags: ghFlags,
     },
   },
 } as const satisfies Plugin;
@@ -58,7 +64,7 @@ export default defineConfig({
       when: {
         subcommand: { pattern: ["pr", "create"], depth: 2 },
         not: {
-          flag: { anyOf: [{ aliases: ["--draft"], takesValue: false }] },
+          flag: { anyOf: [ghFlags.draft] },
         },
       },
       reason:

@@ -12,6 +12,7 @@
  */
 
 import type { Rule } from "../../../schema.ts";
+import { GIT_CLI_DESCRIPTOR } from "../descriptors.ts";
 
 /**
  * `no-hard-reset` - block `git reset --hard` in any form.
@@ -27,7 +28,10 @@ export const noHardReset = {
   // (`git reset -h`: `--hard`: reset HEAD, index and working tree).
   when: {
     subcommand: "reset",
-    flag: { anyOf: [{ aliases: ["--hard"], takesValue: false }] },
+    // `--hard` referenced BY VARIABLE from the owning plugin's table
+    // (never a hand-built literal in the rule — a duplicated literal
+    // can skew from the table into silent fail-open).
+    flag: { anyOf: [GIT_CLI_DESCRIPTOR.flags.hard] },
   },
   reason:
     "Hard reset discards uncommitted changes permanently. Use `git stash` to save work first, or `git reset --soft` to keep changes staged.",

@@ -591,9 +591,10 @@ describe("zero-literal pins (issue #123)", () => {
   it("condition: never appears in examples (named predicates only)", () => {
     // `condition:` is an escape hatch and MUST NOT appear in examples
     // (copy-paste-true docs): leaf-inexpressible logic gets a named
-    // `definePredicate` wired through `requires:` (see the
-    // force-push-strict pack) or a registered `when:` leaf (see the
-    // work-item-plugin). Key-shaped matches only (`^\s*condition\s*:`)
+    // `definePredicate` registered on an inline plugin literal and
+    // consumed as a `when:` leaf (see the force-push-strict pack) or
+    // a multi-file plugin (see the work-item-plugin). Key-shaped
+    // matches only (`^\s*condition\s*:`)
     // so prose mentions in comments/docs never trip the pin.
     const out: string[] = [];
     const visit = (abs: string, rel: string): void => {
@@ -610,6 +611,56 @@ describe("zero-literal pins (issue #123)", () => {
       const text = readFileSync(abs, "utf8");
       for (const line of text.split("\n")) {
         if (/^[ \t]*condition\s*:/.test(line)) {
+          out.push(`${rel} :: ${line.trim()}`);
+        }
+      }
+    };
+    visit(join(repoRoot, "examples"), "examples");
+    assert.deepEqual([...new Set(out)].sort(), []);
+  });
+
+  it("requires:/unless: never take functions in examples (registered leaves only)", () => {
+    // Named logic belongs in the registry — even at single-file
+    // scale (see the force-push-strict pack's inline plugin
+    // literal): function-valued `requires:` / `unless:` in examples
+    // is an antipattern (a name carries unit tests + a registry
+    // entry; an inline closure carries neither). The fn slots stay
+    // one-off escape hatches for real configs; `requires:` /
+    // `unless:` Pattern STRING forms stay allowed (transient until
+    // the gh table lands). Key-shaped matches whose same-line value
+    // (or the next non-empty line, for wrapped values) starts with a
+    // quote, backtick, or `/` are the surviving Pattern forms —
+    // anything else (arrow, `async`, `function`, bare identifier)
+    // fails the pin.
+    const out: string[] = [];
+    const visit = (abs: string, rel: string): void => {
+      const st = statSync(abs);
+      if (st.isDirectory()) {
+        const base = abs.split("/").pop() ?? "";
+        if (base === "node_modules" || base === ".git") return;
+        for (const entry of readdirSync(abs)) {
+          visit(join(abs, entry), rel === "" ? entry : `${rel}/${entry}`);
+        }
+        return;
+      }
+      if (!/\.(ts|mts|cts|js|mjs|cjs|md|json)$/.test(abs)) return;
+      const lines = readFileSync(abs, "utf8").split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i] ?? "";
+        const m = /^[ \t]*(requires|unless)[ \t]*:(.*)$/.exec(line);
+        if (!m) continue;
+        let value = (m[2] ?? "").trim();
+        // Comment-only remainder (`requires: // ...`) carries no
+        // value — fall through to the next non-empty line.
+        if (value === "" || value.startsWith("//")) {
+          let j = i + 1;
+          while (j < lines.length && (lines[j] ?? "").trim() === "") j++;
+          value = (lines[j] ?? "").trim();
+        }
+        // Strip a leading comment then re-check: `requires: /* x */ fn`
+        // stays a violation (first non-comment char decides).
+        value = value.replace(/^(\/\/.*|\/\*[\s\S]*?\*\/)/, "").trim();
+        if (!/^["'`/]/.test(value)) {
           out.push(`${rel} :: ${line.trim()}`);
         }
       }

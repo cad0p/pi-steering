@@ -22,12 +22,13 @@
  *
  * Shape:
  *
- *   - `plugins: [gitPlugin]` declares the shipping plugin — since
- *     issue #72 nothing is engine-injected, so the rules only exist
- *     if the plugin is declared (and its names only typo-check if it
- *     is). The declaration also supplies the git CLI facts the
- *     replacement rule's `subcommand:` / `flag:` leaves resolve
- *     against.
+ *   - `plugins: [gitPlugin, forcePushSignalPlugin]` declares the
+ *     shipping plugin (since issue #72 nothing is engine-injected, so
+ *     the rules only exist if the plugin is declared — and its names
+ *     only typo-check if it is; the declaration also supplies the git
+ *     CLI facts the replacement rule's `subcommand:` leaf resolves
+ *     against) plus the inline single-predicate plugin that registers
+ *     the replacement rule's named force signal below.
  *   - `disabledRules: ["no-force-push"]` drops the plugin's rule so
  *     ours owns the block message (otherwise its message would win
  *     on `git push --force`).
@@ -47,7 +48,8 @@
 import {
   defineConfig,
   definePredicate,
-  type PredicateContext,
+  type Plugin,
+  type PredicateShape,
 } from "@cad0p/pi-steering";
 import gitPlugin, { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
 
@@ -60,46 +62,76 @@ import gitPlugin, { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
  */
 const { flags: gitFlags } = GIT_CLI_DESCRIPTOR;
 
+declare global {
+  /**
+   * This pack's typed-predicate registry: one named signal consumed
+   * via `when.isForcePushSignal` below. Single-file examples still
+   * register (inline plugin literal, no `requires:` workaround) —
+   * reusable/named logic belongs in the registry per ADR §13; the
+   * `requires:` / `condition:` fn slots are one-off escape hatches
+   * only, and `condition:` is FORBIDDEN in examples (CI-pinned).
+   */
+  interface PiSteeringPredicates {
+    isForcePushSignal: PredicateShape<boolean>;
+  }
+}
+
 /**
  * Named force-push signal (ADR §13: leaf-inexpressible OR gets a
- * name, never an inline `condition:` — `condition:` is FORBIDDEN in
- * examples, CI-pinned). Flag forms ride the derived `hasFlag` over
- * the table refs above; leading-`+` refspecs (`git push origin
- * +main`) ride a positional scan (`+main` is a positional, not
- * flag-shaped, so no `flag:` entry can express it).
+ * name, never an inline `condition:`). Flag forms ride the derived
+ * `hasFlag` over the table refs above; leading-`+` refspecs
+ * (`git push origin +main`) ride a positional scan (`+main` is a
+ * positional, not flag-shaped, so no `flag:` entry can express it).
  *
- * Wired through `requires:` — the first-class PredicateFn slot —
- * rather than a registered `when:` leaf: single-file examples stay
- * linear (no inline plugin object, no `declare global` augmentation
- * for typing), and the const graduates to a registry untouched when
- * the pack grows into a real plugin (multi-file plugins stay on
- * registered `when:` leaves — see ../work-item-plugin). The one-line
- * adapter bridges the arities (`definePredicate` handlers take
- * `(args, ctx)`; `requires:` takes `(ctx)`).
+ * A REGISTERED `when:` leaf (via the inline `forcePushSignalPlugin`
+ * below), alongside `subcommand: "push"` — not a `requires:`-wired
+ * closure. A name carries its own unit tests and a registry entry;
+ * an inline closure carries neither.
  */
-const isForcePushSignal = definePredicate<null>((_args, ctx): boolean => {
+const isForcePushSignal = definePredicate<
+  boolean | { value: boolean; onUnknown?: "allow" | "block" }
+>((args, ctx) => {
+  // Bare (`true` / `false`) or spread (`{ value, onUnknown? }`)
+  // boolean-leaf shapes; malformed → false (fail-closed contract
+  // mirrored from the git plugin's `isForcePush`).
+  const expected =
+    typeof args === "boolean"
+      ? args
+      : args !== null && typeof args === "object"
+        ? (args as { value?: unknown }).value
+        : undefined;
+  if (typeof expected !== "boolean") return false;
   if (ctx.input.tool !== "bash") return false;
-  if (
+  const words = ctx.input.args;
+  if (!Array.isArray(words)) return false;
+  const signal =
     ctx.command.hasFlag([
       gitFlags.force,
       gitFlags.forceShort,
       gitFlags.forceWithLease,
       gitFlags.forceIfIncludes,
       gitFlags.mirror,
-    ])
-  ) {
-    return true;
-  }
-  const args = ctx.input.args;
-  if (!Array.isArray(args)) return false;
-  return args.some((w) => {
-    const v = w?.value ?? "";
-    return v.length > 1 && v[0] === "+" && v[1] !== ":";
-  });
+    ]) ||
+    words.some((w) => {
+      const v = w?.value ?? "";
+      return v.length > 1 && v[0] === "+" && v[1] !== ":";
+    });
+  return signal === expected;
 });
 
+/**
+ * Inline single-predicate plugin registering `isForcePushSignal`
+ * under `when.isForcePushSignal`. Same doctrine as multi-file
+ * plugins (see ../work-item-plugin) at single-file scale: declare,
+ * register, consume by name.
+ */
+const forcePushSignalPlugin = {
+  name: "force-push-signal",
+  predicates: { isForcePushSignal },
+} as const satisfies Plugin;
+
 export default defineConfig({
-  plugins: [gitPlugin],
+  plugins: [gitPlugin, forcePushSignalPlugin],
   // Disable-and-replace idiom (kept as a reference): drop the plugin's
   // shipped rule so our custom rule owns the block-reason message.
   // Since issue #65 that rule is already strict — you only need this
@@ -112,19 +144,12 @@ export default defineConfig({
       tool: "bash",
       command: "git",
       // Mirrors the SEALED plugins/git no-force-push routing (issue
-      // #65): `subcommand: "push"` plus the named force-signal via
-      // `requires:` (see `isForcePushSignal` above — no `condition:`
-      // in examples, ever).
-      // Unknown-safe coercion (NOT `=== true`): the engine's
-      // requires-throw contract treats unknown as SATISFIED so the
-      // remaining gates still run fail-closed — `!== false` preserves
-      // exactly that (unknown → rest evaluated → push + unknown-signal
-      // still blocks via `when.subcommand`); `=== true` would map
-      // unknown → rule skipped (fail-OPEN, wrong direction).
-      requires: (ctx: PredicateContext) =>
-        isForcePushSignal(null, ctx) !== false,
+      // #65): `subcommand: "push"` plus the registered
+      // `isForcePushSignal` leaf (see above — no `requires:`, no
+      // `condition:` in examples, ever).
       when: {
         subcommand: "push",
+        isForcePushSignal: true,
       },
       reason:
         "No force pushes of any kind, including --force-with-lease. Create a new commit, or reset + re-commit via a non-force path.",

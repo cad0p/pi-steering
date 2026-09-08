@@ -13,6 +13,11 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import {
+  expectAllows,
+  expectBlocks,
+  loadHarness,
+} from "@cad0p/pi-steering/testing";
 import config from "./steering.ts";
 
 describe("example: force-push-strict", () => {
@@ -47,5 +52,36 @@ describe("example: force-push-strict", () => {
       typeof strict!.reason === "string" && strict!.reason.length > 0,
       "reason should be a non-empty string",
     );
+  });
+
+  it("strict rule routes via registered when: leaves (no requires:/unless: fn slots)", () => {
+    // Doctrinal shape: the named force signal is a REGISTERED
+    // predicate consumed by name alongside `subcommand:` — function-
+    // valued `requires:` / `unless:` are an antipattern in examples
+    // (CI-pinned repo-wide); `requires:` / `unless:` Pattern string
+    // forms stay allowed.
+    const strict = config.rules!.find((r) => r.name === "no-force-push-strict");
+    assert.ok(strict, "no-force-push-strict not found");
+    assert.deepEqual(strict!.when, {
+      subcommand: "push",
+      isForcePushSignal: true,
+    });
+    assert.ok(!("requires" in strict!), "requires: slot must be absent");
+    assert.ok(!("unless" in strict!), "unless: slot must be absent");
+  });
+
+  it("blocks git push --force, allows a plain push", async () => {
+    const h = loadHarness({ config });
+    await expectBlocks(
+      h,
+      { command: "git push --force" },
+      { rule: "no-force-push-strict" },
+    );
+    await expectBlocks(
+      h,
+      { command: "git push origin +main" },
+      { rule: "no-force-push-strict" },
+    );
+    await expectAllows(h, { command: "git push origin main" });
   });
 });

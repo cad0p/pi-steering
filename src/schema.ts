@@ -671,10 +671,9 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
   /**
    * Escape-hatch predicate for one-off logic. FORBIDDEN in examples
    * (CI-pinned: no `condition:` key under `examples/`, any depth) —
-   * example rules compose built-in leaves, registered predicates, and
-   * the `requires:` PredicateFn slot instead (see the
-   * `force-push-strict` pack for the blessed `requires:`-wired named
-   * predicate shape). Leaf-inexpressible or reused logic gets a named
+   * example rules compose built-in leaves and registered predicates
+   * instead (see the `force-push-strict` pack for the blessed
+   * inline-plugin registered-predicate shape). Leaf-inexpressible or reused logic gets a named
    * `definePredicate` per ADR §13 (precedents: the rm plugin's
    * `hasRecursiveForce`, the git plugin's `isForcePush`) — a name
    * carries its own unit tests and a registry entry, an inline

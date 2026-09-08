@@ -88,19 +88,23 @@ Create `.pi/steering/index.ts` at your project root:
 
 ```ts
 import { defineConfig } from "@cad0p/pi-steering";
+import gitPlugin from "@cad0p/pi-steering/plugins/git";
 
 export default defineConfig({
+  // The git plugin declares git's argv facts (which flags consume
+  // values, which shorts glue) — the `command:` union below only
+  // accepts declared basenames, so the plugin must be listed for
+  // `command: "git"` to typecheck.
+  plugins: [gitPlugin],
   rules: [
     {
       name: "no-force-push",
       tool: "bash",
-      field: "command",
-      // `\b` after `--force` is enough to catch `--force-with-lease`
-      // too: `-` is a non-word character, so a word boundary sits
-      // between `e` and `-`. The shipped plugin rule goes further —
-      // it also blocks bundled short flags (`-uf`), leading-`+`
-      // refspecs (`git push origin +main`), and `--mirror`.
-      pattern: /^git\s+push.*--force\b/,
+      command: "git",
+      when: {
+        subcommand: "push",
+        flag: { anyOf: [{ aliases: ["--force"], takesValue: false }] },
+      },
       reason:
         "Force pushes rewrite remote history. Create a new commit instead, or ask the user to run one manually.",
     },
@@ -111,24 +115,23 @@ export default defineConfig({
 With this config:
 
 - `git push --force`, `sh -c 'git push --force'`, and `cd /repo && git push --force` all block via your rule.
-- `git push --force-with-lease` is blocked too once you declare the git plugin — its sealed `no-force-push` rule treats every history-rewrite form as unsafe (see [Defaults](#defaults) below).
-- `git commit` on `main` / `master` / `mainline` / `trunk` blocks via the git plugin's `no-main-commit` rule (opt-in — declare `plugins: [gitPlugin]`, see [Defaults](#defaults) below).
-- `echo 'git push --force'` correctly does not block — the AST extraction anchors patterns on real command refs, not substrings of arguments.
+- `git push --force-with-lease` is blocked too once you rely on the git plugin's sealed `no-force-push` rule instead of the sketch above — it treats every history-rewrite form as unsafe (bundled shorts like `-uf`, leading-`+` refspecs like `git push origin +main`, `--mirror`; see [Defaults](#defaults) below).
+- `git commit` on `main` / `master` / `mainline` / `trunk` blocks via the git plugin's `no-main-commit` rule (already declared above — see [Defaults](#defaults) below).
+- `echo 'git push --force'` correctly does not block — routing is exact basename equality on real command refs, not substrings of arguments.
 
 ## Defaults
 
 **There are none.** Since issue [#72](https://github.com/cad0p/pi-steering/issues/72), the package ships no implicit rules or plugins: a fresh config loads with ZERO active rails, and every guard on your session is something you declared. Protection is explicit, visible, and `pi-steering list`-truthful.
 
-The four safety rails that used to be engine-injected now live in domain plugins, one declaration each:
+The two safety rails that used to be engine-injected now live in domain plugins, one declaration each:
 
 ```ts
 import { defineConfig } from "@cad0p/pi-steering";
 import gitPlugin from "@cad0p/pi-steering/plugins/git";
 import rmPlugin from "@cad0p/pi-steering/plugins/rm";
-import asyncPlugin from "@cad0p/pi-steering/plugins/async";
 
 export default defineConfig({
-  plugins: [gitPlugin, rmPlugin, asyncPlugin],
+  plugins: [gitPlugin, rmPlugin],
 });
 ```
 
@@ -136,7 +139,8 @@ What each plugin ships:
 
 - **[git](./src/plugins/git/README.md)** — `no-force-push` and `no-hard-reset` (the destructive-git rails; `no-force-push` is sealed per issue [#65](https://github.com/cad0p/pi-steering/issues/65): it blocks every remote-history-rewrite form — `--force`, `--force-with-lease`, `--force-if-includes`, bundled shorts like `-uf`, leading-`+` refspecs like `git push origin +main`, and `--mirror`), plus the non-overridable `no-main-commit` / `no-main-commit-github` pair (issue #79), the `branch` / `upstream` / `commitsAhead` / `hasStagedChanges` / `isClean` / `remote` predicates, the branch tracker, and the `cwd.git` tracker extension.
 - **rm** — `no-rm-rf-slash`, the recursive-force-delete-from-root guard. Non-overridable (`noOverride: true`).
-- **async** — `no-long-running-commands`, the dev-server / watcher availability guard. Override-comment eligible like `no-force-push`.
+
+The deleted `async` plugin's `no-long-running-commands` availability rail has no honest home yet (its CLI tables were never verified — see the restoration follow-up, issue [#120](https://github.com/cad0p/pi-steering/issues/120)).
 
 Declaring a plugin is also what feeds its rule / plugin names into `defineConfig`'s generics for typo-checking on `disabledRules` / `disabledPlugins` — an undeclared plugin's names are NOT in the inferred union, so a stale disable entry is a compile error instead of a silent no-op. Runtime registration and type-level visibility cannot diverge.
 
@@ -229,8 +233,10 @@ User prompt sent to pi.
         walkerState     = { cwd, branch, …, events }  (all trackers +
                           synthesized events under the reserved `events` key)
         agentLoopIndex  = N+1
-   f. Test rule.pattern / requires / unless against ref.text.
-      Run when.cwd / when.branch / when.missing / plugin predicates.
+   f. Route bash rules by exact `command:` basename equality;
+      test write/edit rule.pattern / requires / unless against
+      their target. Run when.cwd / when.branch / when.missing /
+      plugin predicates.
       `when.missing` merges real entries (ctx.findEntries) with
       synthesized speculative ones (walkerState.events) by timestamp
       — one unified latest-entry comparison.
@@ -270,10 +276,13 @@ The important bits worth stressing:
 interface Rule {
   name: string;                                 // unique; shown in block reason
   tool: "bash" | "write" | "edit";
-  field: "command" | "path" | "content";        // which input field pattern tests
-  pattern: string | RegExp;                     // main match
-  requires?: Pattern | PredicateFn;             // AND extra
-  unless?: Pattern | PredicateFn;               // exemption
+  // Bash rules route on the command: first filter (no field/pattern):
+  command?: Basename | readonly Basename[];    // bash only — required, exact basename equality
+  // Write/edit rules match with field + pattern (untouched):
+  field?: "path" | "content";                 // write/edit only — which input field pattern tests
+  pattern?: string | RegExp;                    // write/edit only — main match
+  requires?: Pattern | PredicateFn;             // AND extra (transient — see retirement note below)
+  unless?: Pattern | PredicateFn;               // exemption (transient — see retirement note below)
   when?: TopLevelWhenClause;                   // composable predicates
   reason: string | ReasonFn;                    // message (or fn) to the agent
   noOverride?: boolean;                         // default: true (fail-closed)
@@ -285,15 +294,20 @@ interface Rule {
 type ReasonFn = (ctx: PredicateContext) => string | Promise<string>;
 ```
 
-The **pattern** tests against the flattened `basename + " " + args.join(" ")` of each extracted command ref (bash). Anchor with `^` so substrings of arguments don't accidentally match. For write/edit, the pattern tests `path` or `content` directly.
+Bash rules carry NO `field` / `pattern` — routing is the required `command:` first filter: exact basename equality against each extracted command ref (`command: "git"` matches `git`, `sh -c 'git push'`, `/usr/bin/git`, and `git -C /x push`; `echo 'git push'` has basename `echo` and never matches). One basename per entry — `command: "git commit"` is illegal (whitespace is rejected at build). A readonly array is plain OR (`command: ["git", "rm"]` — one name = one `disabledRules` / exemption / override entry, NOT shared leaves; leaves stay per-ref AND under arrays, so a leaf meaningless for a binary never fires its refs). An empty array never matches. At `defineConfig` sites the `command:` union narrows to declared descriptor keys (plugin-shipped + inline-literal `cliDescriptors`), so `command: "gti"` is a compile error; with no facts in scope the union is unconstrained `string` and the fail-closed rule-tagged missing-descriptor block covers the rest at evaluation time. Nameless refs (bare `VAR=x` chains — no binary) never match.
+
+For write/edit, the **pattern** tests `path` or `content` directly.
 
 The **reason** is written for the agent. Include what was blocked and what the safe alternative is — the agent reads it and acts on it. A plain string is the common case. For dynamic context (the walker-resolved cwd, a count pulled from `findEntries`), pass a function instead:
 
 ```ts
 {
   name: "cr-upstream-mainline",
-  tool: "bash", field: "command",
-  pattern: /^cr\b/,
+  tool: "bash",
+  command: "cr", // enclosing config must declare cr's argv facts:
+  // `plugins: [{ name: "cr-facts", cliDescriptors: { cr: {} } }]`
+  // (inline-literal plugin — NO new top-level config field; without
+  // facts the rule fails closed with a missing-descriptor block).
   reason: (ctx) =>
     ctx.walkerState?.cwd === "unknown"
       ? "Walker could not resolve cwd statically. Retry with a literal path, or run `cr` from inside a package directory."
@@ -345,7 +359,7 @@ Built-ins:
 - **`not`** — boolean NOT over an inner predicate block. One level only (no `not: not: ...` recursion). Inside `not:`, leaf-level `onUnknown:` is forbidden; the block-level `onUnknown:` modifier projects walker-unknown verdicts (default `"block"` = fail-CLOSED, rule fires).
 - **`subcommand`** — rule fires only when the command's extracted subcommand matches. Bare `string` = EXACT equality (`"push"` ≠ `"pushback"`, deliberately not `cwd:`'s regex-source semantics); `RegExp` = test; bare array = OR at depth 1; spread `{ pattern, depth?, onUnknown? }` covers multi-word runs (`{ pattern: ["s3", "ls"], depth: 2 }` — array length must equal `depth`). Consuming-flag arity resolves ONLY via the CLI-descriptor registry by basename (`Plugin.cliDescriptors` — e.g. bare `subcommand: "push"` already extracts `push` from `git -C /x push` via the git plugin's declared descriptor, so the plugin must be declared for the match). No descriptor for the ref's basename → the engine throws `MissingDescriptorError` and blocks with an actionable reason (declare the descriptor, or `{ "<basename>": {} }` for explicit strict) — absent descriptors are loud, never silent. `null` extraction (all-flags, trailing consuming flag, after-only shapes like `go -v build`, non-bash tools) → `"unknown"` → `onUnknown:` (default `"block"`, fail-closed).
 - **`flag`** — rule fires when any listed entry is present: `{ anyOf: [gitFlags.noPager], onUnknown? }` (`gitFlags` = `GIT_CLI_DESCRIPTOR.flags` from `@cad0p/pi-steering/plugins/git` — entries, OR over entries, each entry ORs aliases; a flag worth gating is worth a table row, so import the owning plugin's table, never hand-build literals in rules). Longs match the exact token or `--flag=value`; single-char shorts match exactly, inside bundles (`-uf` always matches `-u` / `-f` — longs never bundle-match), or glued (`-Rfoo` matches `-R` iff the table derives glue for `R`). Bundle matching derives from the descriptor table via the lead-letter rule: the first table-declared value-taking letter glues the remainder (nothing after it is present); undeclared letters never glue (fail-closed — the remedy is a table row). Consuming-flag values are skipped by position, never by content (table-derived arity; absent basename → `MissingDescriptorError` block, same loudness as `subcommand`). Non-bash tools → `"unknown"` → default `"block"`; otherwise presence is definite.
-- **`condition`** — escape hatch for one-off logic. Prefer plugin predicates when the logic is reusable. Throws (sync or rejected promise) are caught and treated as `"unknown"` → default `"block"` policy fires the rule fail-CLOSED. Authors needing fail-OPEN wrap inside `not: { condition: fn, onUnknown: "allow" }` OR catch the throw inside the callback body.
+- **`condition`** — escape hatch for one-off logic. Prefer named plugin predicates (via `definePredicate`, tested per ADR §13) when the logic is reusable, per-binary divergent, or leaf-inexpressible (a flag-AND like recursive-plus-force, a positional scan like leading-`+` refspecs — the `flag:` leaf is OR-only, so such ANDs can't live in leaves and get a name instead of an inline closure): predicate names compose across configs, typecheck at `defineConfig` sites, and carry their own unit tests. `condition:` stays the one-off escape hatch — the rule's single-binary single-use composition that isn't worth a name. Throws (sync or rejected promise) are caught and treated as `"unknown"` → default `"block"` policy fires the rule fail-CLOSED. Authors needing fail-OPEN wrap inside `not: { condition: fn, onUnknown: "allow" }` OR catch the throw inside the callback body.
 
 Plugin-registered predicate leaves come from the `PiSteeringPredicates` registry, populated by each plugin's `declare global` block:
 
@@ -409,6 +423,10 @@ const myPredicate: PredicateHandler = (args, ctx) => {
 
 `resolveWord` returns `undefined` when any part of the word is statically intractable (unknown var, command substitution, arithmetic, parameter-expansion with modifiers). Handle that the same way the built-in `when.cwd` does — via an `onUnknown: "allow" | "block"` policy on your own predicate surface.
 
+### `requires:` / `unless:` (transient — dated retirement)
+
+`requires` (AND extra) and `unless` (same-rule exemption) predate the `when:` clause tree and stay supported, but they are transient: once [`pi-steering-github#61`](https://github.com/cad0p/pi-steering-github/issues/61) (the `gh` CLI table) lands, they are restricted to write/edit rules and eventually retired in favor of `when:` leaves — the restriction/retirement issue ([#121](https://github.com/cad0p/pi-steering/issues/121)) tracks the date. New rules should use `when:` (+ named plugin predicates) instead; `requires:` / `unless:` / `watch` patterns survive wherever already written.
+
 ### `onFire`
 
 `Rule.onFire` runs after all predicates pass and BEFORE the block verdict is returned. Use it for self-marking patterns:
@@ -416,8 +434,12 @@ const myPredicate: PredicateHandler = (args, ctx) => {
 ```ts
 {
   name: "commit-description-check",
-  pattern: /^git\s+commit\b/,
-  when: { missing: { event: "description-reviewed", in: "agent_loop" } },
+  tool: "bash",
+  command: "git",
+  when: {
+    subcommand: "commit",
+    missing: { event: "description-reviewed", in: "agent_loop" },
+  },
   reason: "Re-read the commit message first.",
   writes: ["description-reviewed"],
   onFire: (ctx) => ctx.appendEntry("description-reviewed", {}),
@@ -468,8 +490,8 @@ export default defineConfig({
   observers: [syncObserver],
   rules: [{
     name: "cr-needs-sync",
-    tool: "bash", field: "command",
-    pattern: /^cr\b/,
+    tool: "bash",
+    command: "cr",
     // `event` is type-narrowed to the union of all declared `writes`
     // across plugins + user observers. A typo like "ws-sync-don" is
     // rejected by the compiler.
@@ -488,7 +510,8 @@ Sometimes "X occurred" isn't enough — a later event should invalidate it. `mis
 ```ts
 {
   name: "cr-needs-fresh-sync",
-  pattern: /^cr\b/,
+  tool: "bash",
+  command: "cr",
   when: {
     missing: {
       event: "ws-sync-done",
@@ -541,8 +564,8 @@ const syncObserver = {
 
 const crNeedsSync = {
   name: "cr-needs-sync",
-  tool: "bash", field: "command",
-  pattern: /^cr\b/,
+  tool: "bash",
+  command: "cr",
   when: { missing: { event: "ws-sync-done", in: "agent_loop" } },
   reason: "Run `sync` first.",
 } as const satisfies Rule;
@@ -563,8 +586,9 @@ export default defineConfig({
   rules: [
     {
       name: "must-read-docs",
-      tool: "bash", field: "command",
-      pattern: /^npm\s+publish/,
+      tool: "bash",
+      command: "npm",
+      when: { subcommand: "publish" },
       observer: "description-read",               // ← typo-checked against plugin + inline observers
       when: { missing: { event: "doc-read", in: "agent_loop" } },  // ← event literal checked against writes
       reason: "Read the release notes before publishing.",
@@ -752,9 +776,9 @@ export default defineConfig({
 });
 ```
 
-`as const satisfies Rule` preserves literal types so `defineConfig`'s cross-reference checks (on `missing.event`, `observer`, etc.) still run on the replacement. No need to restate `pattern` / `when` / `observer` / `onFire` — the spread carries them through.
+`as const satisfies Rule` preserves literal types so `defineConfig`'s cross-reference checks (on `missing.event`, `observer`, etc.) still run on the replacement. No need to restate `command` / `when` / `observer` / `onFire` — the spread carries them through.
 
-Changing more than the reason (tightening the pattern, scoping by cwd, swapping the observer) works the same way: spread the original, then override the fields you want to change.
+Changing more than the reason (tightening the match, scoping by cwd, swapping the observer) works the same way: spread the original, then override the fields you want to change.
 
 > **Always use a fresh `name` for the replacement.** Reusing the plugin rule's name has two failure modes — same name + no `disabledRules` keeps both rules (your customization silently fails to apply) and same name + `disabledRules` filters out both (silent fail-OPEN, the worst outcome for a safety rule). The git plugin's [Customization](./src/plugins/git/README.md#customization) section walks through worked examples (soften the reason text; cwd-based exemption with the array-form `cwd:` predicate's `onUnknown: "allow"` pin to keep `not:` carve-outs fail-closed under walker-unknown cwd).
 
@@ -942,7 +966,7 @@ One-shot conversion from a v1 JSON config to a v0.1.0 TypeScript config:
 pi-steering import-json .pi/steering.json -o .pi/steering/index.ts
 ```
 
-Emits a `defineConfig({...})` module using JSON-literal rendering. Rule patterns come across verbatim; `requires` / `unless` / override semantics are preserved. Plugins, observers, and function-valued predicates are rejected — those features only exist in the TypeScript shape and must be authored directly.
+Emits a `defineConfig({...})` module using JSON-literal rendering. Write/edit rule patterns come across verbatim; `requires` / `unless` / override semantics are preserved. Bash rules do NOT round-trip (`pattern:` was removed — rewrite as `command:` + `when:` leaves in TypeScript). Plugins, observers, and function-valued predicates are rejected — those features only exist in the TypeScript shape and must be authored directly.
 
 ## Override comments
 

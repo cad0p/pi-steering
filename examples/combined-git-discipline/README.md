@@ -1,6 +1,6 @@
 # combined-git-discipline
 
-A batteries-included rule pack that stacks PR/git-hygiene rules on top of the declared domain plugins (git / rm / async). Drop-in starting point for teams that want disciplined PR workflows.
+A batteries-included rule pack that stacks PR/git-hygiene rules on top of the declared domain plugins (git / rm). Drop-in starting point for teams that want disciplined PR workflows.
 
 > **TypeScript form (canonical):** see [`steering.ts`](./steering.ts) — drop in at `~/.pi/agent/steering.ts` or `<project-root>/.pi/steering.ts`. The loader accepts TypeScript only. The [`steering.json`](./steering.json) form is provided for reference + `pi-steering import-json` migration; the loader does NOT pick up JSON files. See [examples/README.md#json](../README.md#json) for migration steps.
 
@@ -15,14 +15,13 @@ From this pack:
 
 Force pushes are covered by the git plugin — no extra rule needed. Since issue [#65](https://github.com/cad0p/pi-steering/issues/65) its shipped `no-force-push` rule is **sealed**: it blocks every remote-history-rewrite form (`--force`, `--force-with-lease`, `--force-if-includes`, bundled shorts like `-uf`, leading-`+` refspecs like `git push origin +main`, and `--mirror`). Older copies of this pack disabled that rule and re-added a stricter variant; that step is now redundant — and dropping it actually *strengthens* coverage, since the sealed rule catches more than the old strict one did.
 
-From the declared plugins (git + rm + async, per issue #72 there are no engine-injected rails):
+From the declared plugins (git + rm, per issue #72 there are no engine-injected rails):
 
 | Rule | What it blocks |
 |---|---|
 | `no-force-push` | Every history-rewrite push form (see above). Sealed by [#65](https://github.com/cad0p/pi-steering/issues/65). |
 | `no-hard-reset` | `git reset --hard` — prevents silent loss of uncommitted work. |
 | `no-rm-rf-slash` | `rm -rf /` with any flag combination or wrapper. `noOverride: true`. |
-| `no-long-running-commands` | `npm run dev`, `tsc --watch`, `next dev`, etc. — stop the agent from blocking itself on a watcher. |
 
 ## Precedence: why there's no `disable` anymore
 
@@ -36,7 +35,7 @@ Each rule on its own is reasonable. Stacking them encodes a specific team discip
 
 - History is append-only (`no-force-push` + `no-hard-reset` from the git plugin, plus this pack's `no-amend`).
 - Code review is gated by the human (`pr-create-must-be-draft`).
-- The agent can't shoot everyone in the foot or wedge itself on a dev server (`no-rm-rf-slash`, `no-long-running-commands`).
+- The agent can't shoot everyone in the foot (`no-rm-rf-slash`).
 
 Use this as a starting point and carve out exceptions with inline override comments (`# steering-override: <rule-name> — <reason>`) for the edge cases that genuinely need them.
 

@@ -13,12 +13,12 @@ A rule pack that forces `gh pr create` to include `--draft`.
 
 ## How it works
 
-The rule uses two of the schema's predicates in combination:
+The rule uses `command:` routing plus two `when:`-level predicates in combination:
 
-- `pattern: "^gh\\s+pr\\s+create\\b"` — fires on any `gh pr create` invocation.
+- `command: "gh"` + `subcommand: { pattern: ["pr", "create"], depth: 2 }` — fires on any `gh pr create` invocation.
 - `unless: "--draft\\b"` — exempts the command if `--draft` is present anywhere in the argument list.
 
-`unless` is the escape hatch baked into the schema precisely for "mostly block, but allow the safe variant" rules like this one. No need to write two patterns.
+`unless` is the escape hatch baked into the schema precisely for "mostly block, but allow the safe variant" rules like this one. (Transient: `requires:` / `unless:` are kept with dated retirement conditions — see the root README.)
 
 ## Why
 

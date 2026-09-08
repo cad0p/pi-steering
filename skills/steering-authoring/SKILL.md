@@ -28,7 +28,7 @@ The loader walks up from `cwd` to the nearest `.pi/` dir, falling back to `~/.pi
 | "invalidate Y when Z happens" | `when: { missing: { event: Y_EVENT, in: "agent_loop", since: Z_EVENT } }`. Y only counts if its latest entry is newer than Z's latest entry in scope. If Z never occurred, the clause degrades to a simple presence check. |
 | "put runtime state in the block message" | `reason: (ctx) => \`blocked at \${ctx.walkerState?.cwd}\`` — `Rule.reason` accepts a sync or async function. The engine awaits it and prefixes with `[steering:name@source]` like a string reason (after the fixed preamble `This tool call was not executed; blocked by a steering rule:` that leads every block message). If it throws, a fail-safe fallback text fires and the error is logged to `console.warn`; the block still fires. |
 | "add a custom check" | Write a plugin in `.pi/steering/plugins/`, import it into `index.ts`, register it in `plugins: [...]`. |
-| "change the reason on a built-in rule" | Import the original rule from its plugin, spread it with `{ ...original, name: "new-name", reason: "..." }`, and use `disabledRules: ["original-name"]` + add the replacement. Preserves pattern / when / observer. |
+| "change the reason on a built-in rule" | Import the original rule from its plugin, spread it with `{ ...original, name: "new-name", reason: "..." }`, and use `disabledRules: ["original-name"]` + add the replacement. Preserves command / when / observer. |
 | "test this rule" | Create `steering.test.ts` using `expectBlocks` / `expectAllows` / `loadHarness`. |
 | "convert my JSON config to TypeScript" | Run `pi-steering import-json .pi/steering.json -o .pi/steering.ts`. Plugins, observers, and function predicates don't round-trip — author those directly in TS. |
 | "publish a pi-steering plugin" | Package as `pi-steering-<domain>` (unscoped) with `keywords: ["pi-package", "pi-steering-package"]` in package.json. peerDep on `@cad0p/pi-steering`. No direct dep on `@cad0p/unbash-walker` — reuse the package-root walker re-exports (see README "Writing plugins › Dependency rule"). |
@@ -39,19 +39,19 @@ The loader walks up from `cwd` to the nearest `.pi/` dir, falling back to `~/.pi
 import { defineConfig } from "@cad0p/pi-steering";
 
 export default defineConfig({
+  plugins: [{ name: "facts", cliDescriptors: { "dangerous-command": {} } }],
   rules: [
     {
       name: "no-dangerous-command",
       tool: "bash",
-      field: "command",
-      pattern: /^dangerous-command\b/,
+      command: "dangerous-command",
       reason: "don't run this",
     },
   ],
 });
 ```
 
-There are NO engine-shipped default rules (issue #72): every rail lives in an opt-in domain plugin — declare `plugins: [gitPlugin, rmPlugin, asyncPlugin]` to get `no-force-push` / `no-hard-reset`, `no-rm-rf-slash`, and `no-long-running-commands`. Declaring a plugin is also what feeds its rule / plugin names into `defineConfig`'s type unions (typo-checking on `disabledRules` / `disabledPlugins`), keeping the types in sync with what's actually loaded. Disable individual rules via `disabledRules: ["name"]`; simply don't declare a plugin you don't want.
+There are NO engine-shipped default rules (issue #72): every rail lives in an opt-in domain plugin — declare `plugins: [gitPlugin, rmPlugin]` to get `no-force-push` / `no-hard-reset` and `no-rm-rf-slash`. Declaring a plugin is also what feeds its rule / plugin names into `defineConfig`'s type unions (typo-checking on `disabledRules` / `disabledPlugins`), keeping the types in sync with what's actually loaded. Disable individual rules via `disabledRules: ["name"]`; simply don't declare a plugin you don't want.
 
 ## Git plugin (branch / upstream / commits-ahead predicates)
 
@@ -65,9 +65,8 @@ export default defineConfig({
     {
       name: "no-main-push",
       tool: "bash",
-      field: "command",
-      pattern: /^git\s+push\b/,
-      when: { branch: /^(main|master|mainline|trunk)$/ },
+      command: "git",
+      when: { subcommand: "push", branch: /^(main|master|mainline|trunk)$/ },
       reason: "don't push from main",
     },
   ],

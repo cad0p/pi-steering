@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import type { BashToolCallEvent } from "@earendil-works/pi-coding-agent";
@@ -392,3 +392,153 @@ describe("command: async deletion pins (issue #117 §6.1)", () => {
     assert.equal(noRmRfSlash.noOverride, true);
   });
 });
+
+describe("command: deletion grep pins (issue #117 §7)", () => {
+  const repoRoot = join(dirname(new URL(import.meta.url).pathname), "..");
+  const SURFACE = [
+    "src/plugins",
+    "src/bin",
+    "scripts",
+    "examples",
+    "skills",
+    "README.md",
+    "package.json",
+  ];
+  const SKIP_DIRS = new Set(["node_modules", "dist", ".git"]);
+  // The pin file names the deleted shapes in its own scanner +
+  // expected sets — excluding it keeps the scan non-recursive. Its
+  // own claims are covered by the sibling tests above (package.json
+  // exports pin, literal dynamic-import rejection).
+  const SKIP_FILES = new Set(["src/command-filter.test.ts"]);
+  const SCAN_EXTS = new Set([
+    ".ts",
+    ".mts",
+    ".cts",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".md",
+    ".json",
+  ]);
+
+  function scanHits(re: RegExp): string[] {
+    const out: string[] = [];
+    const visit = (abs: string, rel: string): void => {
+      const st = statSync(abs);
+      if (st.isDirectory()) {
+        if (SKIP_DIRS.has(abs.split("/").pop() ?? "")) return;
+        for (const entry of readdirSync(abs)) {
+          visit(join(abs, entry), rel === "" ? entry : `${rel}/${entry}`);
+        }
+        return;
+      }
+      if (SKIP_FILES.has(rel)) return;
+      if (![...SCAN_EXTS].some((ext) => abs.endsWith(ext))) return;
+      const text = readFileSync(abs, "utf8");
+      for (const line of text.split("\n")) {
+        if (re.test(line)) out.push(`${rel} :: ${line.trim()}`);
+      }
+    };
+    for (const root of SURFACE) visit(join(repoRoot, root), root);
+    // Dedupe: the same sanctioned line often repeats within one
+    // file (predicate tests). Any DISTINCT hit line still trips.
+    return [...new Set(out)].sort();
+  }
+
+  it("scoped async refs are gone except the pin itself + the deletion note", () => {
+    // Scoped (NOT bare `async`, which matches the keyword):
+    // `asyncPlugin` (imports/arrays), `plugins/async` (subpaths),
+    // `no-long-running-commands` (the deleted rail). Any new hit
+    // fails the pin — update the set only by conscious edit.
+    assert.deepEqual(
+      scanHits(/asyncPlugin|plugins\/async|no-long-running/),
+      EXPECTED_ASYNC_HITS,
+    );
+  });
+
+  it("pattern: keys are allowlisted leaf/docs/rejection shapes only", () => {
+    // No bash-rule `pattern:` may remain in the rule surface
+    // (shipped rules, example rules, bin, scripts, skills, READMEs).
+    // Every surviving `pattern:` key is a sanctioned shape: `flag:` /
+    // predicate spread args (`branch: { pattern }`, `remote:`,
+    // `workItemFormat:`), `subcommand: { pattern }` spreads, the
+    // compat/CLI rejection fixtures (bash JSON patterns must THROW),
+    // the write-rule fixture, schema/type docs, and historical prose
+    // naming the deletion. Any new hit fails the pin.
+    assert.deepEqual(
+      scanHits(/(?<![\w.])pattern\s*:/),
+      EXPECTED_PATTERN_HITS,
+    );
+  });
+
+  it("importing the deleted async subpath fails (literal specifier, tsc + runtime)", async () => {
+    // Literal specifier so tsc checks it too: restoring the file
+    // trips the unused-`@ts-expect-error` error (loud in reverse).
+    // @ts-expect-error — ./plugins/async no longer exists.
+    await assert.rejects(import("../plugins/async/index.ts"));
+  });
+});
+
+const EXPECTED_ASYNC_HITS: readonly string[] = [
+    "README.md :: The deleted `async` plugin's `no-long-running-commands` availability rail has no honest home yet (its CLI tables were never verified \u2014 see the restoration follow-up, issue [#120](https://github.com/cad0p/pi-steering/issues/120)).",
+];
+
+const EXPECTED_PATTERN_HITS: readonly string[] = [
+    "README.md :: - **`subcommand`** \u2014 rule fires only when the command's extracted subcommand matches. Bare `string` = EXACT equality (`\"push\"` \u2260 `\"pushback\"`, deliberately not `cwd:`'s regex-source semantics); `RegExp` = test; bare array = OR at depth 1; spread `{ pattern, depth?, onUnknown? }` covers multi-word runs (`{ pattern: [\"s3\", \"ls\"], depth: 2 }` \u2014 array length must equal `depth`). Consuming-flag arity resolves ONLY via the CLI-descriptor registry by basename (`Plugin.cliDescriptors` \u2014 e.g. bare `subcommand: \"push\"` already extracts `push` from `git -C /x push` via the git plugin's declared descriptor, so the plugin must be declared for the match). No descriptor for the ref's basename \u2192 the engine throws `MissingDescriptorError` and blocks with an actionable reason (declare the descriptor, or `{ \"<basename>\": {} }` for explicit strict) \u2014 absent descriptors are loud, never silent. `null` extraction (all-flags, trailing consuming flag, after-only shapes like `go -v build`, non-bash tools) \u2192 `\"unknown\"` \u2192 `onUnknown:` (default `\"block\"`, fail-closed).",
+    "README.md :: // SpreadBase auto-detects to `{ pattern: Bare }` via",
+    "README.md :: Emits a `defineConfig({...})` module using JSON-literal rendering. Write/edit rule patterns come across verbatim; `requires` / `unless` / override semantics are preserved. Bash rules do NOT round-trip (`pattern:` was removed \u2014 rewrite as `command:` + `when:` leaves in TypeScript). Plugins, observers, and function-valued predicates are rejected \u2014 those features only exist in the TypeScript shape and must be authored directly.",
+    "README.md :: pattern: RegExp;",
+    "README.md :: | { pattern: Pattern | Pattern[]; onUnknown?: \"allow\" | \"block\" };",
+    "examples/combined-git-discipline/steering.ts :: subcommand: { pattern: [\"pr\", \"create\"], depth: 2 },",
+    "examples/draft-prs-only/README.md :: - `command: \"gh\"` + `subcommand: { pattern: [\"pr\", \"create\"], depth: 2 }` \u2014 fires on any `gh pr create` invocation.",
+    "examples/draft-prs-only/steering.ts :: // `subcommand: { pattern: [\"pr\", \"create\"], depth: 2 }` routes",
+    "examples/draft-prs-only/steering.ts :: subcommand: { pattern: [\"pr\", \"create\"], depth: 2 },",
+    "examples/dynamic-reason-runtime-cwd/steering.test.ts :: subcommand: { pattern: [\"run\", \"deploy\"], depth: 2 },",
+    "examples/dynamic-reason-runtime-cwd/steering.ts :: // `subcommand: { pattern: [\"run\", \"deploy\"], depth: 2 }` routes",
+    "examples/dynamic-reason-runtime-cwd/steering.ts :: subcommand: { pattern: [\"run\", \"deploy\"], depth: 2 },",
+    "examples/work-item-plugin/src/index.ts :: *       - Invalidation-sentinel pattern: observer writes",
+    "examples/work-item-plugin/src/predicates/work-item-format.test.ts :: \"not-an-object\" as unknown as { pattern: RegExp },",
+    "examples/work-item-plugin/src/predicates/work-item-format.test.ts :: pattern: /\\[PROJ-\\d+\\]/,",
+    "examples/work-item-plugin/src/predicates/work-item-format.test.ts :: { pattern: /\\[PROJ-\\d+\\]/ },",
+    "examples/work-item-plugin/src/predicates/work-item-format.ts :: *   when: { workItemFormat: { pattern: /\\[PROJ-\\d+\\]/ } }",
+    "examples/work-item-plugin/src/predicates/work-item-format.ts :: pattern: RegExp;",
+    "examples/work-item-plugin/src/rules/commit-description-check.ts :: * Helper that writes the reminder entry. The ADR \u00a714 pattern: both",
+    "examples/work-item-plugin/src/rules/commit-requires-work-item.ts :: *   - The typed-arg authoring pattern \u2014 `{ pattern: /\\[PROJ-\\d+\\]/ }`.",
+    "examples/work-item-plugin/src/rules/commit-requires-work-item.ts :: workItemFormat: { pattern: /\\[PROJ-\\d+\\]/ },",
+    "src/bin/pi-steering.test.ts :: pattern: \"^/etc/\",",
+    "src/bin/pi-steering.test.ts :: pattern: \"^git\\\\\\\\s+push\",",
+    "src/plugins/git/README.md :: bash `pattern:` in issue #117 \u2014 routing is exact basename equality",
+    "src/plugins/git/README.md :: when: { branch: { pattern: /^main$/, onUnknown: \"allow\" } }",
+    "src/plugins/git/README.md :: when: { remote: { pattern: /production/, onUnknown: \"block\" } }",
+    "src/plugins/git/README.md :: when: { upstream: { pattern: \"^origin/\", onUnknown: \"allow\" } }",
+    "src/plugins/git/helpers/pattern-args.ts :: *   - `{ pattern: Pattern, onUnknown? }`         -> object used as-is,",
+    "src/plugins/git/helpers/pattern-args.ts :: *   - `{ pattern: Pattern[], onUnknown? }`       -> array preserved,",
+    "src/plugins/git/helpers/pattern-args.ts :: // Object form: { pattern: Pattern | Pattern[]; onUnknown? }.",
+    "src/plugins/git/helpers/pattern-args.ts :: export function matchPattern(pattern: Pattern, target: string): boolean {",
+    "src/plugins/git/integration.test.ts :: * `remote: { pattern: ..., onUnknown: \"allow\" }`; on the resulting",
+    "src/plugins/git/predicates/branch.test.ts :: // Pins the array shorthand and `{ pattern: Pattern[]; onUnknown }` form",
+    "src/plugins/git/predicates/branch.test.ts :: assert.equal(await branch({ pattern: [/^main$/, /^master$/] }, ctx), true);",
+    "src/plugins/git/predicates/branch.test.ts :: await branch({ pattern: /^main$/, onUnknown: \"allow\" }, ctxAllow),",
+    "src/plugins/git/predicates/branch.test.ts :: { pattern: /^main$/, onUnknown: \"allow\" },",
+    "src/plugins/git/predicates/branch.test.ts :: { pattern: [/^main$/, /^master$/], onUnknown: \"allow\" },",
+    "src/plugins/git/predicates/branch.ts :: *   when: { branch: { pattern: /^main$/, onUnknown: \"allow\" } }  // object form",
+    "src/plugins/git/predicates/branch.ts :: *   when: { branch: { pattern: [/^main$/, /^master$/], onUnknown: \"allow\" } }",
+    "src/plugins/git/predicates/remote.test.ts :: // Pins the array shorthand and `{ pattern: Pattern[]; onUnknown }` form",
+    "src/plugins/git/predicates/remote.test.ts :: await remote({ pattern: /./, onUnknown: \"allow\" }, ctx),",
+    "src/plugins/git/predicates/remote.test.ts :: await remote({ pattern: [/github\\.com\\//, /gitlab\\.com\\//] }, ctx),",
+    "src/plugins/git/predicates/remote.test.ts :: { pattern: [/github\\.com\\//, /gitlab\\.com\\//], onUnknown: \"allow\" },",
+    "src/plugins/git/predicates/shared.test.ts :: await branch({ pattern: /^main$/, onUnknown: \"block\" }, ctx),",
+    "src/plugins/git/predicates/shared.test.ts :: await remote({ pattern: /./, onUnknown: \"allow\" }, ctx),",
+    "src/plugins/git/predicates/shared.test.ts :: await remote({ pattern: /my-org/, onUnknown: \"block\" }, ctx),",
+    "src/plugins/git/predicates/shared.test.ts :: await upstream({ pattern: /^origin\\/main$/, onUnknown: \"allow\" }, ctx),",
+    "src/plugins/git/predicates/shared.test.ts :: await upstream({ pattern: /^origin\\/main$/, onUnknown: \"block\" }, ctx),",
+    "src/plugins/git/predicates/upstream.test.ts :: // Pins the array shorthand and `{ pattern: Pattern[]; onUnknown }` form",
+    "src/plugins/git/predicates/upstream.test.ts :: await upstream({ pattern: /./, onUnknown: \"allow\" }, ctx),",
+    "src/plugins/git/predicates/upstream.test.ts :: await upstream({ pattern: [/^origin\\/main$/, /^origin\\/develop$/] }, ctx),",
+    "src/plugins/git/predicates/upstream.test.ts :: pattern: [/^origin\\/main$/, /^origin\\/develop$/],",
+    "src/plugins/git/rules/no-main-commit-github.ts :: // old `GIT_COMMIT_PATTERN` anchor, deleted with bash `pattern:`).",
+    "src/plugins/git/rules/no-main-commit-github.ts :: remote: { pattern: /github\\.com[/:]/, onUnknown: \"allow\" },",
+    "src/plugins/git/rules/no-main-commit.test.ts :: * `remote: { pattern: ..., onUnknown: \"allow\" }`) skips on the",
+    "src/plugins/git/rules/no-main-commit.ts :: *   `when: { branch: { pattern: /.../, onUnknown: \"allow\" } }`",
+    "src/plugins/git/rules/no-main-commit.ts :: // old `GIT_COMMIT_PATTERN` anchor, deleted with bash `pattern:`).",
+];

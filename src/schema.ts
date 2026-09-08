@@ -1760,7 +1760,7 @@ export interface PredicateWord extends Word {
  * Bash note (per ADR §9): `command`, `basename`, and `args` are
  * populated PER extracted command ref - a bash invocation of
  * `git push --force && ls` runs the predicate once per ref, with
- * `command: "git push --force"` (flattened for pattern matching),
+ * `command: "git push --force"` (flattened `basename + args` string),
  * `basename: "git"`, and `args: [<PredicateWord>, <PredicateWord>]`
  * (suffix `PredicateWord[]` — see {@link PredicateWord}). `rawCommand`
  * and full AST node access are deliberately NOT exposed - the wrapper

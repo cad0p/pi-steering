@@ -731,12 +731,17 @@ type CandidateOutcome = ToolCallEventResult | "no-fire" | "overridden";
  * Returns the built {@link PredicateContext} when every predicate
  * passes (rule fires), or `null` when the chain short-circuits to
  * "no-fire" — **either** because a predicate legitimately rejected
- * the candidate, **or** because a predicate threw.
+ * the candidate, **or** because a `when`-path predicate threw.
  *
- * Throws are the S1 hardening: a predicate function (built-in or
- * plugin-supplied) that throws synchronously or rejects asynchronously
- * gets its error logged with the rule name + source and the rule is
- * treated as NOT firing. Evaluation continues with the next rule.
+ * Throw posture is directional (issue #118, S1 refinement): a
+ * `requires` fn that throws synchronously or rejects asynchronously
+ * projects to satisfied (unknown → satisfied → evaluate rest), and an
+ * `unless` fn that throws projects to absent (unknown → absent →
+ * evaluate rest). Each throw is logged once with the rule name +
+ * source. A `when`-path escape still treats the rule as NOT firing
+ * (warn+skip). `MissingDescriptorError` is rethrown with rule context
+ * from every catch (loud-block passthrough wins over projection).
+ * Evaluation continues with the next rule.
  *
  * Why "does not fire" (vs "block" / "abort the whole evaluate"):
  *   - Mirrors the observer-dispatcher's per-observer isolation —
@@ -753,6 +758,27 @@ async function runPredicateChain(
   shared: SharedEvalContext,
 ): Promise<PredicateContext | null> {
   const source = shared.ruleSources.get(rule) ?? "user";
+  // Explicit passthrough (issue #107, absent-descriptor goes loud):
+  // a missing descriptor is a fail-CLOSED config hole, NOT a buggy
+  // predicate — swallowing it here would fail OPEN. Attach rule
+  // context and rethrow to `evaluateEvent`'s top catch BEFORE any
+  // warn+project. Deliberately STRONGER than the `UnknownPredicateError`
+  // precedent (isolated to warn+skip per evaluator.test.ts
+  // "isolates an unknown when.<key> throw as 'rule did not fire'").
+  // Single hierarchy site shared by the per-clause catches below and
+  // the shared backstop catch (issue #118) — MDE always wins,
+  // everything else projects. MDE never warns; it blocks loud at the
+  // top catch (`evaluateEvent`'s rule-tagged descriptor branch).
+  // No intermediate catch sits between here and the top catch on the
+  // rule path (`evaluateCandidate` awaits bare; `onFire`'s catch wraps
+  // `onFire` only; the `evaluateEventInner` rule loop awaits bare).
+  const rethrowIfMissingDescriptor = (err: unknown): void => {
+    if (err instanceof MissingDescriptorError) {
+      err.ruleName = rule.name;
+      err.source = source;
+      throw err;
+    }
+  };
   try {
     // Pattern-miss is the common case; exit before allocating ctx.
     if (!matchesPattern(rule.pattern, cand.target)) return null;
@@ -781,11 +807,29 @@ async function runPredicateChain(
     };
 
     if (rule.requires !== undefined) {
-      const ok = await matchesPatternOrFn(rule.requires, cand.target, ctx);
+      let ok: boolean;
+      try {
+        ok = await matchesPatternOrFn(rule.requires, cand.target, ctx);
+      } catch (err) {
+        rethrowIfMissingDescriptor(err);
+        console.warn(
+          `[pi-steering] predicate threw for rule "${rule.name}"@${source}: ${formatError(err)}`,
+        );
+        ok = true; // unknown → satisfied → evaluate rest (strict)
+      }
       if (!ok) return null;
     }
     if (rule.unless !== undefined) {
-      const ok = await matchesPatternOrFn(rule.unless, cand.target, ctx);
+      let ok: boolean;
+      try {
+        ok = await matchesPatternOrFn(rule.unless, cand.target, ctx);
+      } catch (err) {
+        rethrowIfMissingDescriptor(err);
+        console.warn(
+          `[pi-steering] predicate threw for rule "${rule.name}"@${source}: ${formatError(err)}`,
+        );
+        ok = false; // unknown → absent → evaluate rest (strict)
+      }
       if (ok) return null;
     }
     const whenOk = await evaluateWhen(
@@ -804,21 +848,11 @@ async function runPredicateChain(
 
     return ctx;
   } catch (err) {
-    // Explicit passthrough (issue #107, absent-descriptor goes loud):
-    // a missing descriptor is a fail-CLOSED config hole, NOT a buggy
-    // predicate — swallowing it here would fail OPEN. Attach rule
-    // context and rethrow to `evaluateEvent`'s top catch BEFORE the
-    // warn+null. Deliberately STRONGER than the `UnknownPredicateError`
-    // precedent (isolated to warn+skip per evaluator.test.ts
-    // "isolates an unknown when.<key> throw as 'rule did not fire'").
-    // No intermediate catch sits between here and the top catch on the
-    // rule path (`evaluateCandidate` awaits bare; `onFire`'s catch wraps
-    // `onFire` only; the `evaluateEventInner` rule loop awaits bare).
-    if (err instanceof MissingDescriptorError) {
-      err.ruleName = rule.name;
-      err.source = source;
-      throw err;
-    }
+    // Shared backstop (when-path escapes, `arityOf` binding throws,
+    // pattern edges): warn+skip posture unchanged (S1). Per-clause
+    // throws never reach here — the requires/unless catches above
+    // swallow non-MDE after a single warn and rethrow only MDE.
+    rethrowIfMissingDescriptor(err);
     console.warn(
       `[pi-steering] predicate threw for rule "${rule.name}"@${source}: ${formatError(err)}`,
     );
@@ -840,11 +874,14 @@ async function runPredicateChain(
  *   4. `when`      — clause tree (`cwd`, `not`, `condition`, plugin
  *                     predicates).
  *
- * All four steps are wrapped in a try/catch via
- * {@link runPredicateChain} — a throw is logged and treated as "rule
- * did not fire" (sole exception: `MissingDescriptorError`, which the
- * catch rethrows with rule context to the top-level fail-closed
- * catch — absent descriptors fail CLOSED, never silent). That way a
+ * All four steps are wrapped in try/catch via
+ * {@link runPredicateChain} — a throw is logged (sole exception:
+ * `MissingDescriptorError`, which every catch rethrows with rule
+ * context to the top-level fail-closed catch — absent descriptors
+ * fail CLOSED, never silent). Projection is directional (issue #118):
+ * a throwing `requires` fn counts as satisfied and a throwing `unless`
+ * fn counts as absent (chain continues — strict); only `when`-path
+ * escapes are treated as "rule did not fire". That way a
  * whole rule list (a broken guardrail rule silently poisoning the
  * rest) nor leaks its raw `error.message` back to the agent via a
  * pi-level error tool_result.

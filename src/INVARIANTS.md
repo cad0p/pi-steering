@@ -28,10 +28,16 @@ parameter in `evaluateWhen` / `evaluateNotBlock` /
 `readLeafOnUnknown`; the `ignoreExplicitModifiers` strict flag;
 `validateExemptionWhenClauseShape`).
 
-A predicate that throws — built-in or plugin-supplied, sync or async
-— is treated as "rule does not fire", logged via `console.warn` with
-the rule name + `@<source>` tag + key, and evaluation continues with
-the next rule. The top-level wrap in `evaluator.ts` is the outermost
+A `when`-path predicate that throws — built-in or plugin-supplied,
+ sync or async — is treated as "rule does not fire", logged via
+ `console.warn` with the rule name + `@<source>` tag + key, and
+ evaluation continues with the next rule. `requires:`/`unless:`
+ predicate fns project directionally instead (unknown → strict,
+ warn logged in both cases, chain continues): a throwing `requires`
+ fn counts as satisfied, a throwing `unless` fn counts as absent
+ (issue #118). `MissingDescriptorError` is rethrown with rule context
+ from every path — absent descriptors fail CLOSED (loud block), never
+ warn+skip. The top-level wrap in `evaluator.ts` is the outermost
 catch: if the engine's own scaffolding throws (parse errors, walker
 bugs, corrupted session JSONL), the tool is BLOCKED with an
 engine-tagged reason so the agent sees the throw came from the

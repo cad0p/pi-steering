@@ -41,8 +41,8 @@ describe("compat: fromJSON happy paths", () => {
       rules: [
         {
           name: "no-foo",
-          tool: "bash",
-          field: "command",
+          tool: "write",
+          field: "path",
           pattern: "^foo",
           reason: "foo forbidden",
         },
@@ -51,12 +51,72 @@ describe("compat: fromJSON happy paths", () => {
     assert.deepEqual(out.rules, [
       {
         name: "no-foo",
-        tool: "bash",
-        field: "command",
+        tool: "write",
+        field: "path",
         pattern: "^foo",
         reason: "foo forbidden",
       },
     ]);
+  });
+
+  it("rejects bash rules: bash `pattern:` was removed (issue #117)", () => {
+    // Pre-1.0, no shim: fromJSON does NOT import bash `pattern:` at
+    // all — any bash rule throws FromJSONError with the rule path
+    // plus a migration message (rewrite as `command:` + leaves in
+    // TypeScript). No anchored-vs-clever classifier, no translation,
+    // no new `command:` JSON input key, no WARN-and-continue.
+    try {
+      fromJSON({
+        rules: [
+          {
+            name: "no-foo",
+            tool: "bash",
+            field: "command",
+            pattern: "^foo",
+            reason: "foo forbidden",
+          },
+        ],
+      });
+      assert.fail("expected FromJSONError");
+    } catch (err) {
+      assert.ok(err instanceof FromJSONError);
+      assert.equal(err.path, "<root>.rules[0].pattern");
+      assert.match(err.message, /rewrite the rule in TypeScript as `command:`/);
+    }
+  });
+
+  it("still imports write/edit `pattern:` (their mechanism is untouched)", () => {
+    const out = fromJSON({
+      rules: [
+        {
+          name: "no-secret",
+          tool: "edit",
+          field: "content",
+          pattern: "secret",
+          reason: "no secrets",
+        },
+      ],
+    });
+    const imported = out.rules?.[0];
+    assert.ok(imported?.tool === "edit" && imported.pattern === "secret");
+  });
+
+  it("passes `requires` / `unless` strings through on write/edit rules (transient)", () => {
+    const out = fromJSON({
+      rules: [
+        {
+          name: "rich",
+          tool: "write",
+          field: "path",
+          pattern: "secret",
+          requires: "\\.env$",
+          unless: "\\.env\\.example$",
+          reason: "no secrets in tracked files",
+        },
+      ],
+    });
+    assert.equal(out.rules?.[0]?.requires, "\\.env$");
+    assert.equal(out.rules?.[0]?.unless, "\\.env\\.example$");
   });
 
   it("carries forward `requires` / `unless` / `noOverride` / `when.cwd`", () => {
@@ -83,6 +143,28 @@ describe("compat: fromJSON happy paths", () => {
     assert.equal(rule.when?.cwd, "^/workplace");
   });
 
+  it("rejects non-cwd when keys at conversion (issue #75 compat path)", () => {
+    // JSON cannot express plugin predicates, `not:`, or `condition:` —
+    // an unknown key never survives conversion, so the compat path
+    // meets the same validation bar as the TS load-time key check.
+    assert.throws(
+      () =>
+        fromJSON({
+          rules: [
+            {
+              name: "typo",
+              tool: "write",
+              field: "path",
+              pattern: "^foo",
+              reason: "x",
+              when: { totallyMadeUp: true },
+            },
+          ],
+        }),
+      /JSON config cannot express `when\.totallyMadeUp`.*\(at <root>\.rules\[0\]\.when\.totallyMadeUp\)/,
+    );
+  });
+
   it("golden: example fixture used by the v1 JSON loader tests round-trips", () => {
     // Mirrors the shape of the fixture at
     // `src/loader.test.ts` — using a
@@ -94,18 +176,18 @@ describe("compat: fromJSON happy paths", () => {
       rules: [
         {
           name: "block-dangerous",
-          tool: "bash",
-          field: "command",
-          pattern: "^rm\\s+-rf",
-          reason: "rm -rf is catastrophic",
+          tool: "write",
+          field: "path",
+          pattern: "^/etc/",
+          reason: "dangerous path",
           noOverride: true,
         },
         {
           name: "warn-in-workplace",
-          tool: "bash",
-          field: "command",
-          pattern: "^git\\s+push",
-          reason: "don't push from workplace paths",
+          tool: "edit",
+          field: "content",
+          pattern: "TODO",
+          reason: "don't land TODOs from workplace paths",
           when: { cwd: "^/workplace" },
         },
       ],
@@ -168,9 +250,7 @@ describe("compat: fromJSON rejections", () => {
     assert.throws(
       () =>
         fromJSON({
-          rules: [
-            { tool: "bash", field: "command", pattern: "p", reason: "r" },
-          ],
+          rules: [{ tool: "write", field: "path", pattern: "p", reason: "r" }],
         }),
       FromJSONError,
     );
@@ -178,7 +258,7 @@ describe("compat: fromJSON rejections", () => {
     assert.throws(
       () =>
         fromJSON({
-          rules: [{ name: "n", tool: "bash", field: "command", reason: "r" }],
+          rules: [{ name: "n", tool: "write", field: "path", reason: "r" }],
         }),
       FromJSONError,
     );
@@ -274,8 +354,8 @@ describe("compat: fromJSON rejections", () => {
           rules: [
             {
               name: "n",
-              tool: "bash",
-              field: "command",
+              tool: "write",
+              field: "path",
               pattern: 42,
               reason: "r",
             },
@@ -292,8 +372,8 @@ describe("compat: fromJSON rejections", () => {
           rules: [
             {
               name: "n",
-              tool: "bash",
-              field: "command",
+              tool: "write",
+              field: "path",
               pattern: "p",
               reason: "r",
               requires: 42,
@@ -311,8 +391,8 @@ describe("compat: fromJSON rejections", () => {
         rules: [
           {
             name: "n",
-            tool: "bash",
-            field: "command",
+            tool: "write",
+            field: "path",
             pattern: "p",
             reason: "r",
             when: { branch: "^main$" },
@@ -334,8 +414,8 @@ describe("compat: fromJSON rejections", () => {
           rules: [
             {
               name: "n",
-              tool: "bash",
-              field: "command",
+              tool: "write",
+              field: "path",
               pattern: "p",
               reason: "r",
               when: { not: {} },
@@ -350,8 +430,8 @@ describe("compat: fromJSON rejections", () => {
           rules: [
             {
               name: "n",
-              tool: "bash",
-              field: "command",
+              tool: "write",
+              field: "path",
               pattern: "p",
               reason: "r",
               when: { condition: "noop" },
@@ -369,8 +449,8 @@ describe("compat: fromJSON rejections", () => {
           rules: [
             {
               name: "n",
-              tool: "bash",
-              field: "command",
+              tool: "write",
+              field: "path",
               pattern: "p",
               reason: "r",
               observer: "some-name",
@@ -388,8 +468,8 @@ describe("compat: fromJSON rejections", () => {
           rules: [
             {
               name: "n",
-              tool: "bash",
-              field: "command",
+              tool: "write",
+              field: "path",
               pattern: "p",
               reason: "r",
               when: { cwd: 42 },
@@ -408,15 +488,15 @@ describe("compat: FromJSONError", () => {
         rules: [
           {
             name: "ok",
-            tool: "bash",
-            field: "command",
+            tool: "write",
+            field: "path",
             pattern: "p",
             reason: "r",
           },
           {
             name: "bad",
-            tool: "bash",
-            field: "command",
+            tool: "write",
+            field: "path",
             pattern: 42,
             reason: "r",
           },

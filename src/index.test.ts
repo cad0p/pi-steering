@@ -497,8 +497,7 @@ describe("register(): user-defined rules via .pi/steering.ts", () => {
 					{
 						name: "no-echo-in-special",
 						tool: "bash",
-						field: "command",
-						pattern: /\\becho\\b/,
+						command: "echo",
 						reason: "echo not allowed in special tree",
 						when: { cwd: /\\/special\\// },
 					},
@@ -712,8 +711,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 					{
 						name: "capture-turn",
 						tool: "bash",
-						field: "command",
-						pattern: /^echo/,
+						command: "echo",
 						reason: "capture",
 						when: {
 							condition: (ctx) => {
@@ -763,8 +761,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 					{
 						name: "capture-pre-agent-start",
 						tool: "bash",
-						field: "command",
-						pattern: /^echo/,
+						command: "echo",
 						reason: "capture",
 						when: {
 							condition: (ctx) => {
@@ -804,8 +801,7 @@ describe("register(): agent_start bumps agentLoopIndex threaded into evaluator",
 					{
 						name: "capture-predicate",
 						tool: "bash",
-						field: "command",
-						pattern: /^echo/,
+						command: "echo",
 						reason: "r",
 						when: {
 							condition: (ctx) => {
@@ -940,9 +936,9 @@ describe("register(): project-trust gate", () => {
 					{
 						name: "no-proj-echo",
 						tool: "bash",
-						field: "command",
-						pattern: /^echo proj$/,
+						command: "echo",
 						reason: "project rule",
+						when: { subcommand: "proj" },
 					},
 				],
 			}`,
@@ -954,13 +950,14 @@ describe("register(): project-trust gate", () => {
     writeFileSync(
       join(globalDir, "index.ts"),
       `export default {
+				plugins: [{ name: "glob-facts", cliDescriptors: { echo: {} } }],
 				rules: [
 					{
 						name: "no-glob-echo",
 						tool: "bash",
-						field: "command",
-						pattern: /^echo glob$/,
+						command: "echo",
 						reason: "global rule",
+						when: { subcommand: "glob" },
 					},
 				],
 			};`,

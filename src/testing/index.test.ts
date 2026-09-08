@@ -180,12 +180,12 @@ describe("loadHarness", () => {
     const rule: Rule = {
       name: "no-cowsay",
       tool: "bash",
-      field: "command",
-      pattern: "^cowsay\\b",
+      command: "cowsay",
       reason: "no cows",
     };
     const plugin: Plugin = {
       name: "petting-zoo",
+      cliDescriptors: { cowsay: {} },
       predicates: {
         // Loose predicate: always-true; here to verify the merger
         // registered it so `when` can reference it by name.
@@ -242,8 +242,7 @@ describe("loadHarness", () => {
           {
             name: "no-force-push",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b.*push\\b.*--force",
+            command: "git",
             reason: "user copy",
           },
         ],
@@ -280,8 +279,7 @@ describe("loadHarness", () => {
     const rule: Rule = {
       name: "uses-exec",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\b",
+      command: "git",
       reason: "calls exec",
       when: {
         condition: async (ctx) => {
@@ -328,8 +326,7 @@ describe("loadHarness", () => {
     const rule: Rule = {
       name: "uses-exec",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\b",
+      command: "git",
       reason: "calls exec",
       when: {
         condition: async (ctx) => {
@@ -378,19 +375,18 @@ describe("loadHarness", () => {
   it("exposes harness.config reflecting the effective (disable-filtered) state (T3)", () => {
     const harness = loadHarness({
       config: {
+        plugins: [TEST_STRICT_FACTS],
         rules: [
           {
             name: "keep-me",
             tool: "bash",
-            field: "command",
-            pattern: /^keep/,
+            command: "x",
             reason: "keep",
           },
           {
             name: "drop-me",
             tool: "bash",
-            field: "command",
-            pattern: /^drop/,
+            command: "y",
             reason: "drop",
           },
         ],
@@ -410,20 +406,24 @@ describe("loadHarness", () => {
     const pluginRule = {
       name: "plugin-rule",
       tool: "bash" as const,
-      field: "command" as const,
-      pattern: /^keep/,
+      command: "x" as const,
       reason: "plugin",
     };
     const droppedPluginRule = {
       name: "dropped-plugin-rule",
       tool: "bash" as const,
-      field: "command" as const,
-      pattern: /^drop/,
+      command: "y" as const,
       reason: "drop",
     };
     const harness = loadHarness({
       config: {
-        plugins: [{ name: "demo", rules: [pluginRule, droppedPluginRule] }],
+        plugins: [
+          {
+            name: "demo",
+            cliDescriptors: { x: {}, y: {} },
+            rules: [pluginRule, droppedPluginRule],
+          },
+        ],
         disabledRules: ["dropped-plugin-rule"],
       },
     });
@@ -442,11 +442,12 @@ describe("loadHarness", () => {
     const rule = {
       name: "clean",
       tool: "bash" as const,
-      field: "command" as const,
-      pattern: /^never$/,
+      command: "x" as const,
       reason: "clean",
     };
-    const harness = loadHarness({ config: { rules: [rule] } });
+    const harness = loadHarness({
+      config: { plugins: [TEST_STRICT_FACTS], rules: [rule] },
+    });
     assert.deepEqual(harness.diagnostics, []);
   });
 
@@ -529,8 +530,7 @@ describe("loadHarness", () => {
         {
           name: "would-block",
           tool: "bash" as const,
-          field: "command" as const,
-          pattern: /^.*$/,
+          command: "never" as const,
           reason: "never",
         },
       ],
@@ -664,8 +664,7 @@ describe("loadHarness", () => {
           {
             name: "phony] BAD",
             tool: "bash" as const,
-            field: "command" as const,
-            pattern: /^never$/,
+            command: "never" as const,
             reason: "r",
           },
         ],
@@ -729,8 +728,7 @@ describe("loadHarness", () => {
           {
             name: "phony] BAD",
             tool: "bash" as const,
-            field: "command" as const,
-            pattern: /^never$/,
+            command: "never" as const,
             reason: "r",
           },
         ],
@@ -1122,8 +1120,7 @@ describe("ctx.command harness integration", () => {
     const rule: Rule = {
       name: "two-messages",
       tool: "bash",
-      field: "command",
-      pattern: "^git\\b",
+      command: "git",
       reason: "two -m values",
       when: {
         condition: (ctx) =>
@@ -1506,8 +1503,7 @@ describe("expectBlocks / expectAllows / expectRuleFires", () => {
   const blockAllRule: Rule = {
     name: "block-all",
     tool: "bash",
-    field: "command",
-    pattern: /.*/,
+    command: ["x", "y", "z", "anything", "git", "npm"],
     reason: "test block",
     noOverride: true,
   };
@@ -1627,8 +1623,7 @@ describe("runMatrix / formatMatrix", () => {
   const blockAllRule: Rule = {
     name: "block-all",
     tool: "bash",
-    field: "command",
-    pattern: /.*/,
+    command: ["x", "y", "z", "anything", "git", "npm"],
     reason: "test block",
     noOverride: true,
   };
@@ -1662,16 +1657,14 @@ describe("runMatrix / formatMatrix", () => {
     const r1: Rule = {
       name: "rule-one",
       tool: "bash",
-      field: "command",
-      pattern: /^x/,
+      command: "x",
       reason: "r1",
       noOverride: true,
     };
     const r2: Rule = {
       name: "rule-two",
       tool: "bash",
-      field: "command",
-      pattern: /^y/,
+      command: "y",
       reason: "r2",
       noOverride: true,
     };
@@ -1860,8 +1853,7 @@ describe("mockExtensionContext", () => {
     const rule: Rule = {
       name: "needs-mark",
       tool: "bash",
-      field: "command",
-      pattern: /^git pu/,
+      command: "git",
       reason: "needs mark",
       noOverride: true,
       when: {

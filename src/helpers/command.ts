@@ -37,10 +37,10 @@ import type { Word } from "@cad0p/unbash-walker";
 import { EMPTY_ARITY, type ResolvedArity } from "../arity.ts";
 import type { CLIFlag, PredicateToolInput } from "../schema.ts";
 import {
+  flagPresenceScan,
   getAllFlagValues,
   getFlagValue,
   hasEnvAssignment,
-  hasFlag,
   isInfoOnly,
 } from "./flags.ts";
 
@@ -68,11 +68,19 @@ import {
  */
 export interface SteeringCommand {
   /**
-   * `true` if the command carries any listed flag entry (bare token,
-   * attached `flag=value` token, glued `-X<rest>` via bound glue).
-   * Delegates to `hasFlag` with the bound argv words through the
-   * `boundEntryViews` adapter (entries select spellings; bound arity
-   * decides consumption/glue).
+   * `true` if the command carries any listed flag entry: bare token,
+   * attached `--flag=value` token, declared consuming-flag values
+   * skipped by position, and short bundles — always-on for
+   * single-char shorts with table-derived glue + lead-letter
+   * truncation (`-uf` counts for `-f`; `-Rfoo` with `R` declared
+   * counts for `R` but never for `f`; longs never bundle-match).
+   * Delegates to the shared `flagPresenceScan` with the bound argv
+   * words, the requested spellings (via the `boundEntryViews`
+   * adapter), and the bound table-derived sets — the SAME code path
+   * as the `when.flag` leaf (issue #123), so facade and leaf agree
+   * structurally, not aspirationally. There is no bundle-blind
+   * variant: a blind `hasFlag` disagreed with the leaf on bundled
+   * bool shorts (the `-uf` fail-open hole).
    */
   hasFlag(flag: CLIFlag | readonly CLIFlag[]): boolean;
 
@@ -127,8 +135,9 @@ export interface SteeringCommand {
  * from a passed entry's `takesValue`. Per requested entry per alias spelling
  * the adapter emits `{aliases:[spelling], takesValue:
  * arity.valueConsumingFlags.has(spelling)}`; bound value methods pass these
- * VIEWS (not caller entries) into `flags.ts` queries, and bundle glue letters
- * come from `arity.gluedShorts` only. A hand-literal with `takesValue:true`
+ * VIEWS (not caller entries) into `flags.ts` queries, and the presence scan
+ * reads consumption/glue from the bound sets (never the views'
+ * `takesValue`). Spellings are filtered to well-formed shapes
  * for an unlisted spelling therefore consumes nothing and skips nothing on
  * the bound path — it cannot bypass the table, and values vs `positionals()`
  * vs leaves cannot diverge.
@@ -151,6 +160,17 @@ function boundEntryViews(
     if (!Array.isArray(aliases)) continue;
     for (const spelling of aliases) {
       if (typeof spelling !== "string") continue;
+      // Well-formed shapes only (the `when.flag` leaf's validity
+      // contract): longs (`--` + name) or single-char shorts (`-` +
+      // letter). Malformed spellings select nothing — mirroring the
+      // leaf's fail-skip, so facade and leaf cannot disagree on garbage.
+      if (spelling.startsWith("--")) {
+        if (spelling.length <= 2) continue;
+      } else if (spelling.startsWith("-")) {
+        if (spelling.length !== 2) continue;
+      } else {
+        continue;
+      }
       views.push({
         aliases: [spelling],
         takesValue: arity.valueConsumingFlags.has(spelling),
@@ -189,7 +209,13 @@ export function commandFromInput(
   const bound: ResolvedArity = arity ?? EMPTY_ARITY;
   const consuming = new Set<string>(bound.valueConsumingFlags);
   return {
-    hasFlag: (flag) => hasFlag(args, boundEntryViews(flag, bound)),
+    hasFlag: (flag) =>
+      flagPresenceScan(
+        args,
+        boundEntryViews(flag, bound),
+        bound.valueConsumingFlags,
+        bound.gluedShorts,
+      ),
     getFlagValue: (flags) => getFlagValue(args, boundEntryViews(flags, bound)),
     getAllFlagValues: (flags) =>
       getAllFlagValues(args, boundEntryViews(flags, bound)),

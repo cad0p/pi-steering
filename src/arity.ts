@@ -67,10 +67,12 @@ function warnInvalidDescriptorOnce(basename: string, detail: string): void {
  * Carries the `basename` (set at the throw site in
  * {@link resolveDescriptor}); the evaluator's `runPredicateChain`
  * attaches `ruleName`/`source` on the rule path before rethrowing to
- * the top-level fail-closed catch (explicit passthrough — deliberately
- * STRONGER than the `UnknownPredicateError` precedent, which S1
- * isolates to warn+skip: a missing descriptor is a fail-CLOSED config
- * hole, not a buggy predicate, so swallowing it would fail OPEN).
+ * the top-level fail-closed catch (explicit passthrough — unknown
+ * predicate keys take the opposite road since issue #75: rejected at
+ * load by `validateWhenClauseKeys`, projected `"unknown"`
+ * fail-closed at runtime — because a missing descriptor is a
+ * fail-CLOSED config hole, not a buggy predicate, swallowing it here
+ * would fail OPEN).
  *
  * Present-but-empty descriptors (`{ npm: {} }`) are EXPLICIT strict
  * and never throw — only a wholly absent entry does.

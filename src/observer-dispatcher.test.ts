@@ -1042,18 +1042,20 @@ describe("buildObserverDispatcher: plugin env tracker parity (issue #54)", () =>
         {
           name: "env-owner",
           trackers: { env: pluginEnvTracker("plugin-only") },
+          // Explicit strict: this suite pins the dispatch-parity
+          // latch, not argv arity (issue #107 loudness).
+          cliDescriptors: { echo: {} },
         },
       ],
       {},
       EVALUATOR_BUILTIN_TRACKERS,
     );
 
-    // Rule surface: pattern on the resolved form blocks the tool_call.
+    // Rule surface: command routing on the resolved form blocks the tool_call.
     const guard: Rule = {
       name: "block-plugin-echo",
       tool: "bash",
-      field: "command",
-      pattern: /echo plugin-only/,
+      command: "echo",
       reason: "resolved-form block",
     };
     const evaluator = buildEvaluator({ rules: [guard] }, resolved, makeHost());
@@ -1172,8 +1174,7 @@ describe("buildObserverDispatcher: plugin env tracker parity (issue #54)", () =>
     const guard: Rule = {
       name: "no-destructive-after-danger",
       tool: "bash",
-      field: "command",
-      pattern: /^rm -rf/,
+      command: "rm",
       reason: "dangerous-rm latch",
       when: {
         not: { missing: { event: "dangerous-rm", in: "agent_loop" } },

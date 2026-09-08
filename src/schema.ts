@@ -404,20 +404,25 @@ export type SubcommandPattern = string | RegExp;
 
 /**
  * Spread form shared by {@link SubcommandLeaf} (outer) and
- * {@link SubcommandLeafInner} (inner): `{ pattern, depth? }`. In spread
- * form an array `pattern` MUST have `length === depth` (positional
- * sequence); bare arrays (no spread) are OR-of-matches at the default
- * depth 1 instead.
+ * {@link SubcommandLeafInner} (inner): `{ anyOf }` — the explicit OR,
+ * mirroring the {@link FlagSpreadBase} leaf. Each member is a single
+ * {@link SubcommandPattern} (one-word match) or a positional sequence
+ * of them (`["pr", "create"]` matches `gh pr create ...` — the
+ * member's length IS the extraction width, inferred per member).
+ *
+ * There is deliberately NO `depth` key: arrays always mean positional
+ * sequence, so the width is never declared twice. `{ anyOf: ["pr",
+ * "push"] }` fires on either one-word subcommand; `{ anyOf:
+ * [["pr", "create"], ["repo", "create"]] }` fires on either
+ * two-word sequence. Members may mix widths.
  */
 export interface SubcommandSpreadBase {
-  /** Single pattern or positional sequence (`length === depth`). */
-  pattern: SubcommandPattern | SubcommandPattern[];
   /**
-   * How many positional tokens make up the subcommand. Default 1.
-   * `aws s3 ls` / `kubectl get pods` want 2. `0` extracts nothing →
-   * `"unknown"` → default `"block"` (fail-closed).
+   * OR over members: each a single pattern or a positional sequence.
+   * Non-empty; every member a `string | RegExp` or a non-empty
+   * all-`string | RegExp` array.
    */
-  depth?: number;
+  anyOf: readonly (SubcommandPattern | readonly SubcommandPattern[])[];
   /**
    * Arity resolves ONLY via the CLI-descriptor registry by basename
    * (issue #107): flags that consume the following token (`-C`, `-c`,
@@ -582,7 +587,7 @@ export interface CLIDescriptor {
  * ## ARGV leaves (`subcommand:` / `flag:`)
  *
  * The spread forms differ the same way (`subcommand:`'s
- * `{ pattern, depth, onUnknown? }` and `flag:`'s
+ * `{ anyOf, onUnknown? }` and `flag:`'s
  * `{ anyOf, onUnknown? }` drop
  * `onUnknown?:` inside `not:`). Named leaf types below keep the
  * Outer/Inner declarations in lockstep: {@link SubcommandLeaf} /
@@ -664,9 +669,15 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
   };
 
   /**
-   * Escape-hatch predicate for one-off logic. Prefer plugin-registered
-   * predicates when the logic is reusable; use `condition` for
-   * genuinely local checks that don't warrant a plugin.
+   * Escape-hatch predicate for one-off logic. FORBIDDEN in examples
+   * (CI-pinned: no `condition:` key under `examples/`, any depth) —
+   * example rules compose built-in leaves and registered predicates
+   * instead (see the `force-push-strict` pack for the blessed
+   * inline-plugin registered-predicate shape). Leaf-inexpressible or reused logic gets a named
+   * `definePredicate` per ADR §13 (precedents: the rm plugin's
+   * `hasRecursiveForce`, the git plugin's `isForcePush`) — a name
+   * carries its own unit tests and a registry entry, an inline
+   * closure carries neither.
    *
    * Throws (sync or rejected promise) are caught and treated as
    * `"unknown"`. Outer-level `condition:` is bare-`PredicateFn`-typed
@@ -725,16 +736,19 @@ export interface BuiltInWhenLeavesOuter<Writes extends string = string> {
    * Bare `string` = EXACT equality (`"push"` does NOT match
    * `"pushback"`) — deliberately NOT the regex-source semantics of
    * {@link Pattern}-typed leaves like `cwd:`. `RegExp` = test
-   * against the extracted word. Bare array = OR-of-matches at the
-   * default depth 1 (any member matching the first subcommand word
-   * fires). Spread form `{ pattern, depth?, onUnknown? }` covers
-   * multi-word runs (`aws s3 ls`, `kubectl get
-   * pods`): the array length MUST equal `depth` (positional
-   * sequence — `["s3", "ls"]` at `depth: 2`); a non-array pattern
-   * with `depth > 1`, a length≠depth array, an empty array, or
-   * non-`string | RegExp` members are invalid and the leaf evaluates
-   * to `false` (rule skips, `cwd`-style fail-skip). `depth: 0`
-   * extracts nothing → `"unknown"` → default `"block"` (fail-closed).
+   * against the extracted word. Bare array = positional sequence
+   * (`["pr", "create"]` matches `gh pr create ...` — length IS
+   * the extraction width, inferred). Spread form `{ anyOf,
+   * onUnknown? }` is the explicit OR, mirroring the `flag:` leaf:
+   * `{ anyOf: ["pr", "push"] }` fires on either one-word
+   * subcommand; `{ anyOf: [["pr", "create"], ["repo",
+   * "create"]] }` fires on either two-word sequence (members may
+   * mix widths; extraction width is per-member). Malformed leaves
+   * (empty array, empty `anyOf`, non-`string | RegExp` members,
+   * non-sequence `anyOf` members, missing `anyOf`, the deleted
+   * `{ pattern, depth }` shape) evaluate to `false` (rule skips,
+   * `cwd`-style fail-skip). There is no zero-width unknown shape:
+   * `command:` alone with no `subcommand:` leaf is the unfiltered form.
    *
    * Consuming-flag arity resolves ONLY via the CLI-descriptor registry
    * by basename (issue #107): `git -C DIR` / `-c <key>=<value>` skip
@@ -1151,9 +1165,9 @@ export interface WhenClause<Writes extends string = string> {
  * Fields common to every tool-specific rule variant.
  *
  * `BaseRule` is the shared slice - everything except the `tool`
- * discriminant and the tool-specific {@link BashRule.field} /
- * {@link WriteRule.field} / {@link EditRule.field} sub-unions. The
- * exported user-facing type is {@link Rule}, the discriminated union
+ * discriminant, the bash {@link BashRule.command} first filter, and
+ * the tool-specific {@link WriteRule.field} / {@link EditRule.field}
+ * sub-unions. The exported user-facing type is {@link Rule}, the discriminated union
  * over the three tool variants; authors should reach for `Rule`
  * unless they're writing generic rule-handling code that already
  * knows the tool at its call site.
@@ -1175,9 +1189,10 @@ export interface BaseRule<
   name: string;
 
   /**
-   * Main match predicate. See {@link Pattern}. The rule fires only
-   * if this matches the chosen `field` value (for bash, the
-   * AST-extracted command string per ref).
+   * Main match predicate (write / edit rules only — bash rules route
+   * on {@link BashRule.command} and carry no `pattern`). See
+   * {@link Pattern}. The rule fires only if this matches the chosen
+   * `field` value.
    */
   pattern: Pattern;
 
@@ -1365,7 +1380,8 @@ export interface BaseRule<
    * { in: "agent_loop" }` check can detect it.
    *
    * Timing guarantees:
-   *   - Runs after `pattern` / `requires` / `unless` / `when` have all
+   *   - Runs after the tool filter (`command:` on bash, `pattern:`
+   *     on write/edit) / `requires` / `unless` / `when` have all
    *     evaluated favourably. If `when.cwd` or any other predicate
    *     fails, the rule doesn't fire and `onFire` doesn't run.
    *   - Runs for rules that will actually BLOCK. Rules suppressed by an
@@ -1389,28 +1405,112 @@ export interface BaseRule<
 }
 
 /**
+ * Union of CLI basenames declared by a `plugins` tuple (issue #117).
+ *
+ * Projects `keyof` each plugin's `cliDescriptors` map across the tuple —
+ * the same tuple-walking shape as {@link AllRuleNames} (see
+ * `define-config.ts`), but over descriptor keys instead of rule names.
+ * `defineConfig` threads this through as the `Cmd` parameter of
+ * {@link BashRule}, so `command: "gti"` (undeclared) is a compile
+ * error while declared basenames (plugin-shipped + inline-literal
+ * `cliDescriptors` keys in the same `plugins:` tuple) are accepted.
+ *
+ * Widening escape (same caveat family as the exemption universe): a
+ * bare `: Plugin` annotation widens `cliDescriptors` to
+ * `Record<string, CLIDescriptor>`, whose key union is `string` — the
+ * constraint goes permissive ("can't verify" means "skip", never a
+ * false-positive). The runtime backstop (the fail-closed
+ * rule-tagged `MissingDescriptorError` block on the first MATCHED
+ * evaluation, naming the missing-descriptor remedy) covers the
+ * widened path.
+ *
+ * Defaults to the unconstrained (`string`) form when no facts exist:
+ * no type argument, an empty tuple, or a tuple where no plugin
+ * declares `cliDescriptors` all mean "can't verify" → skip (never a
+ * false-positive). The runtime backstop (the fail-closed
+ * rule-tagged `MissingDescriptorError` block on the first MATCHED
+ * evaluation, naming the missing-descriptor remedy) covers those
+ * paths — so a descriptor-less config still fails LOUD, never
+ * silent. Strict (typo-killing) exactly when the tuple contributes
+ * ≥1 descriptor key.
+ */
+type PluginBasenames<PL> = PL extends Plugin
+  ? PL["cliDescriptors"] extends infer D
+    ? [D] extends [undefined]
+      ? never
+      : Extract<keyof NonNullable<D>, string>
+    : never
+  : never;
+
+type BasenameWalk<P extends readonly Plugin[]> = P extends readonly [
+  infer First,
+  ...infer Rest,
+]
+  ?
+      | PluginBasenames<First>
+      | (Rest extends readonly Plugin[] ? BasenameWalk<Rest> : never)
+  : never;
+
+export type Basename<P extends readonly Plugin[] = never> = [P] extends [never]
+  ? string
+  : [BasenameWalk<P>] extends [never]
+    ? string
+    : BasenameWalk<P>;
+
+/**
  * Bash rule: gates pi's `bash` tool.
  *
- * `field` is constrained to `"command"` - the evaluator always runs
- * bash rules against the extracted command string per ref (see
- * `evaluator.ts` bash branch). There is no useful "test a bash rule
- * against a path" mode: bash has no path. `field: "path"` /
- * `field: "content"` on a bash rule silently misbehaved in the
- * previous (non-discriminated) schema; the union here makes the
- * mistake a compile error.
+ * Routing is the required `command:` first filter (issue #117) —
+ * exact basename equality vs the walker-ref basename, never regex,
+ * never substring. `field:` is gone from this variant (every bash
+ * rule tested the same `"command"` slot; the redundancy is dropped
+ * and its absence is tsc-enforced), and so is `pattern:` (its whole
+ * mechanism — write / edit rules keep `tool` / `field` / `pattern`
+ * untouched; `pattern` remains their matching surface).
+ *
+ * Wrapper-transparent structurally: `sh -c 'git push'`,
+ * `/usr/bin/git`, `git -C /x` match (the ref sees inner commands);
+ * `echo 'git push'` doesn't (opaque string arg). Nameless refs
+ * (bare `VAR=x` chains — no binary) never match.
  *
  * Inside a rule's predicates / `onFire`, the context exposes the
  * extracted command plus `args` (quote-aware `Word[]`) and
  * `basename` - those are populated per-ref by the evaluator, not by
  * the rule author.
  */
-export interface BashRule<
+export type BashRule<
   ObsName extends string = string,
   Writes extends string = string,
-> extends BaseRule<ObsName, Writes> {
+  Cmd extends string = string,
+> = Omit<BaseRule<ObsName, Writes>, "pattern"> & {
   tool: "bash";
-  field: "command";
-}
+  /**
+   * Exact basename first filter (issue #117) — routing, not matching.
+   *
+   * Required. Absorbs the old `field: "command"` (dropped as
+   * redundant — tsc rejects `field` on bash rules).
+   *
+   * Singular key, union type (schema's dominant `X | X[]` idiom): a
+   * single {@link Basename} or a `readonly` array of them (plain OR —
+   * one name = one `disabledRules` / exemption / override entry, NOT
+   * shared leaves; leaves stay per-ref AND under arrays, and a leaf
+   * meaningless for a binary never fires its refs). An empty array
+   * never matches (mirrors the empty-`anyOf` invalid rule). One
+   * basename per entry — `"git commit"` (whitespace) is rejected at
+   * evaluator build.
+   *
+   * At `defineConfig` sites `Cmd` narrows to the descriptor-key
+   * union across the `plugins` tuple (plugin-shipped +
+   * inline-literal `cliDescriptors` keys), so `command: "gti"` is a
+   * compile error — the silent never-fire typo class is dead. Three
+   * inherited caveats (same as the exemption universe): widened
+   * `: Plugin` skips (runtime loud-throw backstop covers),
+   * per-file universes can false-positive across layers, plain
+   * `satisfies` escapes. Routing to a binary requires its facts:
+   * declare the plugin that ships its `cliDescriptors`.
+   */
+  command: Cmd | readonly Cmd[];
+};
 
 /**
  * Write rule: gates pi's `write` tool (whole-file writes).
@@ -1448,15 +1548,20 @@ export interface EditRule<
 
 /**
  * A single steering rule - discriminated union over the three
- * gatable tools. The `tool` discriminant determines which `field`
- * values are legal: bash rules test against `"command"`, write / edit
- * rules test against `"path"` or `"content"`. Invalid combinations
- * (`{ tool: "bash", field: "path" }`, `{ tool: "write", field:
- * "command" }`, ...) are TS errors.
+ * gatable tools. The `tool` discriminant determines the rule shape:
+ * bash rules route on the required `command:` first filter (exact
+ * basename equality) with `when:` leaves for the rest; write / edit
+ * rules test `field` (`"path"` or `"content"`) against `pattern:`.
+ * Invalid combinations (`{ tool: "write", field: "command" }`,
+ * `pattern:` on a bash rule, `field:` on a bash rule, ...) are TS
+ * errors.
  *
  * Shape refinements vs. v1:
- *   - `pattern` accepts `RegExp` in addition to `string`.
- *   - `requires` / `unless` accept `Pattern | PredicateFn`.
+ *   - Bash: `command: Basename | readonly Basename[]` (required,
+ *     exact equality); no `field`, no `pattern`.
+ *   - Write/edit: `pattern` accepts `RegExp` in addition to `string`.
+ *   - `requires` / `unless` accept `Pattern | PredicateFn` (Patterns
+ *     kept transiently — see the retirement note in the README).
  *   - `when` is a {@link TopLevelWhenClause} — registry-driven
  *     mapped type with one level of `not:` allowed (no nested
  *     `not: not: ...`).
@@ -1469,8 +1574,9 @@ export interface EditRule<
 export type Rule<
   ObsName extends string = string,
   Writes extends string = string,
+  Cmd extends string = string,
 > =
-  | BashRule<ObsName, Writes>
+  | BashRule<ObsName, Writes, Cmd>
   | WriteRule<ObsName, Writes>
   | EditRule<ObsName, Writes>;
 
@@ -1666,7 +1772,7 @@ export interface PredicateWord extends Word {
  * Bash note (per ADR §9): `command`, `basename`, and `args` are
  * populated PER extracted command ref - a bash invocation of
  * `git push --force && ls` runs the predicate once per ref, with
- * `command: "git push --force"` (flattened for pattern matching),
+ * `command: "git push --force"` (flattened `basename + args` string),
  * `basename: "git"`, and `args: [<PredicateWord>, <PredicateWord>]`
  * (suffix `PredicateWord[]` — see {@link PredicateWord}). `rawCommand`
  * and full AST node access are deliberately NOT exposed - the wrapper
@@ -2219,11 +2325,10 @@ export interface SteeringConfig {
    * `plugin.rules[*].name` and inline `rules[*].name`. Ctrl+Click on a
    * literal jumps to the `AllRuleNames` union, NOT the rule's source —
    * TypeScript-language limitation on string-literal union members. To
-   * inspect a shipped rule's `reason` / `pattern`, open its plugin
+   * inspect a shipped rule's `reason` / `when`, open its plugin
    * module directly (e.g. `@cad0p/pi-steering/plugins/git` for
    * `no-force-push` / `no-hard-reset`, `.../plugins/rm` for
-   * `no-rm-rf-slash`, `.../plugins/async` for
-   * `no-long-running-commands`) and hover the exported rule binding:
+   * `no-rm-rf-slash`) and hover the exported rule binding:
    *
    * ```ts
    * import { noForcePush } from "@cad0p/pi-steering/plugins/git";

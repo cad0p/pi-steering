@@ -63,16 +63,16 @@ describe("commit-requires-work-item", () => {
   });
 
   it('does NOT fire on git log --grep="commit"', async () => {
-    // Make sure the pattern doesn't spuriously match arbitrary
+    // Make sure the routing doesn't spuriously match arbitrary
     // commit-containing text.
     await expectAllows(harness, {
       command: 'git log --grep="commit"',
     });
   });
 
-  it("does NOT fire on `git commit` without -m (the rule's pattern requires -m)", async () => {
-    // The rule pattern anchors on `-m\s`, so this never even
-    // reaches the predicate.
+  it("does NOT fire on `git commit` without -m (the rule's flag leaf requires -m)", async () => {
+    // The rule's `-m` / `--message` flag entry never matches, so this
+    // never even reaches the predicate.
     await expectAllows(harness, { command: "git commit --amend" });
   });
 

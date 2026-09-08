@@ -41,6 +41,20 @@ import type { CLIDescriptor } from "../../schema.ts";
  * `DEFAULT_POSITION_POLICIES["git"]`; `-C`/`-c` handling matches
  * `./trackers/branch-tracker.ts`.
  *
+ * Subcommand-scoped entries (issue #117 — all `--help`-pinned, see
+ * each entry): the flags table is per-binary (flat), so push / reset /
+ * commit entries share one map; the RULES scope them with `subcommand:`
+ * (AND-composition keeps `git push --hard` out of `no-hard-reset`).
+ *   - push: `force` (`-f` / `--force`), `forceWithLease`,
+ *     `forceIfIncludes`, `mirror` — `git push -h`.
+ *   - reset: `hard` — `git reset -h` (`--hard`: reset HEAD, index
+ *     and working tree).
+ *   - commit: `amend`, `message` (`-m` / `--message`, the table's only
+ *     takesValue:true — `git commit -h`: `-m, --message <message>`).
+ * `--force-with-lease[=<ref:expect>]` and `--force-if-includes` take
+ * attached-optional values only → takesValue:false (the `--exec-path`
+ * precedent).
+ *
  * Referenced by name (never inlined) in the plugin literal so hover
  * rides on this const.
  */
@@ -64,5 +78,19 @@ export const GIT_CLI_DESCRIPTOR = {
     workTree: { aliases: ["--work-tree"], takesValue: true },
     namespace: { aliases: ["--namespace"], takesValue: true },
     configEnv: { aliases: ["--config-env"], takesValue: true },
+    // Push force surface (issue #117; `git push -h`).
+    force: { aliases: ["--force"], takesValue: false },
+    forceShort: { aliases: ["-f"], takesValue: false },
+    forceWithLease: { aliases: ["--force-with-lease"], takesValue: false },
+    forceIfIncludes: {
+      aliases: ["--force-if-includes"],
+      takesValue: false,
+    },
+    mirror: { aliases: ["--mirror"], takesValue: false },
+    // Reset surface (issue #117; `git reset -h`).
+    hard: { aliases: ["--hard"], takesValue: false },
+    // Commit surface (issue #117; `git commit -h`).
+    amend: { aliases: ["--amend"], takesValue: false },
+    message: { aliases: ["-m", "--message"], takesValue: true },
   },
 } as const satisfies CLIDescriptor;

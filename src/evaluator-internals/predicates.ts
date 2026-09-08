@@ -33,6 +33,7 @@ import {
 } from "@cad0p/unbash-walker";
 import type { ResolvedArity } from "../arity.ts";
 import { arityOf, EMPTY_ARITY, resolveDescriptor } from "../arity.ts";
+import { flagPresenceScan } from "../helpers/flags.ts";
 import { isPattern } from "../internal/pattern-utils.ts";
 import type {
   CLIDescriptor,
@@ -46,7 +47,6 @@ import type {
   PredicateWord,
   ReservedPredicateKey,
   SubcommandPattern,
-  SubcommandSpreadBase,
   TopLevelWhenClause,
   TopLevelWhenClauseNoRecurse,
 } from "../schema.ts";
@@ -142,7 +142,8 @@ export function isReservedPredicateKey(
  * exemption mode (used via {@link validateExemptionWhenClauseShape}):
  * any `onUnknown` key found — at the clause top level, at the
  * not-block top level (recursion), or in a leaf object form
- * (`{ pattern, onUnknown }` / `{ value, onUnknown }`) — throws
+ * (`{ pattern, onUnknown }` / `{ value, onUnknown }` / `{ anyOf,
+ * onUnknown }`) — throws
  * instead of being stripped as a modifier.
  */
 export function validateWhenClauseShape(
@@ -173,7 +174,7 @@ export function validateWhenClauseShape(
     // Leaf object forms can smuggle `onUnknown` as a sibling of
     // `pattern` / `value` (e.g. `cwd: { pattern, onUnknown }`, or a
     // plugin predicate's `{ value, onUnknown }` spread) — or as a
-    // sibling of the ARGV-spread keys (`subcommand: { depth,
+    // sibling of the ARGV-spread keys (`subcommand: { anyOf,
     // onUnknown }`, `flag: { anyOf, onUnknown }`).
     // Bare-keyed spreads evade a `pattern | value`-only trigger, so
     // every spread payload key arms the check. Reject those in strict
@@ -244,11 +245,10 @@ export function validateWhenClauseShape(
  *   - the clause top level (`when: { cwd: /x/, onUnknown: ... }`),
  *   - the not-block top level (`when: { not: { cwd: /x/, onUnknown:
  *     ... } }` — the recursion below), and
- *   - leaf object forms carrying `pattern` / `value` / `anyOf` /
- *     `depth` keys
+ *   - leaf object forms carrying `pattern` / `value` / `anyOf` keys
  *     (`cwd: { pattern: /x/, onUnknown: ... }`, plugin spread forms
  *     `{ value: ..., onUnknown: ... }`, ARGV spreads
- *     `{ anyOf: [...], onUnknown: ... }` / `{ depth, onUnknown }`).
+ *     `{ anyOf: [...], onUnknown: ... }`).
  *
  * `condition` (function) and `missing` (`{ event, in, since?,
  * notIn? }`) values are skipped — they cannot carry `onUnknown`.
@@ -270,8 +270,8 @@ export function validateExemptionWhenClauseShape(
 }
 
 /**
- * Does this leaf value carry a `{ pattern | value | anyOf |
- * depth, onUnknown }`
+ * Does this leaf value carry a `{ pattern | value | anyOf,
+ * onUnknown }`
  * object form — i.e. a spread-form leaf that smuggles an `onUnknown`
  * modifier as a sibling of its payload key? Used by
  * {@link validateWhenClauseShape} in strict (`rejectOnUnknown`)
@@ -293,10 +293,7 @@ function leafObjectCarriesOnUnknown(value: unknown): boolean {
   }
   const record = value as Record<string, unknown>;
   return (
-    ("pattern" in record ||
-      "value" in record ||
-      "anyOf" in record ||
-      "depth" in record) &&
+    ("pattern" in record || "value" in record || "anyOf" in record) &&
     "onUnknown" in record
   );
 }
@@ -339,6 +336,78 @@ void _MODIFIER_KEYS_COVERS_TYPE;
 
 function isModifierKey(key: string): boolean {
   return (MODIFIER_KEYS as readonly string[]).includes(key);
+}
+
+/**
+ * Non-registry leaf keys the engine itself dispatches (issue #75
+ * load-time key validation). `not` is the operator field (recursed
+ * into, never flagged); `onUnknown` is a modifier (skipped via
+ * {@link MODIFIER_KEYS}). Everything else must resolve against the
+ * merged predicate registry.
+ */
+const BUILT_IN_LEAF_KEYS: ReadonlySet<string> = new Set([
+  "cwd",
+  "subcommand",
+  "flag",
+  "missing",
+  "condition",
+]);
+
+/**
+ * Load-time unknown-predicate check (issue #75, layer 1 — primary).
+ *
+ * Walks a rule's (or exemption's) `when:` clause — recursing into
+ * `not:` blocks — and throws error-class on the first leaf key that
+ * is neither a built-in ({@link BUILT_IN_LEAF_KEYS} + the `not`
+ * operator, modifiers skipped) nor present in the merged predicate
+ * registry. The diagnostic names the rule path, the key, and the
+ * source layer, with an "install the plugin that provides X" hint —
+ * the twin of the `command:` strict union and the exemption-orphan
+ * error-class precedent: a predicate-key typo can no longer silently
+ * disable a guard (the runtime used to catch-and-skip the throw).
+ *
+ * Runs at config-resolve time (see `buildEvaluator`): inline rules,
+ * plugin-shipped rules, AND exemption clauses go through the same
+ * check. `block` is `undefined` (absent clause) → no-op.
+ *
+ * `known` is the merged registry key set (`Object.keys` of the
+ * resolved predicates); `source` is the owning layer for the hint
+ * (`"user"` for config-authored clauses, `plugin "<name>"` for
+ * shipped ones).
+ */
+export function validateWhenClauseKeys(
+  block: TopLevelWhenClause<string> | undefined,
+  path: string,
+  known: ReadonlySet<string>,
+  source: string,
+): void {
+  if (block === undefined) return;
+  for (const [key, value] of Object.entries(block)) {
+    if (value === undefined) continue;
+    if (isModifierKey(key)) continue;
+    if (key === "not") {
+      if (
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+      ) {
+        validateWhenClauseKeys(
+          value as TopLevelWhenClause<string>,
+          `${path}.not`,
+          known,
+          source,
+        );
+      }
+      continue;
+    }
+    if (BUILT_IN_LEAF_KEYS.has(key)) continue;
+    if (known.has(key)) continue;
+    throw new Error(
+      `[pi-steering] ${path} names unknown predicate "${key}" — ` +
+        `no plugin registered a handler for "when.${key}" in ${source}. ` +
+        `Install the plugin that provides "${key}" (or fix the typo).`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -398,17 +467,21 @@ export async function matchesPatternOrFn(
 // ---------------------------------------------------------------------------
 
 /**
- * Thrown when a {@link TopLevelWhenClause} references a predicate name that no
- * plugin has registered. The error message includes the offending key
+ * Named error for a `when:` clause referencing a predicate name that
+ * no plugin registered. The error message includes the offending key
  * so the source of the typo / missing plugin is clear at the site of
  * the rule.
+ *
+ * Retained as public API for catch-by-type callers; the engine itself
+ * no longer throws it (issue #75): static configs fail at load via
+ * {@link validateWhenClauseKeys} (rule + layer + key + install hint),
+ * and the dispatcher projects unregistered keys to `"unknown"`
+ * fail-closed at runtime instead of throwing into catch-and-skip.
  *
  * Schema-level typo detection doesn't cover this because the
  * `TopLevelWhenClause` mapped-type's index signature is deliberately
  * loose (`unknown`) — per
- * the ADR, plugin predicates can accept arbitrary arg shapes. The
- * trade-off is that we surface the error at evaluation time instead of
- * load time; the key-scoped message keeps that tolerable.
+ * the ADR, plugin predicates can accept arbitrary arg shapes.
  */
 export class UnknownPredicateError extends Error {
   readonly key: string;
@@ -568,85 +641,58 @@ const VALID_POSITION_POLICIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Normalize a `when.subcommand` leaf into `{ patterns, depth }`, or
- * return `"unknown"` for the depth-0 shape (extracts nothing →
- * walker-null → unknown → default block), or `null` when malformed
- * (caller fail-skips → `false`).
+ * Normalize a `when.subcommand` leaf into its OR-of-sequences member
+ * list (each member a positional sequence of {@link SubcommandPattern}),
+ * or `null` when malformed (caller fail-skips → `false`).
  *
  * Shapes:
- *   - bare `string | RegExp` → single pattern, depth 1.
- *   - bare array → OR-of-matches at depth 1 (any length ≥ 1, all
- *     members `string | RegExp`).
- *   - spread `{ pattern, depth? }` → single pattern requires depth 1
- *     (single + depth > 1 is invalid); array pattern requires
- *     `length === depth` (positional sequence). `depth` defaults to
- *     1; non-integer / negative depths are invalid.
+ *   - bare `string | RegExp` → one single-pattern member.
+ *   - bare array → one positional-sequence member (length ≥ 1, all
+ *     members `string | RegExp` — length IS the extraction width).
+ *   - spread `{ anyOf }` → OR over members; each member is a single
+ *     `string | RegExp` or a non-empty all-`string | RegExp` array
+ *     (members may mix widths; extraction width is per-member).
+ *
+ * Anything else — empty arrays, empty `anyOf`, non-`string | RegExp`
+ * members, non-sequence `anyOf` members, missing `anyOf`, and the
+ * deleted `{ pattern, ... }` shape — is malformed → `null`
+ * (fail-skip, never unknown). There is no zero-width unknown shape.
  *
  * Arity resolves via the table channel (issue #110): the spread carries no
  * arity — `evaluateSubcommand` resolves via `arityOf(basename, descriptors,
  * cache)` (derived sets from the `flags` table).
  */
-function normalizeSubcommandLeaf(value: unknown):
-  | {
-      patterns: SubcommandPattern[];
-      depth: number;
-      sequence: boolean;
-    }
-  | "unknown"
-  | null {
-  // Bare single pattern.
+function normalizeSubcommandLeaf(value: unknown): SubcommandPattern[][] | null {
+  // Bare single pattern → one single-word member.
   if (isSubcommandPattern(value)) {
-    return {
-      patterns: [value],
-      depth: 1,
-      sequence: false,
-    };
+    return [[value]];
   }
-  // Bare array: OR-of-matches at depth 1.
+  // Bare array → one positional-sequence member.
   if (Array.isArray(value)) {
     if (value.length === 0 || !value.every(isSubcommandPattern)) return null;
-    return {
-      patterns: value as SubcommandPattern[],
-      depth: 1,
-      sequence: false,
-    };
+    return [value as SubcommandPattern[]];
   }
-  // Spread form.
+  // Spread form: `{ anyOf }` only.
   if (value !== null && typeof value === "object") {
-    const obj = value as Partial<SubcommandSpreadBase> & {
-      pattern?: unknown;
-      depth?: unknown;
-    };
-    if (!("pattern" in obj)) return null;
-    const depth = obj.depth ?? 1;
-    if (typeof depth !== "number" || !Number.isInteger(depth) || depth < 0) {
+    const obj = value as { anyOf?: unknown };
+    if (!Array.isArray(obj.anyOf) || obj.anyOf.length === 0) return null;
+    const members: SubcommandPattern[][] = [];
+    for (const member of obj.anyOf) {
+      if (isSubcommandPattern(member)) {
+        members.push([member]);
+        continue;
+      }
+      if (
+        Array.isArray(member) &&
+        member.length > 0 &&
+        member.every(isSubcommandPattern)
+      ) {
+        members.push(member as SubcommandPattern[]);
+        continue;
+      }
       return null;
     }
-    if (depth === 0) return "unknown";
-    if (isSubcommandPattern(obj.pattern)) {
-      // Single (non-array) pattern with depth > 1 is invalid.
-      if (depth !== 1) return null;
-      return {
-        patterns: [obj.pattern],
-        depth,
-        sequence: false,
-      };
-    }
-    if (Array.isArray(obj.pattern)) {
-      if (obj.pattern.length === 0 || !obj.pattern.every(isSubcommandPattern)) {
-        return null;
-      }
-      // Spread arrays are positional sequences: length MUST equal
-      // depth (`["s3", "ls"]` at depth 2). Anything else is
-      // invalid (bare arrays cover the OR shorthand).
-      if (obj.pattern.length !== depth) return null;
-      return {
-        patterns: obj.pattern as SubcommandPattern[],
-        depth,
-        sequence: depth > 1,
-      };
-    }
-    return null;
+    return members;
   }
   return null;
 }
@@ -711,8 +757,9 @@ function projectSubcommandWords(args: readonly PredicateWord[]): Word[] {
  * with no `args`) — the caller projects via `onUnknown:` (default
  * `"block"` = fail-CLOSED) exactly like {@link evaluateCwd}.
  *
- * Malformed leaves (empty array, length≠depth, non-`string|RegExp`
- * members, single pattern with depth > 1, bad depth) fail-SKIP to
+ * Malformed leaves (empty array, empty `anyOf`, non-`string|RegExp`
+ * members, non-sequence `anyOf` members, missing `anyOf`, the deleted
+ * `{ pattern, ... }` shape) fail-SKIP to
  * `false` (`cwd`-style), NOT unknown. Walker `TypeError`s (invalid
  * resolved policy) never escape: skip + warn (S1).
  */
@@ -728,10 +775,8 @@ function evaluateSubcommand(
   // Non-bash tools carry no `args` → unknown → default block
   // (fail-closed, S1).
   if (!Array.isArray(args)) return "unknown";
-  const normalized = normalizeSubcommandLeaf(value);
-  if (normalized === "unknown") return "unknown";
-  if (normalized === null) return false;
-  const { patterns, depth, sequence } = normalized;
+  const members = normalizeSubcommandLeaf(value);
+  if (members === null) return false;
   // Resolve per-binary argv knowledge via the hoisted `arityOf` (issue
   // #110): registry policy overrides the table fallback; absent throws
   // `MissingDescriptorError` (loud — no silent fallback). Re-validates at
@@ -773,43 +818,64 @@ function evaluateSubcommand(
     return false;
   }
   // Project FIRST (normalization, outside the guard below): `try/catch`
-  // wraps ONLY the `locateSubcommandRun` call, so a walker `TypeError`
+  // wraps ONLY the `locateSubcommandRun` calls, so a walker `TypeError`
   // must never escape — extraction failure skips + warns (S1).
   const projected = projectSubcommandWords(args);
-  let run: SubcommandRun | null;
-  try {
-    run = locateSubcommandRun(projected, {
-      positionPolicy,
-      depth,
-      valueConsumingFlags,
-    });
-  } catch (err) {
-    const msg =
-      err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
-    console.warn(
-      `[pi-steering] Rule "${ruleName}"@${source}: when.subcommand ` +
-        `extraction threw: ${msg}`,
-    );
-    return false;
-  }
-  if (run === null) return "unknown";
-  const words = run.words.map(scanWordText);
-  if (sequence) {
-    // Positional sequence: the walker caps at `depth`, so require a
-    // full run (`aws s3` does NOT match `["s3", "ls"]` depth 2).
-    if (words.length !== depth) return false;
-    return patterns.every((p, i) => {
+  // OR over members; extraction width is per-member (the walker's
+  // `depth` option is the member length — length IS the width,
+  // inferred). A member matches iff extraction yields a full run of
+  // exactly its width and every position matches (bare strings EXACT
+  // equality, RegExp tested against the word). A `null` extraction on
+  // any member (all-flags invocation, trailing consuming flag,
+  // after-only invalid shape, assignment-only/nameless) with no
+  // member matched surfaces `"unknown"` → the caller's `onUnknown:`
+  // policy (default `"block"` = fail-CLOSED) — the single-member
+  // case reproduces the old null → unknown contract exactly.
+  let sawNull = false;
+  for (const member of members) {
+    const width = member.length;
+    let run: SubcommandRun | null;
+    try {
+      run = locateSubcommandRun(projected, {
+        positionPolicy,
+        depth: width,
+        valueConsumingFlags,
+      });
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? `${err.message}\n${err.stack ?? ""}`
+          : String(err);
+      console.warn(
+        `[pi-steering] Rule "${ruleName}"@${source}: when.subcommand ` +
+          `extraction threw: ${msg}`,
+      );
+      return false;
+    }
+    if (run === null) {
+      sawNull = true;
+      continue;
+    }
+    const words = run.words.map(scanWordText);
+    // Positional sequence: the walker caps at the width, so require
+    // a full run (`aws s3` does NOT match `["s3", "ls"]`).
+    if (words.length !== width) continue;
+    let hit = true;
+    for (let i = 0; i < width; i++) {
       const word = words[i];
-      return word !== undefined && matchesSubcommandPattern(p, word);
-    });
+      const p = member[i];
+      if (
+        word === undefined ||
+        p === undefined ||
+        !matchesSubcommandPattern(p, word)
+      ) {
+        hit = false;
+        break;
+      }
+    }
+    if (hit) return true;
   }
-  // OR-of-matches (or single) at depth 1: match the first word.
-  // Defensive: the scan only returns non-empty runs, so `first` is
-  // always defined when `run` is non-null — the `undefined` branch is
-  // unreachable but kept total under `noUncheckedIndexedAccess`.
-  const first = words[0];
-  if (first === undefined) return "unknown";
-  return patterns.some((p) => matchesSubcommandPattern(p, first));
+  return sawNull ? "unknown" : false;
 }
 
 /**
@@ -880,84 +946,6 @@ function normalizeFlagLeaf(value: unknown): {
 }
 
 /**
- * Presence scan over the ref's resolved words, shared by the
- * `subcommand`-adjacent flag matching contract (issue #90; #110 entries;
- * #115 derived bundles): exact token matches, attached `--flag=value`
- * forms (no declaration needed — single token by construction),
- * declared consuming-flag values skipped BY POSITION (`i += 2`, never by
- * content), and short bundles — always on for single-char shorts, longs
- * NEVER bundle-match. Bundling derives from the descriptor table via the
- * lead-letter rule: the token's letters scan left to right; the first
- * letter in the derived glue set glues the remainder (only the non-glued
- * prefix is present); undeclared letters never glue (strict-always,
- * fail-closed — the remedy is a table row). `--` itself is a flag-shaped
- * token; post-`--` positionals are unmodelled (walker limitation) and
- * scan as ordinary tokens.
- */
-function flagPresent(
-  args: readonly Word[],
-  anyOf: readonly CLIFlag[],
-  valueConsumingFlags: ReadonlySet<string>,
-  gluedShorts: ReadonlySet<string> = new Set(),
-): boolean {
-  const spellings = new Set<string>();
-  const longs = new Set<string>();
-  const shortLetters = new Set<string>();
-  for (const entry of anyOf) {
-    for (const alias of entry.aliases) {
-      spellings.add(alias);
-      if (alias.startsWith("--")) longs.add(alias);
-      else if (alias.length === 2) shortLetters.add(alias[1]!);
-    }
-  }
-  const consuming = valueConsumingFlags;
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === undefined) continue; // bounds-guard; unreachable while i < length
-    const token = scanWordText(arg);
-    // Exact token match (covers separate-form consuming flags too —
-    // the flag itself IS present; only its value is skipped).
-    if (spellings.has(token)) return true;
-    // Attached `--flag=value`: match the name half against the long
-    // spellings; single token, consumes nothing further.
-    if (token.startsWith("--") && token.includes("=")) {
-      if (longs.has(token.slice(0, token.indexOf("=")))) return true;
-      continue;
-    }
-    // Declared consuming flag: skip its value BY POSITION.
-    if (consuming.has(token)) {
-      i += 1;
-      continue;
-    }
-    // Short bundles (`-uf`), always on for single-char-short aliases
-    // (longs never match here). Glue derivation runs FIRST: the first
-    // letter in the derived glue set glues the remainder, so only the
-    // non-glued prefix is present (`-Rfoo` with `R` declared presents
-    // `R`, never `f`; `-xRfoo` presents `xR`). Undeclared letters never
-    // glue — over-presence fires fail-closed, fixed with a table row.
-    // The token is the same resolved form the rest of the scan uses
-    // (S1), so rawText-only and all-absent words never throw.
-    if (token.length > 1 && token[0] === "-" && token[1] !== "-") {
-      let body = token.slice(1);
-      const eq = body.indexOf("=");
-      if (eq !== -1) body = body.slice(0, eq);
-      let end = body.length;
-      for (let j = 0; j < body.length; j++) {
-        if (gluedShorts.has(body[j]!)) {
-          end = j + 1;
-          break;
-        }
-      }
-      const present = body.slice(0, end);
-      for (const letter of shortLetters) {
-        if (present.includes(letter)) return true;
-      }
-    }
-  }
-  return false;
-}
-
-/**
  * Built-in `when.flag` predicate. Presence scan over `ctx.input.args`
  * (no walker extraction call — positionals and flags scan uniformly).
  * Returns a trinary {@link PredicateVerdict}: `"unknown"` ONLY when
@@ -986,7 +974,7 @@ function evaluateFlag(
       : basename !== undefined
         ? resolveDescriptor(basename, descriptors)
         : EMPTY_ARITY;
-  return flagPresent(
+  return flagPresenceScan(
     args,
     normalized.anyOf,
     arity.valueConsumingFlags,
@@ -1544,9 +1532,25 @@ async function evaluateNotBlock(
       continue;
     }
 
-    // Plugin-registered predicate. Unknown predicate → named error.
+    // Plugin-registered predicate. Unregistered keys (issue #75 layer
+    // 2, defense-in-depth) project `"unknown"` under the block-level
+    // `onUnknown:` policy instead of throwing — consistent with
+    // handler-throws, so a rule with an unknown key fails CLOSED
+    // (fires) rather than silently disappearing down the per-rule
+    // catch-and-skip. Unreachable for static configs once the
+    // load-time key check exists; still warns loudly so the missing
+    // plugin surfaces in logs.
     const handler = predicates[key];
-    if (handler === undefined) throw new UnknownPredicateError(key);
+    if (handler === undefined) {
+      console.warn(
+        `[pi-steering] Rule "${ruleName}"@${source}: when.${key} names ` +
+          `an unregistered predicate — projecting "unknown" (fail-closed ` +
+          `under the block-level onUnknown policy). Install the plugin ` +
+          `that provides "${key}" (or fix the typo).`,
+      );
+      verdicts.push("unknown");
+      continue;
+    }
     verdicts.push(
       await evaluateLeafTrinary(handler, value, ctx, ruleName, source, key),
     );
@@ -1641,10 +1645,12 @@ async function evaluateNotBlock(
  * explicit modifiers stay honored exactly as before (rule-path
  * behavior is byte-identical).
  *
- * Escapes `evaluateWhen` does NOT swallow (`UnknownPredicateError`,
- * `evaluateMissing` shape throws, …) propagate to the caller — the
- * exemption call site in the evaluator wraps the whole clause in its
- * own try/catch and treats a throw as "does not match" (S1).
+ * Escapes `evaluateWhen` does NOT swallow (`evaluateMissing` shape
+ * throws, …) propagate to the caller — the exemption call site in the
+ * evaluator wraps the whole clause in its own try/catch and treats a
+ * throw as "does not match" (S1). Unregistered predicate keys are NOT
+ * escapes anymore (issue #75): they project `"unknown"` inline,
+ * fail-closed in rule mode, no-match in exemption mode.
  */
 export async function evaluateWhen(
   when: TopLevelWhenClause<string> | undefined,
@@ -1789,8 +1795,31 @@ export async function evaluateWhen(
 
     // Plugin-registered predicate. Trinary leaf adapter awaits, narrows,
     // catches throws, then leaf-level `onUnknown:` projects to boolean.
+    // Unregistered keys (issue #75 layer 2, defense-in-depth) project
+    // `"unknown"` under the applicable `onUnknown:` policy instead of
+    // throwing — consistent with handler-throws, so a rule with an
+    // unknown key fails CLOSED in rule mode (fires) rather than
+    // silently disappearing down the per-rule catch-and-skip.
+    // Exemption mode (`onUnknownDefault: "allow"`) projects to
+    // no-match, so the guard still fires (no S1 regression). Warns
+    // loudly either way so the missing plugin surfaces in logs.
     const handler = predicates[key];
-    if (handler === undefined) throw new UnknownPredicateError(key);
+    if (handler === undefined) {
+      console.warn(
+        `[pi-steering] Rule "${ruleName}"@${source}: when.${key} names ` +
+          `an unregistered predicate — projecting "unknown" (fail-closed ` +
+          `under the block-level onUnknown policy). Install the plugin ` +
+          `that provides "${key}" (or fix the typo).`,
+      );
+      const unknownVerdict: PredicateVerdict = "unknown";
+      const onUnknown = readLeafOnUnknown(
+        value,
+        onUnknownDefault,
+        ignoreExplicitModifiers,
+      );
+      if (!projectVerdict(unknownVerdict, onUnknown)) return false;
+      continue;
+    }
     const verdict = await evaluateLeafTrinary(
       handler,
       value,

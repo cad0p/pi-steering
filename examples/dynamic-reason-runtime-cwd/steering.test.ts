@@ -60,7 +60,9 @@ async function callReason(ctx: PredicateContext): Promise<string> {
 
 describe("example: dynamic-reason-runtime-cwd", () => {
   it("rule.when uses the canonical positive form (`isClean: false`)", () => {
-    // Pins the rule's `when:` to `{ isClean: false }`. The equivalent
+    // Pins the rule's `when:` to the `isClean: false` positive form
+    // plus the command-first `subcommand` routing (the old
+    // `/^npm\\s+run\\s+deploy\\b/` anchor). The equivalent
     // `{ not: { isClean: true } }` shape produces the same fail-CLOSED
     // behavior on the walker-unknown branch under the trinary engine's
     // default block-level `onUnknown: "block"`, but diverges on the
@@ -68,13 +70,16 @@ describe("example: dynamic-reason-runtime-cwd", () => {
     // positive form is preferred for readability and per-leaf modifier
     // composition. See README "Why isClean: false over not: { isClean: true }".
     const rule = getDeployRule();
-    assert.deepEqual(rule.when, { isClean: false });
+    assert.deepEqual(rule.when, {
+      subcommand: ["run", "deploy"],
+      isClean: false,
+    });
   });
 
   it("registers the deploy-requires-clean-tree rule (bash/command)", () => {
     const rule = getDeployRule();
     assert.equal(rule.tool, "bash");
-    assert.equal(rule.field, "command");
+    assert.equal(rule.command, "npm");
   });
 
   it("walker-unknown cwd → reason composes walkerUnknownCwdReason + retry guidance", async () => {

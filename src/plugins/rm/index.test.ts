@@ -38,18 +38,23 @@ describe("rm plugin: ship surface", () => {
     assert.equal(name, "rm");
   });
 
-  it("every rule has non-empty name, pattern, reason and a valid regex", () => {
+  it("every rule has non-empty name, command routing, and reason", () => {
     for (const r of RULES_AS_RULE) {
       assert.ok(r.name.length > 0);
-      const patternLen =
-        typeof r.pattern === "string"
-          ? r.pattern.length
-          : r.pattern.source.length;
-      assert.ok(patternLen > 0, `empty pattern in ${r.name}`);
-      assert.ok(r.reason.length > 0, `empty reason in ${r.name}`);
-      if (typeof r.pattern === "string") {
-        assert.doesNotThrow(() => new RegExp(r.pattern as string));
+      if (r.tool !== "bash") throw new Error("narrow");
+      const cmds = Array.isArray(r.command) ? r.command : [r.command];
+      assert.ok(cmds.length > 0, `empty command in ${r.name}`);
+      for (const c of cmds) {
+        assert.ok(
+          typeof c === "string" && c.length > 0 && !/\s/.test(c),
+          `bad command entry in ${r.name}`,
+        );
       }
+      assert.ok(
+        !("pattern" in r) && !("field" in r),
+        `bash remnant in ${r.name}`,
+      );
+      assert.ok(r.reason.length > 0, `empty reason in ${r.name}`);
     }
   });
 });

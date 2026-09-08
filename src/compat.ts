@@ -15,8 +15,18 @@
  *
  *   - Top-level v1 fields: `disable`, `defaultNoOverride`, `rules`.
  *   - Rule fields: `name`, `tool`, `field`, `pattern` (stays a string —
- *     v2 accepts `string | RegExp`), `requires`, `unless`, `reason`,
- *     `noOverride`, `when.cwd` (string pattern).
+ *     v2 accepts `string | RegExp` in TS — write / edit rules only),
+ *     `requires`, `unless`, `reason`, `noOverride`, `when.cwd`
+ *     (string pattern).
+ *
+ * Bash rules are REJECTED (issue #117): bash `pattern:` was deleted —
+ * routing is the tsc-enforced `command:` first filter plus `when:`
+ * leaves, which JSON cannot express (no plugin context for the
+ * descriptor union, no table entries, no predicates). The throw
+ * carries the rule path plus a migration message (rewrite as
+ * `command:` + leaves in TypeScript). No translation, no
+ * WARN-and-continue (warn-and-drop would leave an unroutable rule —
+ * fail-open).
  *
  * Rejected (throws):
  *
@@ -161,8 +171,10 @@ function convertRule(raw: unknown, path: string): Rule {
     );
   }
   // Validate the (tool, field) combination per the discriminated
-  // Rule union: bash rules test against `command`; write / edit
-  // rules test against `path` or `content`.
+  // Rule union: write / edit rules test against `path` or `content`.
+  // Bash rules never reach the pattern import below — bash `pattern:`
+  // was deleted (issue #117); every bash rule throws with the rule
+  // path plus a migration message, before its pattern is even read.
   if (tool === "bash" && field !== "command") {
     throw new FromJSONError(
       `bash rules must use \`field: "command"\` (got "${field}")`,
@@ -174,6 +186,17 @@ function convertRule(raw: unknown, path: string): Rule {
       `${tool} rules must use \`field: "path"\` or \`field: "content"\` ` +
         `(got "command")`,
       `${path}.field`,
+    );
+  }
+  if (tool === "bash") {
+    // No bash `pattern:` import at all (issue #117, pre-1.0, no shim):
+    // routing is `command:` + leaves in TypeScript. No anchored-vs-
+    // clever classifier, no translation, no new `command:` JSON input
+    // key (JSON is not a first-class format). `requires` / `unless`
+    // strings stay importable (transient); `when` cwd-only unchanged.
+    throw new FromJSONError(
+      "bash `pattern:` was removed (issue #117); rewrite the rule in TypeScript as `command:` + `when:` leaves",
+      `${path}.pattern`,
     );
   }
   const pattern = raw["pattern"];
@@ -188,17 +211,15 @@ function convertRule(raw: unknown, path: string): Rule {
     throw new FromJSONError("`reason` must be a string", `${path}.reason`);
   }
 
-  const rule: Rule =
-    tool === "bash"
-      ? { name, tool, field: "command", pattern, reason }
-      : {
-          name,
-          tool,
-          // Narrowed by the (tool, field) check above.
-          field: field as "path" | "content",
-          pattern,
-          reason,
-        };
+  // Bash rules throw above (issue #117) — only write / edit reach here.
+  const rule: Rule = {
+    name,
+    tool,
+    // Narrowed by the (tool, field) check above.
+    field: field as "path" | "content",
+    pattern,
+    reason,
+  };
 
   // Optional: requires / unless (string patterns only).
   if ("requires" in raw) {

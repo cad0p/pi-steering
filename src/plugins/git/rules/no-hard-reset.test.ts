@@ -2,12 +2,13 @@
 // Part of pi-steering.
 
 /**
- * Pattern spot-checks + end-to-end coverage for the git plugin's
- * `no-hard-reset` rule (`./no-hard-reset.ts`).
+ * Behavior + end-to-end coverage for the git plugin's `no-hard-reset`
+ * rule (`./no-hard-reset.ts`).
  *
- * The fixtures are ported verbatim from the former `defaults.test.ts`
- * (issue #72 moved the rule here): if a case flips vs. its old
- * expectation, the pattern drifted during the migration.
+ * The fixtures are ported from the former pattern spot-checks (issue
+ * #117 migrated the rule to `command:` + `subcommand:` + `flag:`): if
+ * a case flips vs. its old expectation, the routing drifted during
+ * the migration.
  */
 
 import assert from "node:assert/strict";
@@ -19,44 +20,19 @@ import {
 } from "../../../__test-helpers__.ts";
 import { buildEvaluator } from "../../../evaluator.ts";
 import { resolvePlugins } from "../../../plugin-merger.ts";
-import type { Rule } from "../../../schema.ts";
+import type { Plugin, Rule } from "../../../schema.ts";
+import { GIT_CLI_DESCRIPTOR } from "../descriptors.ts";
 import { noHardReset } from "./no-hard-reset.ts";
 
-describe("rules/no-hard-reset: pattern spot-checks", () => {
-  function pattern(): RegExp {
-    if (typeof noHardReset.pattern !== "string") {
-      throw new Error("no-hard-reset must use a string pattern");
-    }
-    return new RegExp(noHardReset.pattern);
-  }
-
-  it("matches `git reset --hard`", () => {
-    assert.equal(pattern().test("git reset --hard"), true);
-  });
-
-  it("matches `git reset --hard HEAD`", () => {
-    assert.equal(pattern().test("git reset --hard HEAD"), true);
-  });
-
-  it("does NOT match `git reset --soft`", () => {
-    assert.equal(pattern().test("git reset --soft HEAD~1"), false);
-  });
-
-  it("matches `git -C /other reset --hard` (pre-subcommand flag)", () => {
-    assert.equal(pattern().test("git -C /other reset --hard"), true);
-  });
-
-  it("matches `git -c rerere.enabled=false reset --hard` (key=val config)", () => {
-    assert.equal(
-      pattern().test("git -c rerere.enabled=false reset --hard"),
-      true,
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// End-to-end through buildEvaluator
-// ---------------------------------------------------------------------------
+/**
+ * Minimal facts plugin: the real git descriptor table without the
+ * plugin's predicates / trackers, so these suites pin the rule's own
+ * routing (not the git plugin's exec-backed predicates).
+ */
+const gitFacts = {
+  name: "git-facts",
+  cliDescriptors: { git: GIT_CLI_DESCRIPTOR },
+} as const satisfies Plugin;
 
 function bashEvent(command: string): BashToolCallEvent {
   return {
@@ -67,34 +43,67 @@ function bashEvent(command: string): BashToolCallEvent {
   };
 }
 
+function ruleEvaluator() {
+  const resolved = resolvePlugins([gitFacts], {});
+  const rules: readonly Rule[] = [noHardReset];
+  return buildEvaluator({ rules }, resolved, makeHost());
+}
+
+async function blocks(command: string): Promise<boolean> {
+  const ev = ruleEvaluator();
+  const r = await ev.evaluate(bashEvent(command), makeCtx("/r"), 0);
+  return (r as { block?: boolean } | undefined)?.block === true;
+}
+
+describe("rules/no-hard-reset: routing shape", () => {
+  it("routes on command git + subcommand reset + --hard flag", () => {
+    assert.equal(noHardReset.command, "git");
+    assert.deepEqual(noHardReset.when, {
+      subcommand: "reset",
+      flag: { anyOf: [{ aliases: ["--hard"], takesValue: false }] },
+    });
+  });
+});
+
 describe("rules/no-hard-reset: end-to-end via buildEvaluator", () => {
-  function ruleEvaluator() {
-    const resolved = resolvePlugins([], {});
-    const rules: readonly Rule[] = [noHardReset];
-    return buildEvaluator({ rules }, resolved, makeHost());
-  }
+  it("blocks `git reset --hard`", async () => {
+    assert.equal(await blocks("git reset --hard"), true);
+  });
 
   it("blocks `git reset --hard HEAD`", async () => {
+    assert.equal(await blocks("git reset --hard HEAD"), true);
+  });
+
+  it("allows `git reset --soft HEAD~1`", async () => {
+    assert.equal(await blocks("git reset --soft HEAD~1"), false);
+  });
+
+  it("blocks `git -C /other reset --hard` (pre-subcommand flag)", async () => {
+    assert.equal(await blocks("git -C /other reset --hard"), true);
+  });
+
+  it("blocks `git -c key=val reset --hard` (key=val config)", async () => {
+    assert.equal(await blocks("git -c key=val reset --hard"), true);
+  });
+
+  it("blocks `sh -c 'git reset --hard'` (wrapper)", async () => {
+    assert.equal(await blocks("sh -c 'git reset --hard'"), true);
+  });
+
+  it("does NOT block `echo 'git reset --hard'` (basename is echo)", async () => {
+    assert.equal(await blocks("echo 'git reset --hard'"), false);
+  });
+
+  it("block reason names the rule", async () => {
     const ev = ruleEvaluator();
     const r = await ev.evaluate(
       bashEvent("git reset --hard HEAD"),
       makeCtx("/r"),
       0,
     );
-    assert.equal((r as { block?: boolean } | undefined)?.block, true);
     assert.match(
       (r as { reason?: string } | undefined)?.reason ?? "",
       /no-hard-reset/,
     );
-  });
-
-  it("allows `git reset --soft HEAD~1`", async () => {
-    const ev = ruleEvaluator();
-    const r = await ev.evaluate(
-      bashEvent("git reset --soft HEAD~1"),
-      makeCtx("/r"),
-      0,
-    );
-    assert.equal(r, undefined);
   });
 });

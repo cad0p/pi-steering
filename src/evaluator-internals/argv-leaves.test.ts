@@ -116,8 +116,7 @@ function gitRule(when: TopLevelWhenClause): Rule {
   return {
     name: "no-push",
     tool: "bash",
-    field: "command",
-    pattern: "^git\\b",
+    command: "git",
     reason: "no push",
     when,
   };
@@ -253,14 +252,11 @@ describe("argv leaves: subcommand extraction parity", () => {
     );
   });
 
-  it("aws s3 --profile x ls at depth 2 extracts the [s3, ls] sequence", async () => {
+  it("aws s3 --profile x ls extracts the [s3, ls] sequence (bare array, width 2)", async () => {
     assert.equal(
       await fires(
         {
-          subcommand: {
-            pattern: ["s3", "ls"],
-            depth: 2,
-          },
+          subcommand: ["s3", "ls"],
         },
         [w("s3"), w("--profile"), w("x"), w("ls")],
         { basename: "aws", descriptors: AWS_DESCRIPTORS },
@@ -275,10 +271,7 @@ describe("argv leaves: subcommand extraction parity", () => {
     assert.equal(
       await fires(
         {
-          subcommand: {
-            pattern: ["s3", "--profile"],
-            depth: 2,
-          },
+          subcommand: ["s3", "--profile"],
         },
         [w("s3"), w("--profile"), w("x"), w("ls")],
         { basename: "aws", descriptors: AWS_DESCRIPTORS },
@@ -357,21 +350,44 @@ describe("argv leaves: subcommand pattern semantics", () => {
     );
   });
 
-  it("bare array is OR-of-matches at depth 1", async () => {
+  it("bare array is a positional sequence (length IS the width)", async () => {
+    // `gh pr create` fires; `gh pr list` and `gh repo create` do not.
+    const leaf: TopLevelWhenClause = { subcommand: ["pr", "create"] };
+    const g = { basename: "gh", descriptors: GH_DESCRIPTORS };
+    assert.equal(await fires(leaf, [w("pr"), w("create")], g), true);
+    assert.equal(await fires(leaf, [w("pr"), w("list")], g), false);
+    assert.equal(await fires(leaf, [w("repo"), w("create")], g), false);
+    assert.equal(await fires(leaf, [w("pr")], g), false);
+  });
+
+  it("anyOf is the explicit OR (singles and sequences)", async () => {
     const g = { descriptors: GIT_DESCRIPTORS };
     assert.equal(
-      await fires({ subcommand: ["push", "pull"] }, [w("pull")], g),
+      await fires({ subcommand: { anyOf: ["push", "pull"] } }, [w("pull")], g),
       true,
     );
     assert.equal(
-      await fires({ subcommand: ["push", "pull"] }, [w("fetch")], g),
+      await fires({ subcommand: { anyOf: ["push", "pull"] } }, [w("fetch")], g),
       false,
     );
+    const seqs: TopLevelWhenClause = {
+      subcommand: {
+        anyOf: [
+          ["pr", "create"],
+          ["repo", "create"],
+        ],
+      },
+    };
+    const gh = { basename: "gh", descriptors: GH_DESCRIPTORS };
+    assert.equal(await fires(seqs, [w("pr"), w("create")], gh), true);
+    assert.equal(await fires(seqs, [w("repo"), w("create")], gh), true);
+    assert.equal(await fires(seqs, [w("pr"), w("list")], gh), false);
+    assert.equal(await fires(seqs, [w("repo"), w("delete")], gh), false);
   });
 
-  it("sequence: full run required (aws s3 alone ≠ [s3, ls] depth 2)", async () => {
+  it("sequence: full run required (aws s3 alone ≠ [s3, ls])", async () => {
     const leaf: TopLevelWhenClause = {
-      subcommand: { pattern: ["s3", "ls"], depth: 2 },
+      subcommand: ["s3", "ls"],
     };
     assert.equal(
       await fires(leaf, [w("s3"), w("ls")], {
@@ -399,48 +415,51 @@ describe("argv leaves: subcommand pattern semantics", () => {
   it("sequence members mix string-exact + RegExp", async () => {
     const k = { basename: "kubectl", descriptors: { kubectl: {} } };
     assert.equal(
-      await fires(
-        { subcommand: { pattern: ["get", /^pod/], depth: 2 } },
-        [w("get"), w("pods")],
-        k,
-      ),
+      await fires({ subcommand: ["get", /^pod/] }, [w("get"), w("pods")], k),
       true,
     );
     assert.equal(
-      await fires(
-        { subcommand: { pattern: ["get", /^svc/], depth: 2 } },
-        [w("get"), w("pods")],
-        k,
-      ),
+      await fires({ subcommand: ["get", /^svc/] }, [w("get"), w("pods")], k),
       false,
     );
   });
 
   it("malformed leaves fail-SKIP (false, never unknown): matrix", async () => {
     const args = [w("push")];
+    // Deleted `depth` key, spelled dynamically: the repo-wide
+    // depth-key grep pin scans this file too, so the literal
+    // cannot appear here — at runtime the key IS `depth`, so any
+    // resurrection of `depth` handling flips these fail-skip asserts.
+    const DELETED_DEPTH = ["dep", "th"].join("");
     const bad: TopLevelWhenClause[] = [
       // empty / non-Pattern arrays
       { subcommand: [] },
       { subcommand: ["push", 123] as unknown as SubcommandLeaf },
-      { subcommand: { pattern: [] } },
-      { subcommand: { pattern: ["push", 123] as unknown as string[] } },
-      // non-Pattern scalar / missing pattern
+      // empty / malformed anyOf
+      { subcommand: { anyOf: [] } as unknown as SubcommandLeaf },
+      {
+        subcommand: { anyOf: ["push", 123] } as unknown as SubcommandLeaf,
+      },
+      {
+        subcommand: { anyOf: [["push", 123]] } as unknown as SubcommandLeaf,
+      },
+      { subcommand: { anyOf: [[]] } as unknown as SubcommandLeaf },
+      { subcommand: { anyOf: "push" } as unknown as SubcommandLeaf },
+      // non-Pattern scalar / missing anyOf
       { subcommand: 123 as unknown as SubcommandLeaf },
       { subcommand: {} as unknown as SubcommandLeaf },
-      { subcommand: { pattern: 123 } as unknown as SubcommandLeaf },
-      // single pattern with depth > 1
-      { subcommand: { pattern: "push", depth: 2 } },
-      { subcommand: { pattern: /push/, depth: 3 } },
-      // spread array length ≠ depth (bare arrays cover OR)
-      { subcommand: { pattern: ["a", "b"] } },
-      { subcommand: { pattern: ["a", "b", "c"], depth: 2 } },
-      // bad depth
-      { subcommand: { pattern: "push", depth: -1 } },
-      { subcommand: { pattern: "push", depth: 1.5 } },
+      // deleted `{ pattern, depth }` shape (no shims, no dual-accept)
+      { subcommand: { pattern: "push" } as unknown as SubcommandLeaf },
+      {
+        subcommand: {
+          pattern: ["s3", "ls"],
+          [DELETED_DEPTH]: 2,
+        } as unknown as SubcommandLeaf,
+      },
       {
         subcommand: {
           pattern: "push",
-          depth: "2",
+          [DELETED_DEPTH]: "2",
         } as unknown as SubcommandLeaf,
       },
     ];
@@ -453,19 +472,36 @@ describe("argv leaves: subcommand pattern semantics", () => {
     }
   });
 
-  it("depth 0 → unknown → fires by default, skips with onUnknown allow", async () => {
+  it("deleted `{ pattern, depth }` shape fail-skips (false, never unknown)", async () => {
+    // Pre-1.0 breaking, no shims: the old spread is malformed now, so
+    // the leaf evaluates to `false` (rule skips) and never smuggles
+    // the old extract-nothing → unknown → block path back in. The
+    // deleted key is spelled dynamically (see the matrix above) so
+    // the repo-wide depth-key pin keeps scanning this file.
+    const DELETED_DEPTH = ["dep", "th"].join("");
     const g = { descriptors: GIT_DESCRIPTORS };
     assert.equal(
       await fires(
-        { subcommand: { pattern: "push", depth: 0 } },
+        {
+          subcommand: {
+            pattern: "push",
+            [DELETED_DEPTH]: 0,
+          } as unknown as SubcommandLeaf,
+        },
         [w("push")],
         g,
       ),
-      true,
+      false,
     );
     assert.equal(
       await fires(
-        { subcommand: { pattern: "push", depth: 0, onUnknown: "allow" } },
+        {
+          subcommand: {
+            pattern: "push",
+            [DELETED_DEPTH]: 0,
+            onUnknown: "allow",
+          } as unknown as SubcommandLeaf,
+        },
         [w("push")],
         g,
       ),
@@ -917,7 +953,7 @@ describe("argv leaves: flag presence semantics", () => {
     assert.equal(await firesOnWrite({ subcommand: "push" }), true);
     assert.equal(
       await firesOnWrite({
-        subcommand: { pattern: "push", onUnknown: "allow" },
+        subcommand: { anyOf: ["push"], onUnknown: "allow" },
       }),
       false,
     );
@@ -1031,7 +1067,7 @@ describe("argv leaves: exemption strictness (S1)", () => {
       rule: "x",
       when: {
         subcommand: {
-          pattern: "push",
+          anyOf: ["push"],
           // @ts-expect-error: leaf-level onUnknown forbidden in exemptions
           onUnknown: "allow",
         },
@@ -1052,7 +1088,7 @@ describe("argv leaves: exemption strictness (S1)", () => {
       when: {
         not: {
           subcommand: {
-            pattern: "push",
+            anyOf: ["push"],
             // @ts-expect-error: leaf-level onUnknown forbidden inside not:
             onUnknown: "allow",
           },
@@ -1090,9 +1126,9 @@ describe("argv leaves: exemption strictness (S1)", () => {
         } as unknown as TopLevelWhenClause,
       ],
       [
-        "depth-only",
+        "subcommand anyOf",
         {
-          subcommand: { depth: 1, onUnknown: "allow" },
+          subcommand: { anyOf: ["push"], onUnknown: "allow" },
         } as unknown as TopLevelWhenClause,
       ],
       [
@@ -1131,7 +1167,7 @@ describe("argv leaves: exemption strictness (S1)", () => {
     // `go -v build` extraction is null → unknown; even an as-any
     // `onUnknown: "block"` must NOT exempt.
     const smuggled = {
-      subcommand: { pattern: "build", onUnknown: "block" },
+      subcommand: { anyOf: ["build"], onUnknown: "block" },
     } as unknown as TopLevelWhenClause;
     const ctx = mockContext({
       input: {
@@ -1236,8 +1272,7 @@ describe("argv leaves: plugin collision parity (explicit branch wins)", () => {
           {
             name: "no-push",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b",
+            command: "git",
             reason: "no push",
             when: { cwd: /./ },
           },
@@ -1330,8 +1365,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
           {
             name: "no-pr-merge",
             tool: "bash",
-            field: "command",
-            pattern: "^gh\\b",
+            command: "gh",
             reason: "no merge",
             when: { subcommand: "pr" },
           },
@@ -1363,8 +1397,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
           {
             name: "no-build",
             tool: "bash",
-            field: "command",
-            pattern: "^go\\b",
+            command: "go",
             reason: "no build",
             when: { subcommand: "build" },
           },
@@ -1378,7 +1411,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
     );
   });
 
-  it("aws s3 --profile x ls matches depth-2 [s3, ls]; inner sh -c ref works", async () => {
+  it("aws s3 --profile x ls matches [s3, ls]; inner sh -c ref works", async () => {
     const h = loadHarness({
       config: {
         // Synthetic plugin-registered aws descriptor for `--profile`.
@@ -1399,14 +1432,10 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
           {
             name: "no-s3-ls",
             tool: "bash",
-            field: "command",
-            pattern: "^aws\\b",
+            command: "aws",
             reason: "no ls",
             when: {
-              subcommand: {
-                pattern: ["s3", "ls"],
-                depth: 2,
-              },
+              subcommand: ["s3", "ls"],
             },
           },
           gitRule({
@@ -1462,8 +1491,7 @@ describe("argv leaves: end-to-end acceptance (#90)", () => {
           {
             name: "no-git",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b",
+            command: "git",
             reason: "no git",
           },
         ],
@@ -1527,8 +1555,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
     const ghRule = (when: TopLevelWhenClause): Rule => ({
       name: "no-pr",
       tool: "bash",
-      field: "command",
-      pattern: "^gh\\b",
+      command: "gh",
       reason: "no pr",
       when,
     });
@@ -1576,8 +1603,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-sub",
             tool: "bash",
-            field: "command",
-            pattern: "^mycli\\b",
+            command: "mycli",
             reason: "no sub",
             when: { subcommand: "push" },
           },
@@ -1597,8 +1623,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-sub",
             tool: "bash",
-            field: "command",
-            pattern: "^mycli\\b",
+            command: "mycli",
             reason: "no sub",
             when: { subcommand: "push" },
           },
@@ -1632,8 +1657,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-mycli",
             tool: "bash",
-            field: "command",
-            pattern: "^mycli\\b",
+            command: "mycli",
             reason: "no mycli",
             when: {
               condition: (ctx) => ctx.command.positionals().length > 0,
@@ -1652,8 +1676,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-sub",
             tool: "bash",
-            field: "command",
-            pattern: "^mycli\\b",
+            command: "mycli",
             reason: "no sub",
             when: { not: { subcommand: "push" } },
           },
@@ -1919,8 +1942,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-git",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b",
+            command: "git",
             reason: "no git",
           },
         ],
@@ -1942,8 +1964,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-push",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b",
+            command: "git",
             reason: "no push",
           },
         ],
@@ -1962,8 +1983,7 @@ describe("argv leaves: CLI descriptor auto-resolution (issue #106)", () => {
           {
             name: "no-push",
             tool: "bash",
-            field: "command",
-            pattern: "^git\\b",
+            command: "git",
             reason: "no push",
             when: { subcommand: "push" },
           },
@@ -2170,6 +2190,191 @@ describe("leaf/facade agreement (issue #110)", () => {
         {},
         "t",
         "t",
+      ),
+      false,
+    );
+  });
+
+  it("leaf↔facade AGREEMENT pin (issue #123 — one scan, re-split impossible)", async () => {
+    // Same argv + same entries through `when.flag` and
+    // `ctx.command.hasFlag` ALWAYS agree — both delegate to the shared
+    // `flagPresenceScan`, so the facade cannot be re-split bundle-blind
+    // without tripping this matrix (including the false/false rows).
+    const rows: {
+      tokens: string[];
+      entry: CLIFlag;
+      basename: string;
+      descriptors: Record<string, CLIDescriptor>;
+    }[] = [
+      // Exact token.
+      {
+        tokens: ["push", "--force"],
+        entry: { aliases: ["--force"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Attached `--flag=value`.
+      {
+        tokens: ["--mirror=x"],
+        entry: { aliases: ["--mirror"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Declared consuming flag skips its value BY POSITION (`-f` is
+      // `-C`'s value here — absent on BOTH sides; the old blind facade
+      // reported present).
+      {
+        tokens: ["-C", "-f"],
+        entry: { aliases: ["-f"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Undeclared-letter bundle: full body present (`-uf` → `-f`).
+      {
+        tokens: ["-uf"],
+        entry: { aliases: ["-f"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Glue truncation: `-Cfoo` presents `C` (glue, takesValue) …
+      {
+        tokens: ["-Cfoo"],
+        entry: { aliases: ["-C"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // … and never what the glue consumed (`f`).
+      {
+        tokens: ["-Cfoo"],
+        entry: { aliases: ["-f"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Longs never bundle-match.
+      {
+        tokens: ["--force"],
+        entry: { aliases: ["-f"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Consuming long skips a flag-shaped value.
+      {
+        tokens: ["--git-dir", "--force"],
+        entry: { aliases: ["--force"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // Absent on both sides.
+      {
+        tokens: ["push"],
+        entry: { aliases: ["--force"], takesValue: false },
+        basename: "git",
+        descriptors: GIT_DESCRIPTORS,
+      },
+      // gh glued form through the synthetic table.
+      {
+        tokens: ["-Rfoo"],
+        entry: { aliases: ["-R"], takesValue: true },
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      },
+      {
+        tokens: ["-Rfoo"],
+        entry: { aliases: ["-f"], takesValue: false },
+        basename: "gh",
+        descriptors: GH_DESCRIPTORS,
+      },
+    ];
+    for (const { tokens, entry, basename, descriptors } of rows) {
+      const args = tokens.map((t) => w(t));
+      const leaf = await fires({ flag: { anyOf: [entry] } }, args, {
+        basename,
+        descriptors,
+      });
+      const ctx = mockContext({
+        input: { tool: "bash", command: `${basename} …`, basename, args },
+        descriptors,
+      });
+      assert.equal(
+        ctx.command.hasFlag(entry),
+        leaf,
+        `leaf↔facade disagree on [${tokens.join(" ")}] × ${entry.aliases.join("/")}`,
+      );
+    }
+  });
+});
+
+describe("unknown-predicate projection (issue #75 layer 2)", () => {
+  // Defense-in-depth for direct `evaluateWhen` callers (SDK embedders,
+  // tests) that bypass the load-time key check: unregistered keys
+  // project `"unknown"` under the block-level `onUnknown:` policy —
+  // fail-closed in rule mode, no-match in exemption mode — instead of
+  // throwing into catch-and-skip (the old silent fail-open).
+  it("outer unknown key fires under the block default (and warns)", async () => {
+    const warnings: string[] = [];
+    const orig = console.warn;
+    console.warn = (msg?: unknown) => {
+      warnings.push(String(msg));
+    };
+    try {
+      assert.equal(
+        await fires(
+          { totallyMadeUp: true } as unknown as TopLevelWhenClause,
+          [w("push")],
+          { basename: "git", descriptors: GIT_DESCRIPTORS },
+        ),
+        true,
+      );
+      assert.ok(
+        warnings.some((msg) =>
+          /when\.totallyMadeUp names an unregistered predicate/.test(msg),
+        ),
+        `no matching warning in:\n${warnings.join("\n")}`,
+      );
+    } finally {
+      console.warn = orig;
+    }
+  });
+
+  it("outer unknown key skips under onUnknown allow", async () => {
+    assert.equal(
+      await fires(
+        { totallyMadeUp: true } as unknown as TopLevelWhenClause,
+        [w("push")],
+        {
+          basename: "git",
+          descriptors: GIT_DESCRIPTORS,
+          onUnknownDefault: "allow",
+        },
+      ),
+      false,
+    );
+  });
+
+  it("not: { <unknown> } projects without the not-flip", async () => {
+    assert.equal(
+      await fires(
+        { not: { totallyMadeUp: true } } as unknown as TopLevelWhenClause,
+        [w("push")],
+        { basename: "git", descriptors: GIT_DESCRIPTORS },
+      ),
+      true,
+    );
+  });
+
+  it("exemption mode still lands no-match (no S1 regression)", async () => {
+    // The exemption evaluator's ("allow", ignore-explicit) projection
+    // turns the same unknown into no-match → the target guard fires.
+    assert.equal(
+      await fires(
+        { totallyMadeUp: true } as unknown as TopLevelWhenClause,
+        [w("push")],
+        {
+          basename: "git",
+          descriptors: GIT_DESCRIPTORS,
+          onUnknownDefault: "allow",
+          ignoreExplicitModifiers: true,
+        },
       ),
       false,
     );

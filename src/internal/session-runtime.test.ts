@@ -105,11 +105,6 @@ describe("buildSessionRuntime: strict-mode contract", () => {
       undefined,
       "no-rm-rf-slash must NOT fire without the rm plugin declared",
     );
-    assert.equal(
-      await result.evaluator.evaluate(event("npm run dev"), ctx, 0),
-      undefined,
-      "no-long-running-commands must NOT fire without the async plugin declared",
-    );
   });
 
   it("fresh-empty merged config: the merged universe is empty", async () => {
@@ -130,8 +125,8 @@ describe("buildSessionRuntime: strict-mode contract", () => {
       tmpHome,
       `export default {
 				rules: [
-					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
-					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+					{ name: "dup", tool: "bash", command: "never", reason: "first" },
+					{ name: "dup", tool: "bash", command: "never", reason: "second" },
 				],
 			};`,
     );
@@ -152,8 +147,8 @@ describe("buildSessionRuntime: strict-mode contract", () => {
       `export default {
 				failOnWarnings: false,
 				rules: [
-					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
-					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+					{ name: "dup", tool: "bash", command: "never", reason: "first" },
+					{ name: "dup", tool: "bash", command: "never", reason: "second" },
 				],
 			};`,
     );
@@ -229,8 +224,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 							{
 								name: "bad name",
 								tool: "bash",
-								field: "command",
-								pattern: /^never$/,
+								command: "never",
 								reason: "r",
 							},
 						],
@@ -262,8 +256,8 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 					{ name: "pb", trackers: { branch: t } },
 				],
 				rules: [
-					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
-					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+					{ name: "dup", tool: "bash", command: "never", reason: "first" },
+					{ name: "dup", tool: "bash", command: "never", reason: "second" },
 				],
 			};`,
     );
@@ -300,8 +294,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 					{
 						name: "phony] BAD",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 					},
 				],
@@ -335,22 +328,19 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 					{
 						name: "phony] BAD",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 					},
 					{
 						name: "dup",
 						tool: "bash",
-						field: "command",
-						pattern: /^A/,
+						command: "never",
 						reason: "first",
 					},
 					{
 						name: "dup",
 						tool: "bash",
-						field: "command",
-						pattern: /^B/,
+						command: "never",
 						reason: "second",
 					},
 				],
@@ -391,8 +381,7 @@ describe("buildSessionRuntime: strict-mode contract", () => {
 					{
 						name: "phony] BAD",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 					},
 				],
@@ -455,14 +444,14 @@ describe("buildSessionRuntime: project-trust gate", () => {
       tmpHome,
       `export default {
 				rules: [
-					{ name: "proj-rule", tool: "bash", field: "command", pattern: /^A/, reason: "proj" },
+					{ name: "proj-rule", tool: "bash", command: "never", reason: "proj" },
 				],
 			};`,
     );
     writeGlobalConfig(
       `export default {
 				rules: [
-					{ name: "global-rule", tool: "bash", field: "command", pattern: /^B/, reason: "global" },
+					{ name: "global-rule", tool: "bash", command: "never", reason: "global" },
 				],
 			};`,
     );
@@ -514,8 +503,8 @@ describe("buildSessionRuntime: project-trust gate", () => {
     writeGlobalConfig(
       `export default {
 				rules: [
-					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
-					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+					{ name: "dup", tool: "bash", command: "never", reason: "first" },
+					{ name: "dup", tool: "bash", command: "never", reason: "second" },
 				],
 			};`,
     );
@@ -551,8 +540,8 @@ describe("buildSessionRuntime: project-trust gate", () => {
       `export default {
 				failOnWarnings: false,
 				rules: [
-					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
-					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+					{ name: "dup", tool: "bash", command: "never", reason: "first" },
+					{ name: "dup", tool: "bash", command: "never", reason: "second" },
 				],
 			};`,
     );
@@ -587,8 +576,8 @@ describe("buildSessionRuntime: project-trust gate", () => {
       tmpHome,
       `export default {
 				rules: [
-					{ name: "dup", tool: "bash", field: "command", pattern: /^A/, reason: "first" },
-					{ name: "dup", tool: "bash", field: "command", pattern: /^B/, reason: "second" },
+					{ name: "dup", tool: "bash", command: "never", reason: "first" },
+					{ name: "dup", tool: "bash", command: "never", reason: "second" },
 				],
 			};`,
     );
@@ -659,8 +648,7 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 					{
 						name: "consumer",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 						when: { missing: { event: "X" } },
 					},
@@ -700,8 +688,7 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 					{
 						name: "consumer",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 						when: { missing: { event: "X" } },
 					},
@@ -742,8 +729,7 @@ describe("buildSessionRuntime: observer-drop breadcrumbs", () => {
 					{
 						name: "consumer",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 					},
 				],

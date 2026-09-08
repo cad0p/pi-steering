@@ -248,8 +248,7 @@ describe("Rule.when: registry-driven mapped type wireup", () => {
     const _r: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r",
       when: {
         cwd: /work/,
@@ -264,8 +263,7 @@ describe("Rule.when: registry-driven mapped type wireup", () => {
     const _r: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r",
       when: {
         not: {
@@ -281,8 +279,7 @@ describe("Rule.when: registry-driven mapped type wireup", () => {
     const _r: Rule = {
       name: "r",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r",
       when: {
         not: {
@@ -317,8 +314,7 @@ describe("validateWhenClauseShape: nested-not: rejection", () => {
     const rule: Rule = {
       name: "nested-not-via-cast",
       tool: "bash",
-      field: "command",
-      pattern: "^git",
+      command: "git",
       reason: "r",
       when: { not: { not: { cwd: /work/ } } } as unknown as NonNullable<
         Rule["when"]
@@ -472,8 +468,7 @@ describe("BuiltInWhenLeaves: shape pin", () => {
     const _ban: Rule = {
       name: "x",
       tool: "bash",
-      field: "command",
-      pattern: "^x",
+      command: "x",
       reason: "x",
       when: {
         not: {
@@ -492,8 +487,7 @@ describe("BuiltInWhenLeaves: shape pin", () => {
     const _bareInsideNot: Rule = {
       name: "x",
       tool: "bash",
-      field: "command",
-      pattern: "^x",
+      command: "x",
       reason: "x",
       when: { not: { cwd: /work/ } },
     };
@@ -502,8 +496,7 @@ describe("BuiltInWhenLeaves: shape pin", () => {
     const _blockLevel: Rule = {
       name: "x",
       tool: "bash",
-      field: "command",
-      pattern: "^x",
+      command: "x",
       reason: "x",
       when: { not: { cwd: /work/, onUnknown: "block" } },
     };
@@ -519,13 +512,12 @@ describe("BuiltInWhenLeaves: shape pin", () => {
     const _banSub: Rule = {
       name: "x",
       tool: "bash",
-      field: "command",
-      pattern: "^x",
+      command: "x",
       reason: "x",
       when: {
         not: {
           subcommand: {
-            pattern: "push",
+            anyOf: ["push"],
             // @ts-expect-error: leaf-level onUnknown forbidden inside not:
             onUnknown: "allow",
           },
@@ -536,8 +528,7 @@ describe("BuiltInWhenLeaves: shape pin", () => {
     const _banFlag: Rule = {
       name: "x",
       tool: "bash",
-      field: "command",
-      pattern: "^x",
+      command: "x",
       reason: "x",
       when: {
         not: {
@@ -556,12 +547,11 @@ describe("BuiltInWhenLeaves: shape pin", () => {
     const _ok: Rule = {
       name: "x",
       tool: "bash",
-      field: "command",
-      pattern: "^x",
+      command: "x",
       reason: "x",
       when: {
         not: {
-          subcommand: { pattern: ["s3", "ls"], depth: 2 },
+          subcommand: { anyOf: [["s3", "ls"]] },
           flag: {
             anyOf: [{ aliases: ["-f"], takesValue: false }],
           },
@@ -587,8 +577,7 @@ describe("BuiltInWhenLeaves: shape pin", () => {
     const _banSpread: Rule = {
       name: "x",
       tool: "bash",
-      field: "command",
-      pattern: "^x",
+      command: "x",
       reason: "x",
       when: {
         // @ts-expect-error: condition?: is bare PredicateFn — spread shape forbidden
@@ -601,8 +590,7 @@ describe("BuiltInWhenLeaves: shape pin", () => {
     const _bareOuter: Rule = {
       name: "x",
       tool: "bash",
-      field: "command",
-      pattern: "^x",
+      command: "x",
       reason: "x",
       when: { condition: () => true },
     };
@@ -611,8 +599,7 @@ describe("BuiltInWhenLeaves: shape pin", () => {
     const _bareInner: Rule = {
       name: "x",
       tool: "bash",
-      field: "command",
-      pattern: "^x",
+      command: "x",
       reason: "x",
       when: { not: { condition: () => true } },
     };

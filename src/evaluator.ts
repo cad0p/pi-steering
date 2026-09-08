@@ -78,6 +78,7 @@ import {
   matchesPattern,
   matchesPatternOrFn,
   validateExemptionWhenClauseShape,
+  validateWhenClauseKeys,
   validateWhenClauseShape,
 } from "./evaluator-internals/predicates.ts";
 import {
@@ -207,6 +208,50 @@ export function buildEvaluator(
     validateWhenClauseShape(rule.when, `rule "${rule.name}".when`);
   }
 
+  // Issue #75 layer 1 (primary): unknown-predicate keys fail LOUD at
+  // config-resolve time instead of silently disabling the rule at
+  // runtime. Every `when:` leaf key must be a built-in or resolve
+  // against the merged predicate registry — inline rules, shipped
+  // rules, and exemption clauses alike. Static configs can no longer
+  // reach the runtime unknown-key projection below; only direct
+  // `evaluateWhen` callers (SDK embedders, tests) can.
+  {
+    const known = new Set(Object.keys(resolved.predicates));
+    for (const rule of config.rules ?? []) {
+      validateWhenClauseKeys(
+        rule.when,
+        `rule "${rule.name}".when`,
+        known,
+        "user",
+      );
+    }
+    for (const rule of resolved.rules) {
+      const owner = resolved.rulePluginOwners[rule.name] ?? "plugin";
+      validateWhenClauseKeys(
+        rule.when,
+        `rule "${rule.name}".when`,
+        known,
+        `plugin "${owner}"`,
+      );
+    }
+    for (const exemption of config.exemptions ?? []) {
+      validateWhenClauseKeys(
+        exemption.when,
+        `exemption for rule "${exemption.rule}".when`,
+        known,
+        "user",
+      );
+    }
+    for (const exemption of resolved.exemptions ?? []) {
+      validateWhenClauseKeys(
+        exemption.when,
+        `exemption for rule "${exemption.rule}".when`,
+        known,
+        "plugin",
+      );
+    }
+  }
+
   // S3 defense-in-depth for exemption target names (direct-caller
   // paths — unit tests, SDK embedders — bypass
   // `runMergerPipeline`'s diagnostic stream; this throw mirrors the
@@ -264,6 +309,32 @@ export function buildEvaluator(
   }
   for (const rule of pluginRules) {
     ruleSources.set(rule, resolved.rulePluginOwners[rule.name] ?? "user");
+  }
+
+  // Issue #117 build-time shape guard: every bash rule's `command`
+  // entries must be well-formed (one non-empty whitespace-free
+  // basename per entry — `command: "git commit"` is illegal). This
+  // runs once at build (not per ref). Unknown basenames are NOT
+  // rejected here: they surface as the fail-closed rule-tagged
+  // `MissingDescriptorError` block (with remedy) on the first MATCHED
+  // evaluation — the `arityOf` throw contract is unchanged (§5), and
+  // unrouted / nameless refs never reach it (routing first,
+  // resolution second). An empty array is NOT a throw: it never
+  // matches (mirrors the empty-`anyOf` invalid rule).
+  {
+    const checkBashCommand = (rule: Rule): void => {
+      if (rule.tool !== "bash") return;
+      const source = ruleSources.get(rule) ?? "user";
+      const cmds = Array.isArray(rule.command) ? rule.command : [rule.command];
+      for (const cmd of cmds) {
+        if (typeof cmd !== "string" || cmd.length === 0 || /\s/.test(cmd)) {
+          throw new Error(
+            `[pi-steering] rule "${rule.name}"@${source} has an invalid command entry ${JSON.stringify(cmd)} — command: takes one basename per entry (e.g. "git", never "git commit").`,
+          );
+        }
+      }
+    };
+    for (const rule of allRules) checkBashCommand(rule);
   }
 
   // Effective walker registry — single source of truth shared with
@@ -743,6 +814,11 @@ type CandidateOutcome = ToolCallEventResult | "no-fire" | "overridden";
  * from every catch (loud-block passthrough wins over projection).
  * Evaluation continues with the next rule.
  *
+ * Unknown predicate keys (issue #75) never reach this catch on the
+ * static-config path: `buildEvaluator` rejects them at load via
+ * `validateWhenClauseKeys`, and the dispatcher projects them to
+ * `"unknown"` (fail-closed) instead of throwing.
+ *
  * Why "does not fire" (vs "block" / "abort the whole evaluate"):
  *   - Mirrors the observer-dispatcher's per-observer isolation —
  *     one broken predicate must not poison the rest of the rule list.
@@ -762,9 +838,9 @@ async function runPredicateChain(
   // a missing descriptor is a fail-CLOSED config hole, NOT a buggy
   // predicate — swallowing it here would fail OPEN. Attach rule
   // context and rethrow to `evaluateEvent`'s top catch BEFORE any
-  // warn+project. Deliberately STRONGER than the `UnknownPredicateError`
-  // precedent (isolated to warn+skip per evaluator.test.ts
-  // "isolates an unknown when.<key> throw as 'rule did not fire'").
+  // warn+project. MDE always wins over projection (unknown predicate
+  // keys never reach here on the static-config path — rejected at load
+  // by `validateWhenClauseKeys`, projected fail-closed at runtime).
   // Single hierarchy site shared by the per-clause catches below and
   // the shared backstop catch (issue #118) — MDE always wins,
   // everything else projects. MDE never warns; it blocks loud at the
@@ -780,8 +856,21 @@ async function runPredicateChain(
     }
   };
   try {
-    // Pattern-miss is the common case; exit before allocating ctx.
-    if (!matchesPattern(rule.pattern, cand.target)) return null;
+    if (rule.tool === "bash") {
+      // Exact-equality first filter (issue #117): routing, never
+      // regex, never substring, no text touch. Mismatch exits before
+      // ctx alloc (the same cheap-first position `pattern` occupied).
+      // Nameless refs (`basename === undefined` — bare `VAR=x`
+      // chains) never match: no throw (carve-out preserved). An empty
+      // array never matches (mirrors the empty-`anyOf` invalid rule).
+      const cmds = Array.isArray(rule.command) ? rule.command : [rule.command];
+      const basename = cand.input.basename;
+      if (basename === undefined || !cmds.includes(basename)) return null;
+    } else if (!matchesPattern(rule.pattern, cand.target)) {
+      // Write / edit rules keep `pattern` as their whole mechanism.
+      // Pattern-miss is the common case; exit before allocating ctx.
+      return null;
+    }
 
     // Per-ref facade binding via the hoisted `arityOf` (issue #110): resolve
     // the descriptor for this ref's basename once per tool_call (cached),
@@ -867,8 +956,10 @@ async function runPredicateChain(
  *
  * Evaluation order (short-circuits on first failure):
  *
- *   1. `pattern`   — required; if no match we exit before allocating
- *                     the predicate context.
+ *   1. Tool filter — bash: exact `command:` basename equality vs
+ *                     the ref (routing first, resolution second);
+ *                     write/edit: `pattern` match. A miss exits
+ *                     before allocating the predicate context.
  *   2. `requires`  — optional AND.
  *   3. `unless`    — optional exemption.
  *   4. `when`      — clause tree (`cwd`, `not`, `condition`, plugin
@@ -995,8 +1086,8 @@ async function evaluateCandidate(
  *     `onUnknown: "block"` never exempts on unknown; the type-level
  *     ban (`ExemptionWhenClause`) and the load-time rejection
  *     (`validateExemptionWhenClauseShape`) are the other two layers.
- *   - Escapes `evaluateWhen` does not swallow (`UnknownPredicateError`,
- *     `evaluateMissing` shape throws, …) are caught HERE, per
+ *   - Escapes `evaluateWhen` does not swallow (`evaluateMissing`
+ *     shape throws, …) are caught HERE, per
  *     exemption — a throwing exemption predicate = "does not match"
  *     = guard fires. Warn logs label the EXEMPTION, not the target
  *     rule (`Rule "<target>"@<src>` would be misleading).

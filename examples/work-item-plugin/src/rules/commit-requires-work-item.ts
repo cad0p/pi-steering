@@ -11,8 +11,9 @@
  *     message MATCHES `[PROJ-N]`" (positive), so we wrap it in `not`
  *     to get "the message does NOT match" (the firing condition).
  *   - The typed-arg authoring pattern — `{ pattern: /\[PROJ-\d+\]/ }`.
- *   - A `pattern` anchored on the subcommand slot so `git log --grep
- *     "commit"` doesn't spuriously match.
+ *   - Routing on `command: "git"` + `subcommand: "commit"` plus the
+ *     `-m` flag entry, so `git log --grep "commit"` doesn't
+ *     spuriously match.
  *
  * Semantics:
  *   - Fires on `git commit [...] -m <msg>` where `<msg>` does NOT
@@ -30,17 +31,22 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
+import { GIT_CLI_DESCRIPTOR } from "@cad0p/pi-steering/plugins/git";
 
 export const commitRequiresWorkItem = {
   name: "commit-requires-work-item",
   tool: "bash",
-  field: "command",
-  // Anchored on `git commit` — the pre-subcommand flag slot (`git -C
-  // /other commit …`) is intentionally omitted to keep the example
-  // compact. The git plugin's `no-main-commit` rule in the package
-  // shows the full slot pattern for production use.
-  pattern: /^git\s+commit\b.*-m\s/,
+  command: "git",
+  // Routed on `git` + `commit` with the `-m` / `--message` flag
+  // entry (the old `/^git\\s+commit\\b.*-m\\s/` anchor — the
+  // pre-subcommand flag slot like `git -C /other commit …` rides
+  // the descriptor's consuming-flag arity). The git plugin's
+  // `no-main-commit` rule in the package shows the production form.
   when: {
+    subcommand: "commit",
+    // `-m` / `--message` referenced BY VARIABLE from the owning
+    // plugin's table (never a hand-built literal in the rule).
+    flag: { anyOf: [GIT_CLI_DESCRIPTOR.flags.message] },
     // Invert the predicate: fire when the work-item tag is MISSING.
     not: {
       // The plugin-registered `workItemFormat` predicate — see

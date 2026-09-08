@@ -2,12 +2,15 @@
 // Part of pi-steering.
 
 /**
- * Pattern spot-checks + end-to-end coverage for the rm plugin's
+ * Behavior + end-to-end coverage for the rm plugin's
  * `no-rm-rf-slash` rule (`./rules/no-rm-rf-slash.ts`).
  *
- * The fixtures are ported verbatim from the former `defaults.test.ts`
- * (issue #72 moved the rule here): if a case flips vs. its old
- * expectation, the pattern drifted during the migration.
+ * The fixtures are ported from the former pattern spot-checks (issue
+ * #117 migrated the rule to `command:` + the named `hasRecursiveForce`
+ * predicate): if a case flips vs. its old expectation, the routing
+ * drifted during the migration. The MERGE GATES live here:
+ * recursive-only does NOT fire, force-only does NOT fire,
+ * `rm -Rf /` fires, plus the positional `/` pin.
  */
 
 import assert from "node:assert/strict";
@@ -22,59 +25,6 @@ import { resolvePlugins } from "../../../plugin-merger.ts";
 import type { Rule } from "../../../schema.ts";
 import rmPlugin, { noRmRfSlash } from "../index.ts";
 
-describe("rules/no-rm-rf-slash: pattern spot-checks", () => {
-  function pattern(): RegExp {
-    if (typeof noRmRfSlash.pattern !== "string") {
-      throw new Error("no-rm-rf-slash must use a string pattern");
-    }
-    return new RegExp(noRmRfSlash.pattern);
-  }
-
-  it("matches `rm -rf /`", () => {
-    assert.equal(pattern().test("rm -rf /"), true);
-  });
-
-  it("matches `rm -fr /` (flag order agnostic)", () => {
-    assert.equal(pattern().test("rm -fr /"), true);
-  });
-
-  it("matches `rm -r -f /` (separated flags)", () => {
-    assert.equal(pattern().test("rm -r -f /"), true);
-  });
-
-  it("matches `rm --recursive --force /` (long-form flags)", () => {
-    assert.equal(pattern().test("rm --recursive --force /"), true);
-  });
-
-  it("matches `rm -Rf /` (uppercase R)", () => {
-    assert.equal(pattern().test("rm -Rf /"), true);
-  });
-
-  it("does NOT match `rm -rf /tmp`", () => {
-    assert.equal(pattern().test("rm -rf /tmp"), false);
-  });
-
-  it("does NOT match `rm /tmp` (no flags)", () => {
-    assert.equal(pattern().test("rm /tmp"), false);
-  });
-
-  it("does NOT match `rm -r /tmp` (missing force flag)", () => {
-    assert.equal(pattern().test("rm -r /tmp"), false);
-  });
-
-  it("does NOT match `rm -f /` (missing recursive flag)", () => {
-    assert.equal(pattern().test("rm -f /"), false);
-  });
-
-  it("does NOT match `rm -rf .`", () => {
-    assert.equal(pattern().test("rm -rf ."), false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// End-to-end through buildEvaluator
-// ---------------------------------------------------------------------------
-
 function bashEvent(command: string): BashToolCallEvent {
   return {
     type: "tool_call",
@@ -84,13 +34,76 @@ function bashEvent(command: string): BashToolCallEvent {
   };
 }
 
-describe("rules/no-rm-rf-slash: end-to-end via buildEvaluator", () => {
-  function ruleEvaluator() {
-    const resolved = resolvePlugins([], {});
-    const rules: readonly Rule[] = [noRmRfSlash];
-    return buildEvaluator({ rules }, resolved, makeHost());
-  }
+function ruleEvaluator() {
+  const resolved = resolvePlugins([rmPlugin], {});
+  const rules: readonly Rule[] = [noRmRfSlash];
+  return buildEvaluator({ rules }, resolved, makeHost());
+}
 
+async function blocks(command: string): Promise<boolean> {
+  const ev = ruleEvaluator();
+  const r = await ev.evaluate(bashEvent(command), makeCtx("/r"), 0);
+  return (r as { block?: boolean } | undefined)?.block === true;
+}
+
+describe("rules/no-rm-rf-slash: routing shape", () => {
+  it("routes on command rm + hasRecursiveForce predicate", () => {
+    assert.equal(noRmRfSlash.command, "rm");
+    assert.deepEqual(noRmRfSlash.when, { hasRecursiveForce: true });
+  });
+});
+
+describe("rules/no-rm-rf-slash: merge gates (issue #117)", () => {
+  it("fires on `rm -Rf /` (merge gate)", async () => {
+    assert.equal(await blocks("rm -Rf /"), true);
+  });
+
+  it("does NOT fire on recursive-only `rm -r /` (merge gate)", async () => {
+    assert.equal(await blocks("rm -r /"), false);
+  });
+
+  it("does NOT fire on force-only `rm -f /` (merge gate)", async () => {
+    assert.equal(await blocks("rm -f /"), false);
+  });
+
+  it("fires on `rm -rf /`", async () => {
+    assert.equal(await blocks("rm -rf /"), true);
+  });
+
+  it("fires on `rm -fr /` (flag order agnostic)", async () => {
+    assert.equal(await blocks("rm -fr /"), true);
+  });
+
+  it("fires on `rm -r -f /` (separated flags)", async () => {
+    assert.equal(await blocks("rm -r -f /"), true);
+  });
+
+  it("fires on `rm --recursive --force /` (long-form flags)", async () => {
+    assert.equal(await blocks("rm --recursive --force /"), true);
+  });
+
+  it("does NOT fire on `rm -rf /tmp` (positional `/` pin)", async () => {
+    assert.equal(await blocks("rm -rf /tmp"), false);
+  });
+
+  it("does NOT fire on `rm /tmp` (no flags)", async () => {
+    assert.equal(await blocks("rm /tmp"), false);
+  });
+
+  it("does NOT fire on `rm -r /tmp` (missing force flag)", async () => {
+    assert.equal(await blocks("rm -r /tmp"), false);
+  });
+
+  it("does NOT fire on `rm -rf .`", async () => {
+    assert.equal(await blocks("rm -rf ."), false);
+  });
+
+  it("does NOT fire on `echo 'rm -rf /'` (basename is echo)", async () => {
+    assert.equal(await blocks("echo 'rm -rf /'"), false);
+  });
+});
+
+describe("rules/no-rm-rf-slash: end-to-end via buildEvaluator", () => {
   it("blocks `rm -rf /` and ignores override (noOverride: true)", async () => {
     const ev = ruleEvaluator();
     const r = await ev.evaluate(

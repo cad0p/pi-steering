@@ -558,7 +558,6 @@ EXAMPLES
 const KNOWN_PLUGIN_SOURCES: Record<string, string> = {
   git: "pi-steering/plugins/git",
   rm: "pi-steering/plugins/rm",
-  async: "pi-steering/plugins/async",
 };
 
 /**

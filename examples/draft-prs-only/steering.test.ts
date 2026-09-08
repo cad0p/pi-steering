@@ -27,16 +27,18 @@ describe("example: draft-prs-only", () => {
     );
   });
 
-  it("rule declares an `unless` escape hatch for --draft", () => {
+  it("rule exempts --draft via `not: { flag: }` (not `unless:`)", () => {
     assert.ok(config.rules);
     const rule = config.rules.find((r) => r.name === "pr-create-must-be-draft");
     assert.ok(rule);
-    // Structural check: rule.unless must be declared (as a string
-    // pattern or RegExp). Its specific contents are pinned by the
-    // engine's own test suite.
+    // Structural check: the --draft carve-out lives in `not: { flag: }`
+    // (the old `unless: "--draft\\b"` string hack migrates here —
+    // the `requires:` / `unless:` Pattern restriction follows the gh
+    // table). Its specific contents are pinned by the engine's suite.
+    const not = (rule.when as { not?: { flag?: unknown } } | undefined)?.not;
     assert.ok(
-      "unless" in rule && rule.unless !== undefined,
-      "rule must declare an `unless` pattern",
+      not !== undefined && not.flag !== undefined,
+      "rule must declare a `not: { flag: }` carve-out",
     );
   });
 

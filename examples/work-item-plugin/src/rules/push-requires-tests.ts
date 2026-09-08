@@ -39,9 +39,9 @@ import { RETEST_REQUIRED_EVENT } from "../observers/retest-required-tracker.ts";
 export const pushRequiresTests = {
   name: "push-requires-tests",
   tool: "bash",
-  field: "command",
-  pattern: /^git\s+push\b/,
+  command: "git",
   when: {
+    subcommand: "push",
     // Fires when TEST_PASSED_EVENT has NOT been written in the
     // current agent loop, OR its most-recent entry is older than
     // the most-recent RETEST_REQUIRED_EVENT (e.g. a later `git pull`

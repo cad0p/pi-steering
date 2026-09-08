@@ -139,8 +139,7 @@ const IMPORT_HEADER = [
 const RULE_BOILERPLATE = [
   '\tname: "x",',
   '\ttool: "bash",',
-  '\tfield: "command",',
-  '\tpattern: "^x",',
+  '\tcommand: "x",',
   '\treason: "x",',
 ].join("\n");
 
@@ -223,8 +222,7 @@ describe("JSDoc propagation through TopLevelWhenClause mapped type", () => {
         "\t\t{",
         '\t\t\tname: "inline",',
         '\t\t\ttool: "bash",',
-        '\t\t\tfield: "command",',
-        '\t\t\tpattern: "^x",',
+        '\t\t\tcommand: "x",',
         '\t\t\treason: "x",',
         "\t\t\twhen: { isClean: false },",
         "\t\t},",
@@ -255,8 +253,7 @@ describe("JSDoc propagation through TopLevelWhenClause mapped type", () => {
         "const myRule = {",
         '\tname: "factored",',
         '\ttool: "bash",',
-        '\tfield: "command",',
-        '\tpattern: "^x",',
+        '\tcommand: "x",',
         '\treason: "x",',
         "\twhen: { isClean: false },",
         "} as const satisfies Rule;",

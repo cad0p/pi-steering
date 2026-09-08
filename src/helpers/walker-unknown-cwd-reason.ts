@@ -53,9 +53,12 @@ import type {
  *
  * export const myRule: Rule = {
  *   name: "deploy-requires-clean-tree",
- *   tool: "bash", field: "command",
- *   pattern: /^npm\s+run\s+deploy/,
- *   when: { isClean: false },
+ *   tool: "bash",
+ *   command: "npm",
+ *   when: {
+ *     subcommand: ["run", "deploy"],
+ *     isClean: false,
+ *   },
  *   reason: (ctx) => {
  *     if (ctx.walkerState?.cwd === "unknown") {
  *       return walkerUnknownCwdReason(ctx, "working tree status");

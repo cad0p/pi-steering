@@ -7,10 +7,7 @@
  */
 
 import type { Rule } from "../../../schema.ts";
-import {
-  GIT_COMMIT_PATTERN,
-  PROTECTED_BRANCH_PATTERN,
-} from "../helpers/patterns.ts";
+import { PROTECTED_BRANCH_PATTERN } from "../helpers/patterns.ts";
 import { walkerString } from "../predicates/branch.ts";
 import { NO_CHECKOUT_IN_CHAIN } from "../trackers/branch-tracker.ts";
 
@@ -74,9 +71,10 @@ import { NO_CHECKOUT_IN_CHAIN } from "../trackers/branch-tracker.ts";
 export const noMainCommit = {
   name: "no-main-commit",
   tool: "bash",
-  field: "command",
-  pattern: GIT_COMMIT_PATTERN,
-  when: { branch: PROTECTED_BRANCH_PATTERN },
+  command: "git",
+  // Routing is `command: "git"` + `subcommand: "commit"` (the
+  // old `GIT_COMMIT_PATTERN` anchor, deleted with bash `pattern:`).
+  when: { subcommand: "commit", branch: PROTECTED_BRANCH_PATTERN },
   reason: (ctx) => {
     // Delegate the sentinel classification to `walkerString` — the
     // same three-way discrimination (value / unknown / missing)

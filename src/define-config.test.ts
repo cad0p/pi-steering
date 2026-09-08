@@ -16,7 +16,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { PluginExemptionsCheck } from "./define-config.ts";
 import { defineConfig } from "./define-config.ts";
-import shippedAsyncPlugin from "./plugins/async/index.ts";
 import shippedGitPlugin from "./plugins/git/index.ts";
 import shippedRmPlugin from "./plugins/rm/index.ts";
 import type { Observer, Plugin, PredicateContext } from "./schema.ts";
@@ -57,8 +56,7 @@ describe("defineConfig: runtime behavior", () => {
         {
           name: "some-rule",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           observer: "description-reads",
         },
@@ -81,15 +79,13 @@ describe("defineConfig: runtime behavior", () => {
         {
           name: "x",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
         },
         {
           name: "y",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
         },
       ],
@@ -119,16 +115,14 @@ describe("defineConfig: type-level checks", () => {
         {
           name: "r1",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           observer: "description-reads",
         },
         {
           name: "r2",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           observer: "sync-done",
         },
@@ -144,8 +138,7 @@ describe("defineConfig: type-level checks", () => {
         {
           name: "r-plug",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           observer: "branch-changed",
         },
@@ -161,8 +154,7 @@ describe("defineConfig: type-level checks", () => {
         {
           name: "r-typo",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           // @ts-expect-error — typo: "description-read" vs. "description-reads".
           observer: "description-read",
@@ -178,8 +170,7 @@ describe("defineConfig: type-level checks", () => {
         {
           name: "r-no-obs",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           // @ts-expect-error — nothing registered, so any string is invalid.
           observer: "sync-done",
@@ -195,8 +186,7 @@ describe("defineConfig: type-level checks", () => {
         {
           name: "r-inline",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           observer: { name: "ad-hoc", onResult: () => {} },
         },
@@ -218,8 +208,7 @@ describe("defineConfig: type-level checks", () => {
         {
           name: "r-tuple",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           observer: "branch-changed",
         },
@@ -234,8 +223,7 @@ describe("defineConfig: type-level checks", () => {
         {
           name: "r-no-observer",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
         },
       ],
@@ -266,8 +254,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
         {
           name: "plugin-rule",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
         },
       ],
@@ -278,8 +265,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
         {
           name: "user-rule",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
         },
       ],
@@ -295,8 +281,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
         {
           name: "known-rule",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
         },
       ],
@@ -336,8 +321,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
         {
           name: "r",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           writes: ["allowed-type"],
           when: {
@@ -359,8 +343,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
         {
           name: "r",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           writes: ["self-type"],
           when: { missing: { event: "self-type", in: "agent_loop" } },
@@ -382,8 +365,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
         {
           name: "r",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           when: { missing: { event: "sync-done", in: "agent_loop" } },
         },
@@ -399,8 +381,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
         {
           name: "pr",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           writes: ["plugin-type"],
         },
@@ -412,8 +393,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
         {
           name: "r",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           when: { missing: { event: "plugin-type", in: "agent_loop" } },
         },
@@ -439,8 +419,7 @@ describe("defineConfig: type constraints (ADR §8)", () => {
         {
           name: "r",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           when: {
             missing: { event: "plugin-obs-type", in: "agent_loop" },
@@ -533,8 +512,7 @@ describe("defineConfig: bare-annotation footgun (ADR §8 authoring pattern)", ()
         {
           name: "r",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           // @ts-expect-error — bare-annotated observer widens
           // `writes` to `readonly string[]`, which collapses
@@ -560,8 +538,7 @@ describe("defineConfig: bare-annotation footgun (ADR §8 authoring pattern)", ()
         {
           name: "r",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           when: { missing: { event: "sync-done", in: "agent_loop" } },
         },
@@ -588,7 +565,7 @@ describe("defineConfig: rule + plugin name unions track declared plugins", () =>
 
   it("disabledRules rejects an ex-default name WITHOUT its shipping plugin (compile error)", () => {
     const cfg = defineConfig({
-      plugins: [shippedAsyncPlugin, shippedRmPlugin],
+      plugins: [shippedRmPlugin],
       // @ts-expect-error — "no-force-push" ships with the git plugin,
       // which this config does NOT declare. Since #72 there are no
       // engine defaults to keep the name in the union; a leftover
@@ -605,8 +582,7 @@ describe("defineConfig: rule + plugin name unions track declared plugins", () =>
         {
           name: "plugin-rule",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "git",
           reason: "r",
         },
       ],
@@ -617,8 +593,7 @@ describe("defineConfig: rule + plugin name unions track declared plugins", () =>
         {
           name: "user-rule",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "rm",
           reason: "r",
         },
       ],
@@ -752,8 +727,7 @@ describe("Rule discriminated union: tool gates field", () => {
         {
           name: "bash-ok",
           tool: "bash",
-          field: "command",
-          pattern: /^rm\b/,
+          command: "rm",
           reason: "r",
         },
       ],
@@ -805,48 +779,13 @@ describe("Rule discriminated union: tool gates field", () => {
     assert.equal(cfg.rules?.length, 2);
   });
 
-  it('bash rules reject `field: "path"` (type error)', () => {
-    const cfg = defineConfig({
-      rules: [
-        // @ts-expect-error — bash rules must use `field: "command"`.
-        // Previously silently misbehaved (evaluator always tested
-        // the extracted command regardless of `field`).
-        {
-          name: "bash-path-bad",
-          tool: "bash",
-          field: "path",
-          pattern: /^x/,
-          reason: "r",
-        },
-      ],
-    });
-    assert.equal(cfg.rules?.length, 1);
-  });
-
-  it('bash rules reject `field: "content"` (type error)', () => {
-    const cfg = defineConfig({
-      rules: [
-        // @ts-expect-error — bash rules must use `field: "command"`.
-        {
-          name: "bash-content-bad",
-          tool: "bash",
-          field: "content",
-          pattern: /^x/,
-          reason: "r",
-        },
-      ],
-    });
-    assert.equal(cfg.rules?.length, 1);
-  });
-
   it('write rules reject `field: "command"` (type error)', () => {
     const cfg = defineConfig({
       rules: [
-        // @ts-expect-error — write rules test `path` / `content`,
-        // never `command` (write has no command).
         {
           name: "write-command-bad",
           tool: "write",
+          // @ts-expect-error — write rules test `path` / `content`.
           field: "command",
           pattern: /^x/,
           reason: "r",
@@ -859,11 +798,10 @@ describe("Rule discriminated union: tool gates field", () => {
   it('edit rules reject `field: "command"` (type error)', () => {
     const cfg = defineConfig({
       rules: [
-        // @ts-expect-error — edit rules test `path` / `content`,
-        // never `command`.
         {
           name: "edit-command-bad",
           tool: "edit",
+          // @ts-expect-error — edit rules test `path` / `content`.
           field: "command",
           pattern: /^x/,
           reason: "r",
@@ -886,8 +824,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
         {
           name: "no-force-push",
           tool: "bash",
-          field: "command",
-          pattern: /^git/,
+          command: "git",
           reason: "r",
         },
       ],
@@ -918,8 +855,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
         {
           name: "plugin-rule",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "git",
           reason: "r",
         },
       ],
@@ -930,8 +866,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
         {
           name: "user-rule",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "git",
           reason: "r",
         },
       ],
@@ -953,8 +888,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
         {
           name: "known-rule",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
         },
       ],
@@ -975,8 +909,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
         {
           name: "consumer",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
           writes: ["sync-done"],
         },
@@ -1004,8 +937,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
         {
           name: "no-force-push",
           tool: "bash",
-          field: "command",
-          pattern: /^git/,
+          command: "git",
           reason: "r",
         },
       ],
@@ -1041,8 +973,7 @@ describe("defineConfig: exemption typing + runtime copy", () => {
         {
           name: "no-force-push",
           tool: "bash",
-          field: "command",
-          pattern: /^git/,
+          command: "git",
           reason: "r",
           writes: ["sync-done"],
         },
@@ -1096,8 +1027,7 @@ const napkinSelf = {
     {
       name: "self-rule",
       tool: "bash",
-      field: "command",
-      pattern: /./,
+      command: "x",
       reason: "r",
     },
   ],
@@ -1215,8 +1145,7 @@ describe("defineConfig: plugin-shipped exemption targets (issue #29)", () => {
         {
           name: "user-inline-rule",
           tool: "bash",
-          field: "command",
-          pattern: /./,
+          command: "x",
           reason: "r",
         },
       ],

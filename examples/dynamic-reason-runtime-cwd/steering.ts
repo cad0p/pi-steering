@@ -27,6 +27,7 @@
 
 import {
   defineConfig,
+  type Plugin,
   type Rule,
   walkerUnknownCwdReason,
 } from "@cad0p/pi-steering";
@@ -49,8 +50,12 @@ import gitPlugin from "@cad0p/pi-steering/plugins/git";
 const deployRequiresCleanTree = {
   name: "deploy-requires-clean-tree",
   tool: "bash",
-  field: "command",
-  pattern: /^npm\s+run\s+deploy\b/,
+  command: "npm",
+  // `subcommand: ["run", "deploy"]` routes
+  // the two-token subcommand (the old `/^npm\\s+run\\s+deploy\\b/`
+  // anchor). npm facts are synthetic-minimal until an npm table
+  // owns them: `prefix` keeps `npm --prefix <dir> run deploy`
+  // routed (a value-taking global before the subcommand).
   // Canonical positive form: `isClean: false` ("fires when dirty")
   // reads forward and lets per-leaf modifiers attach at the leaf if
   // ever needed. The equivalent `not: { isClean: true }` form is also
@@ -61,7 +66,10 @@ const deployRequiresCleanTree = {
   // shape when no other leaves share the not-block. See README
   // "Why isClean: false over not: { isClean: true }" for the full
   // truth table.
-  when: { isClean: false },
+  when: {
+    subcommand: ["run", "deploy"],
+    isClean: false,
+  },
   reason: (ctx) => {
     if (ctx.walkerState?.cwd === "unknown") {
       // Walker couldn't statically resolve cwd. The handler's
@@ -80,7 +88,24 @@ const deployRequiresCleanTree = {
   },
 } as const satisfies Rule;
 
+/**
+ * Minimal synthetic `npm` facts: just the value-taking global the
+ * deploy routing needs. A fuller npm table (all globals) would route
+ * every `npm --<global> ...` form; until one ships, this covers the
+ * documented `npm run deploy` shape plus `--prefix`.
+ */
+const npmFacts = {
+  name: "npm-facts",
+  cliDescriptors: {
+    npm: {
+      flags: {
+        prefix: { aliases: ["--prefix"], takesValue: true },
+      },
+    },
+  },
+} as const satisfies Plugin;
+
 export default defineConfig({
-  plugins: [gitPlugin],
+  plugins: [gitPlugin, npmFacts],
   rules: [deployRequiresCleanTree],
 });

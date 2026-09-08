@@ -25,10 +25,7 @@ import { makeCtx, makeTrackedHost } from "../../../__test-helpers__.ts";
 import { buildEvaluator } from "../../../evaluator.ts";
 import { BLOCK_REASON_PREAMBLE } from "../../../helpers/block-reason-preamble.ts";
 import { resolvePlugins } from "../../../plugin-merger.ts";
-import {
-  GIT_COMMIT_PATTERN,
-  PROTECTED_BRANCH_PATTERN,
-} from "../helpers/patterns.ts";
+import { PROTECTED_BRANCH_PATTERN } from "../helpers/patterns.ts";
 import gitPlugin from "../index.ts";
 import { noMainCommit } from "./no-main-commit.ts";
 import { noMainCommitGithub } from "./no-main-commit-github.ts";
@@ -100,7 +97,7 @@ function buildWithBranchAndRemote(
 // no-main-commit-github
 //
 // Specialization of `no-main-commit` that emits PR-flow guidance on
-// github.com clones. The shared `GIT_COMMIT_PATTERN` constant +
+// github.com clones. The shared `command:` + `subcommand:` routing +
 // first-match-wins ordering in the rule array are LOAD-BEARING — these
 // tests pin the routing so a future maintainer reordering for stylistic
 // reasons trips the suite rather than silently regressing the user-
@@ -252,7 +249,7 @@ describe("rules: no-main-commit-github", () => {
     assert.equal(
       res,
       undefined,
-      "shared GIT_COMMIT_PATTERN constant must only match `git commit` (not `git push`)",
+      "shared routing must only match `git commit` (not `git push`)",
     );
   });
 
@@ -506,7 +503,8 @@ describe("rules: no-main-commit-github", () => {
     );
     assert.ok(rule);
     assert.equal(rule.tool, "bash");
-    assert.equal(rule.field, "command");
+    if (rule.tool !== "bash") throw new Error("narrow");
+    assert.equal(rule.command, "git");
     assert.equal(
       rule.noOverride,
       true,
@@ -677,44 +675,38 @@ describe("rules: no-main-commit-github", () => {
     );
   });
 
-  it("both rules' pattern fields equal the exported GIT_COMMIT_PATTERN constant", () => {
-    // Value-equality pin against the exported constant. The pattern
-    // is a string primitive, so this is byte-equality, NOT shared-
-    // reference identity — a future maintainer who inlines the
-    // literal at one rule's definition site with the SAME bytes
-    // would not trip this assertion. What it DOES catch:
-    //   - Either rule's pattern accidentally diverging from the
-    //     exported constant (e.g. one drops `\b`, one anchors
-    //     differently).
-    //   - The constant itself getting renamed away or removed.
-    // True shared-reference factoring would need a `RegExp` (object)
-    // constant; today's design uses a string source so the regex-
-    // compile cache in the engine can dedupe across both rules
-    // without per-rule allocation.
-    assert.equal(
-      noMainCommit.pattern,
-      GIT_COMMIT_PATTERN,
-      "noMainCommit.pattern must equal the exported GIT_COMMIT_PATTERN constant",
+  it("both rules share the same command + subcommand routing", () => {
+    // Routing-equality pin: both commit-on-main rules must route
+    // identically (`command: "git"` + `subcommand: "commit"`) so the
+    // family stays byte-equal as routing evolves. What it catches:
+    //   - Either rule's routing accidentally diverging (e.g. one
+    //     drops the subcommand, the other doesn't).
+    if (noMainCommit.tool !== "bash" || noMainCommitGithub.tool !== "bash") {
+      throw new Error("narrow");
+    }
+    assert.equal(noMainCommit.command, "git");
+    assert.equal(noMainCommitGithub.command, "git");
+    assert.deepEqual(
+      (noMainCommit.when as { subcommand?: unknown }).subcommand,
+      "commit",
     );
-    assert.equal(
-      noMainCommitGithub.pattern,
-      GIT_COMMIT_PATTERN,
-      "noMainCommitGithub.pattern must equal the exported GIT_COMMIT_PATTERN constant",
+    assert.deepEqual(
+      (noMainCommitGithub.when as { subcommand?: unknown }).subcommand,
+      "commit",
     );
   });
 
   it("both rules' branch fields share-reference the exported PROTECTED_BRANCH_PATTERN constant", () => {
     // Shared-reference pin (`===` on the RegExp object), STRICTLY
-    // stronger than the byte-equality pin above for `pattern`. The
+    // Shared-reference pin (`===` on the RegExp object). The
     // protected-branch list is a `RegExp` (object) constant rather
     // than a string source, so identity comparison is meaningful:
     // any future maintainer who inlines `/^(main|master|mainline|trunk)$/`
     // at a rule's definition site — even with byte-identical contents
     // — trips this assertion because the inlined literal compiles to
-    // a fresh `RegExp` instance. That catches the failure mode the
-    // `GIT_COMMIT_PATTERN` value-equality pin cannot: silent
-    // re-inlining that re-introduces the duplication this constant
-    // was extracted to eliminate.
+    // a fresh `RegExp` instance. That catches silent re-inlining
+    // that re-introduces the duplication this constant was extracted
+    // to eliminate.
     //
     // Without the shared constant, the protected-branch list could
     // drift between the two rules (one rule adds a vendor-specific

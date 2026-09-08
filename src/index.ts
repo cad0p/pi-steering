@@ -201,6 +201,8 @@ export {
   BLOCK_REASON_PREAMBLE,
   ENGINE_ERROR_PREAMBLE,
 } from "./helpers/block-reason-preamble.ts";
+export type { BooleanLeafArgs } from "./helpers/boolean-args.ts";
+export { unwrapBooleanLeafArg } from "./helpers/boolean-args.ts";
 export type { SteeringCommand } from "./helpers/command.ts";
 export { commandFromInput } from "./helpers/command.ts";
 // Command facade: context-provided flag-value view (issue #101; #110
@@ -224,6 +226,7 @@ export { buildConfig, loadConfigs, loadSteeringConfig } from "./loader.ts";
 // Schema types — the public authoring surface.
 export type {
   AnyPredicateHandler,
+  Basename,
   BaseRule,
   BashRule,
   BuiltInWhenLeaves,

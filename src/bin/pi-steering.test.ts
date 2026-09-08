@@ -211,14 +211,14 @@ describe("pi-steering import-json: IO errors", () => {
 // ---------------------------------------------------------------------------
 
 const VALID_V1 = {
-  disable: ["no-force-push"],
+  disable: ["no-secrets"],
   rules: [
     {
-      name: "no-amend",
-      tool: "bash",
-      field: "command",
-      pattern: "^git\\s+commit\\b.*--amend",
-      reason: "Don't rewrite history.",
+      name: "no-secrets",
+      tool: "write",
+      field: "path",
+      pattern: "^/etc/",
+      reason: "Don't write outside the project.",
     },
   ],
 };
@@ -236,11 +236,11 @@ describe("pi-steering import-json: conversion", () => {
       /import \{ defineConfig \} from "@cad0p\/pi-steering"/,
     );
     assert.match(r.stdout, /export default defineConfig\(/);
-    assert.match(r.stdout, /"no-amend"/);
-    assert.match(r.stdout, /"Don't rewrite history\."/);
+    assert.match(r.stdout, /"no-secrets"/);
+    assert.match(r.stdout, /"Don\'t write outside the project\."/);
     // Preserve the disabled-rules list. Note the rename: v1 JSON's
     // `disable` key becomes v2 TS `disabledRules` on output.
-    assert.match(r.stdout, /"disabledRules":\s*\[\s*"no-force-push"\s*\]/);
+    assert.match(r.stdout, /"disabledRules":\s*\[\s*"no-secrets"\s*\]/);
   });
 
   it("-o mode: writes file + reports path, exits 0", async () => {
@@ -255,7 +255,7 @@ describe("pi-steering import-json: conversion", () => {
 
     const written = readFileSync(outputPath, "utf8");
     assert.match(written, /import \{ defineConfig \}/);
-    assert.match(written, /"no-amend"/);
+    assert.match(written, /"no-secrets"/);
     // The generated file should be valid enough that a user can
     // drop it in and `tsc --noEmit` it. Sanity check: trailing
     // newline, no BOM.
@@ -286,6 +286,29 @@ describe("pi-steering import-json: conversion", () => {
     const r = await runCli("import-json", inputPath);
     assert.equal(r.code, 2);
     assert.match(r.stderr, /conversion failed at <root>\.plugins/);
+    assert.equal(r.stdout, "");
+  });
+
+  it("bash rules fail with the issue #117 migration error (no shim)", async () => {
+    const inputPath = join(scratch, "steering.json");
+    writeFileSync(
+      inputPath,
+      JSON.stringify({
+        rules: [
+          {
+            name: "no-force-push",
+            tool: "bash",
+            field: "command",
+            pattern: "^git\\\\s+push",
+            reason: "no",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const r = await runCli("import-json", inputPath);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /rewrite the rule in TypeScript as `command:`/);
     assert.equal(r.stdout, "");
   });
 });
@@ -325,8 +348,7 @@ describe("pi-steering list", () => {
 							{
 								name: "no-main-commit",
 								tool: "bash",
-								field: "command",
-								pattern: /^git\\s+commit/,
+								command: "git",
 								when: { branch: /^main$/ },
 								reason: "no",
 							},
@@ -337,8 +359,7 @@ describe("pi-steering list", () => {
 					{
 						name: "my-rule",
 						tool: "bash",
-						field: "command",
-						pattern: /^echo/,
+						command: "echo",
 						reason: "no",
 					},
 				],
@@ -405,8 +426,7 @@ describe("pi-steering list", () => {
 					{
 						name: "u1",
 						tool: "bash",
-						field: "command",
-						pattern: /^ls/,
+						command: "ls",
 						reason: "no",
 					},
 				],
@@ -461,8 +481,7 @@ describe("pi-steering list", () => {
 					{
 						name: "rq",
 						tool: "bash",
-						field: "command",
-						pattern: /^git push/,
+						command: "git",
 						when: { missing: { event: "tests-passed", in: "agent_loop" } },
 						reason: "no",
 					},
@@ -482,8 +501,8 @@ describe("pi-steering list", () => {
 					{
 						name: "git",
 						rules: [
-							{ name: "active-rule", tool: "bash", field: "command", pattern: /./, reason: "r" },
-							{ name: "disabled-rule", tool: "bash", field: "command", pattern: /./, reason: "r" },
+							{ name: "active-rule", tool: "bash", command: "never", reason: "r" },
+							{ name: "disabled-rule", tool: "bash", command: "never", reason: "r" },
 						],
 					},
 				],
@@ -508,7 +527,7 @@ describe("pi-steering list", () => {
 					{
 						name: "git",
 						rules: [
-							{ name: "some-rule", tool: "bash", field: "command", pattern: /./, reason: "r" },
+							{ name: "some-rule", tool: "bash", command: "never", reason: "r" },
 						],
 					},
 				],
@@ -533,8 +552,8 @@ describe("pi-steering list", () => {
 					{
 						name: "git",
 						rules: [
-							{ name: "active-rule", tool: "bash", field: "command", pattern: /./, reason: "r" },
-							{ name: "disabled-rule", tool: "bash", field: "command", pattern: /./, reason: "r" },
+							{ name: "active-rule", tool: "bash", command: "never", reason: "r" },
+							{ name: "disabled-rule", tool: "bash", command: "never", reason: "r" },
 						],
 					},
 					{ name: "also-disabled" },
@@ -582,8 +601,7 @@ describe("pi-steering list", () => {
 					{
 						name: "no-force-push",
 						tool: "bash",
-						field: "command",
-						pattern: /^git\\s+push/,
+						command: "git",
 						reason: "no",
 					},
 				],
@@ -613,8 +631,7 @@ describe("pi-steering list", () => {
 							{
 								name: "no-force-push",
 								tool: "bash",
-								field: "command",
-								pattern: /^git\\s+push/,
+								command: "git",
 								reason: "no",
 							},
 						],
@@ -641,8 +658,7 @@ describe("pi-steering list", () => {
 							{
 								name: "no-force-push",
 								tool: "bash",
-								field: "command",
-								pattern: /^git\\s+push/,
+								command: "git",
 								reason: "no",
 							},
 						],
@@ -653,15 +669,14 @@ describe("pi-steering list", () => {
 				],
 				rules: [
 					{
-						name: "no-long-running-commands",
+						name: "no-publish-test",
 						tool: "bash",
-						field: "command",
-						pattern: /^npm\\s+run\\s+dev/,
+						command: "npm",
 						reason: "no",
 					},
 				],
 				exemptions: [
-					{ rule: "no-long-running-commands", when: { cwd: /\\/tmp\\// } },
+					{ rule: "no-publish-test", when: { cwd: /\\/tmp\\// } },
 				],
 			};`,
     );
@@ -673,7 +688,7 @@ describe("pi-steering list", () => {
     assert.deepEqual(parsed.exemptions, [
       { rule: "no-force-push", when: "cwd", source: "napkin" },
       {
-        rule: "no-long-running-commands",
+        rule: "no-publish-test",
         when: "cwd",
         source: "config",
       },
@@ -691,8 +706,7 @@ describe("pi-steering list", () => {
 							{
 								name: "no-main-commit",
 								tool: "bash",
-								field: "command",
-								pattern: /^git\\s+commit/,
+								command: "git",
 								reason: "no",
 							},
 						],
@@ -826,8 +840,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 					{
 						name: "phony] BAD",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 					},
 				],
@@ -887,8 +900,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 							{
 								name: "bad name",
 								tool: "bash",
-								field: "command",
-								pattern: /^never$/,
+								command: "never",
 								reason: "r",
 							},
 						],
@@ -913,8 +925,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 					{
 						name: "clean-rule",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 					},
 				],
@@ -1012,8 +1023,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 					{
 						name: "phony] ALL CLEAR [real",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 					},
 				],
@@ -1069,8 +1079,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 					{
 						name: "r",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 					},
 				],
@@ -1110,8 +1119,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 					{
 						name: "consumer",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 						when: { missing: { event: "X" } },
 					},
@@ -1150,8 +1158,7 @@ describe("pi-steering list: diagnostics on stderr", () => {
 					{
 						name: "consumer",
 						tool: "bash",
-						field: "command",
-						pattern: /^never$/,
+						command: "never",
 						reason: "r",
 						when: { missing: { event: "X" } },
 					},
@@ -1200,8 +1207,7 @@ describe("pi-steering list: project trust gate", () => {
 					{
 						name: "trusted-project-rule",
 						tool: "bash",
-						field: "command",
-						pattern: /^echo trusted$/,
+						command: "echo",
 						reason: "no",
 					},
 				],
@@ -1336,8 +1342,7 @@ describe("pi-steering list: project trust gate", () => {
 					{
 						name: "symlink-rule",
 						tool: "bash",
-						field: "command",
-						pattern: /^echo sym$/,
+						command: "echo",
 						reason: "no",
 					},
 				],

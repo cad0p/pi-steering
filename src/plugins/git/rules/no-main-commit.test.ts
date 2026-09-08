@@ -24,10 +24,7 @@ import type {
 import { makeCtx, makeTrackedHost } from "../../../__test-helpers__.ts";
 import { buildEvaluator } from "../../../evaluator.ts";
 import { resolvePlugins } from "../../../plugin-merger.ts";
-import {
-  GIT_COMMIT_PATTERN,
-  PROTECTED_BRANCH_PATTERN,
-} from "../helpers/patterns.ts";
+import { PROTECTED_BRANCH_PATTERN } from "../helpers/patterns.ts";
 import gitPlugin from "../index.ts";
 import { noMainCommit } from "./no-main-commit.ts";
 
@@ -88,23 +85,16 @@ function buildWithBranch(branchName: string) {
 // ---------------------------------------------------------------------------
 
 describe("rules: no-main-commit shape", () => {
-  it("exists on the plugin with the expected name + pattern + strict flag", () => {
+  it("exists on the plugin with the expected routing + strict flag", () => {
     const rule = gitPlugin.rules?.find((r) => r.name === "no-main-commit");
     assert.ok(rule);
     assert.equal(rule.tool, "bash");
-    assert.equal(rule.field, "command");
+    if (rule.tool !== "bash") throw new Error("narrow");
+    assert.equal(rule.command, "git");
     assert.equal(rule.noOverride, true);
-    // Accept both shapes: runtime value can be string | RegExp per the
-    // schema, even though the narrowed literal type is string-only after
-    // the `as const satisfies Rule` narrowing in ./no-main-commit.ts.
-    const pattern = rule.pattern as string | RegExp;
-    const patternSource =
-      typeof pattern === "string" ? pattern : pattern.source;
-    assert.ok(patternSource.includes("commit"));
-    assert.ok(
-      rule.when !== undefined &&
-        "branch" in (rule.when as Record<string, unknown>),
-    );
+    const when = rule.when as Record<string, unknown>;
+    assert.equal(when["subcommand"], "commit");
+    assert.ok("branch" in when);
   });
 
   it("fires on `git commit` when branch predicate resolves to main", async () => {

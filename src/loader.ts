@@ -30,6 +30,8 @@ import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
 import { runMergerPipeline } from "./internal/session-runtime.ts";
 import { formatTrackerNameCollisionMessage } from "./plugin-merger.ts";
 import type {
+  AnyPredicateHandler,
+  CLIDescriptor,
   Exemption,
   Observer,
   Plugin,
@@ -427,27 +429,115 @@ async function loadLayer(
 function mergePlugins(
   layers: readonly SteeringConfig[],
   disabledPlugins: ReadonlySet<string>,
+  locks: LockState,
+  deps: LockDependencies,
   diagnostics: SteeringDiagnostic[],
 ): Plugin[] {
   const seen = new Set<string>();
   const out: Plugin[] = [];
-  for (const layer of layers) {
+  for (const [layerIndex, layer] of layers.entries()) {
     if (!layer.plugins) continue;
-    for (const plugin of layer.plugins) {
-      if (seen.has(plugin.name)) {
-        if (!disabledPlugins.has(plugin.name)) {
+    for (const raw of layer.plugins) {
+      if (seen.has(raw.name)) {
+        if (!disabledPlugins.has(raw.name)) {
           diagnostics.push({
             type: "warning",
             kind: "plugin-name-collision",
-            message: `duplicate plugin "${plugin.name}"; keeping first-registered entry.`,
+            message: `duplicate plugin "${raw.name}"; keeping first-registered entry.`,
           });
         }
         continue;
       }
+      // An inner layer must not shadow, by plugin NAME, a plugin that
+      // provides a locked rule's dependencies or ships a locked rule:
+      // first-registered wins today, so the shadow would replace the
+      // provider and the locked rule would name an unregistered
+      // predicate (red-team R-F2b, probe5).
+      if (
+        layerIndex < locks.outer &&
+        (deps.outerProviders.has(raw.name) || deps.outerShips.has(raw.name))
+      ) {
+        diagnostics.push({
+          type: "warning",
+          kind: "locked-rule-violation",
+          message:
+            `refusing plugin "${raw.name}" from ${describeLayers([layerIndex])}: ` +
+            `it shadows the ${describeLayers([locks.outer])} plugin that ` +
+            `${describeProvider(deps, raw.name)} (locked by ` +
+            `${describeLayers([locks.outer])}); the outer plugin keeps the name.`,
+        });
+        continue;
+      }
+      const plugin =
+        layerIndex < locks.outer
+          ? stripProtectedFromPlugin(raw, layerIndex, locks, deps, diagnostics)
+          : raw;
       seen.add(plugin.name);
       out.push(plugin);
     }
   }
+  return out;
+}
+
+/**
+ * Remove from an INNER plugin the pieces a locked rule depends on: the
+ * predicate handlers it calls, its named observers, the CLI descriptors
+ * that decide how its commands parse, its exemptions, and any rule or
+ * observer that would shadow a locked name. Returns the plugin
+ * unchanged when there is nothing to strip; every strip is a
+ * warning-class `locked-rule-violation` naming both sides — never an
+ * engine error, because an inner layer must not be able to disarm the
+ * session by provoking a throw (red-team R-F2a, R-F2b).
+ */
+function stripProtectedFromPlugin(
+  plugin: Plugin,
+  layerIndex: number,
+  locks: LockState,
+  deps: LockDependencies,
+  diagnostics: SteeringDiagnostic[],
+): Plugin {
+  const removed: string[] = [];
+  const predicates: Record<string, AnyPredicateHandler> = {};
+  for (const [key, handler] of Object.entries(plugin.predicates ?? {})) {
+    if (deps.predicates.has(key)) removed.push(`predicate "${key}"`);
+    else predicates[key] = handler;
+  }
+  const observers = (plugin.observers ?? []).filter((observer) => {
+    if (!deps.observers.has(observer.name)) return true;
+    removed.push(`observer "${observer.name}"`);
+    return false;
+  });
+  const cliDescriptors: Record<string, CLIDescriptor> = {};
+  for (const [key, descriptor] of Object.entries(plugin.cliDescriptors ?? {})) {
+    if (deps.descriptors.has(key)) removed.push(`descriptor "${key}"`);
+    else cliDescriptors[key] = descriptor;
+  }
+  const exemptions = (plugin.exemptions ?? []).filter((exemption) => {
+    if (!isProtectedFrom(locks, exemption.rule, layerIndex)) return true;
+    removed.push(`exemption for "${exemption.rule}"`);
+    return false;
+  });
+  const rules = (plugin.rules ?? []).filter((rule) => {
+    if (!isProtectedFrom(locks, rule.name, layerIndex)) return true;
+    removed.push(`rule "${rule.name}"`);
+    return false;
+  });
+  if (removed.length === 0) return plugin;
+  diagnostics.push({
+    type: "warning",
+    kind: "locked-rule-violation",
+    message:
+      `refusing ${removed.join(", ")} from plugin "${plugin.name}" ` +
+      `(${describeLayers([layerIndex])}): a locked rule depends on it, and the ` +
+      `inner declaration would replace the one the lock trusts ` +
+      `(locked by ${describeLayers([locks.outer])}); the outer declaration stays in force.`,
+  });
+  const out: Plugin = { ...plugin };
+  if (plugin.predicates !== undefined) out.predicates = predicates;
+  if (plugin.observers !== undefined) out.observers = observers;
+  if (plugin.cliDescriptors !== undefined) out.cliDescriptors = cliDescriptors;
+  if (plugin.exemptions !== undefined) out.exemptions = exemptions;
+  if (plugin.rules !== undefined) out.rules = rules;
   return out;
 }
 
@@ -476,7 +566,10 @@ function mergeRules(
   locks: LockState,
   diagnostics: SteeringDiagnostic[],
 ): Rule[] {
-  const byName = new Map<string, { rule: Rule; layer: number }>();
+  // Declarations in first-seen order, so the output order stays stable
+  // (inner-first, then outer; within a layer, source order).
+  const declared = new Map<string, Array<{ rule: Rule; layer: number }>>();
+  const order: string[] = [];
   for (const [layerIndex, layer] of layers.entries()) {
     if (!layer.rules) continue;
     const seenInLayer = new Set<string>();
@@ -494,41 +587,51 @@ function mergeRules(
         continue;
       }
       seenInLayer.add(rule.name);
-      const existing = byName.get(rule.name);
-      if (existing === undefined) {
-        byName.set(rule.name, { rule, layer: layerIndex });
-        continue;
-      }
-      const owners = locks.owners.get(rule.name);
-      if (owners === undefined) continue;
-      const existingLocked = owners.has(existing.layer);
-      const incomingLocked = owners.has(layerIndex);
-      if (incomingLocked && !existingLocked) {
-        // Keep the insertion slot, swap in the locked definition.
-        byName.set(rule.name, { rule, layer: layerIndex });
-        diagnostics.push({
-          type: "warning",
-          kind: "locked-rule-violation",
-          message:
-            `refusing an override of locked rule "${rule.name}" from ` +
-            `${describeLayers([existing.layer])} (locked by ` +
-            `${describeLayers([layerIndex])}); the locked definition wins.`,
-        });
-        continue;
-      }
-      if (existingLocked && !incomingLocked) {
-        diagnostics.push({
-          type: "warning",
-          kind: "locked-rule-violation",
-          message:
-            `refusing an override of locked rule "${rule.name}" from ` +
-            `${describeLayers([layerIndex])} (locked by ` +
-            `${describeLayers([...owners])}); the locked definition wins.`,
-        });
+      const list = declared.get(rule.name);
+      if (list === undefined) {
+        declared.set(rule.name, [{ rule, layer: layerIndex }]);
+        order.push(rule.name);
+      } else {
+        list.push({ rule, layer: layerIndex });
       }
     }
   }
-  return [...byName.values()].map((entry) => entry.rule);
+
+  const out: Rule[] = [];
+  for (const name of order) {
+    const entries = declared.get(name) ?? [];
+    // The OUTERMOST lock owner is the authority for this name. A
+    // definition from a layer inner to it is a shadow: the documented
+    // inner-wins path would otherwise replace the locked rail with a
+    // do-nothing body while leaving its name in place (R-F1). Layers
+    // outer to the owner may still override it (they are closer to the
+    // owner than any shadow is).
+    const owners = locks.owners.get(name);
+    const authority = owners === undefined ? undefined : Math.max(...owners);
+    const authoritative = entries.filter(
+      (entry) => authority !== undefined && entry.layer >= authority,
+    );
+    if (authoritative.length > 0) {
+      out.push(authoritative[authoritative.length - 1]?.rule as Rule);
+      for (const shadow of entries) {
+        if (shadow.layer >= authority!) continue;
+        diagnostics.push({
+          type: "warning",
+          kind: "locked-rule-violation",
+          message:
+            `refusing a definition of locked rule "${name}" from ` +
+            `${describeLayers([shadow.layer])} (locked by ` +
+            `${describeLayers([authority as number])}); the locked definition wins.`,
+        });
+      }
+      continue;
+    }
+    // No declaration from the owner or outer: the rule lives only in
+    // inner layers. Keep the ordinary inner-wins winner — the lock
+    // still refuses a LATER disable/override by an inner layer.
+    out.push(entries[0]?.rule as Rule);
+  }
+  return out;
 }
 
 /**
@@ -609,15 +712,15 @@ function mergeExemptions(
   for (const [layerIndex, layer] of layers.entries()) {
     if (!layer.exemptions) continue;
     for (const exemption of layer.exemptions) {
-      const owners = locks.owners.get(exemption.rule);
-      if (owners !== undefined && !owners.has(layerIndex)) {
+      if (isProtectedFrom(locks, exemption.rule, layerIndex)) {
         diagnostics.push({
           type: "warning",
           kind: "locked-rule-violation",
           message:
             `refusing an exemption of locked rule "${exemption.rule}" from ` +
             `${describeLayers([layerIndex])} (locked by ` +
-            `${describeLayers([...owners])}); the exemption is dropped.`,
+            `${describeLayers(ownersOuterThan(locks, exemption.rule, layerIndex))}); ` +
+            "the exemption is dropped.",
         });
         continue;
       }
@@ -630,28 +733,42 @@ function mergeExemptions(
 /**
  * Lock bookkeeping for {@link buildConfig}.
  *
- * `lockedRules` is a LAYER-OWNED claim: a layer that lists a rule name
- * says "no OTHER layer may disable it, redefine it, exempt it, or
- * remove it by disabling the plugin that ships it". The claim is
- * per-layer rather than global on purpose — a layer may still disable
- * or exempt a rule it locked itself, because that is the owner editing
- * their own config, not another layer overriding a rail.
+ * A lock binds only OUTWARD: the layer that declares it protects the
+ * rule from every layer INNER to that declarer, and never from the
+ * declarer itself. With pi-steering's two layers (project = #0 inner,
+ * global = #1 outer) that means only the outermost layer's locks bind.
+ *
+ * The first cut treated every `lockedRules` declaration as ownership,
+ * so a project layer that listed the merge guard became an "owner" and
+ * its own disable / exemption / boolean flip was honoured with zero
+ * diagnostics — a one-line kill switch that all three lenses found
+ * (functional F1, red-team R-F1, trust F1). Declarations are now
+ * per-declarer claims with an outward-only effect, and there is NO
+ * self-exemption: the outermost layer cannot be protected from itself
+ * (nothing is outer to it), so an owner is never locked out of their own
+ * config, while an inner layer's own lock grants it nothing at all.
  */
 interface LockState {
-  /** Rule name → indices of the layers that lock it. */
+  /** Rule name → layer indices that lock it (every declarer). */
   owners: ReadonlyMap<string, ReadonlySet<number>>;
   /** Indices of layers that declare at least one lock. */
   declarers: readonly number[];
+  /** The outermost layer index — the authority end of the chain. */
+  outer: number;
+  /** Rule names locked by the outermost layer (the binding set). */
+  outerLocked: ReadonlySet<string>;
 }
 
 /**
  * Collect every layer's `lockedRules` claim. Names are NOT validated
- * here (see `validateUserConfigNames`): an unknown locked name is inert
- * — it simply protects nothing.
+ * here (see `validateUserConfigNames`); a lock that names no rule is
+ * reported by {@link buildConfig} instead, so the diagnostic has the
+ * full rule universe to compare against.
  */
 function collectLocks(layers: readonly SteeringConfig[]): LockState {
   const owners = new Map<string, Set<number>>();
   const declarers: number[] = [];
+  const outer = layers.length === 0 ? -1 : layers.length - 1;
   for (const [layerIndex, layer] of layers.entries()) {
     const names = layer.lockedRules ?? [];
     if (names.length > 0) declarers.push(layerIndex);
@@ -661,7 +778,201 @@ function collectLocks(layers: readonly SteeringConfig[]): LockState {
       else set.add(layerIndex);
     }
   }
-  return { owners, declarers };
+  const outerLocked = new Set(layers[outer]?.lockedRules ?? []);
+  return { owners, declarers, outer, outerLocked };
+}
+
+/**
+ * True when `name` is locked by a layer OUTER to `layerIndex` — the
+ * only relationship in which a lock binds. A layer's own lock never
+ * protects it, and an inner layer's lock never protects against an
+ * outer one.
+ */
+function isProtectedFrom(
+  locks: LockState,
+  name: string,
+  layerIndex: number,
+): boolean {
+  return ownersOuterThan(locks, name, layerIndex).length > 0;
+}
+
+/** Owners of `name` that are outer to `layerIndex` (for messages). */
+function ownersOuterThan(
+  locks: LockState,
+  name: string,
+  layerIndex: number,
+): number[] {
+  const owners = locks.owners.get(name);
+  if (owners === undefined) return [];
+  return [...owners]
+    .filter((owner) => owner > layerIndex)
+    .sort((a, b) => a - b);
+}
+
+/**
+ * Registry dependencies of the outermost layer's locked rules.
+ *
+ * A locked rule is a BODY, not a runtime: its predicates come from
+ * plugins, its observers are referenced by name, and its CLI
+ * descriptors decide how the command is parsed. A project plugin that
+ * supplies any of those wins the first-registered race and neuters the
+ * rule while leaving its text intact — the rule "stays ACTIVE" and
+ * blocks nothing (red-team R-F2). The lock therefore extends to the
+ * dependency closure, and to the plugins that provide it.
+ */
+interface LockDependencies {
+  /** Predicate keys referenced by a locked rule. */
+  predicates: ReadonlySet<string>;
+  /** Observer names a locked rule references by name. */
+  observers: ReadonlySet<string>;
+  /** CLI basenames a locked bash rule routes on. */
+  descriptors: ReadonlySet<string>;
+  /** Plugin names providing at least one protected dependency. */
+  providers: ReadonlySet<string>;
+  /** Provider names declared by the OUTERMOST layer (the trusted ones). */
+  outerProviders: ReadonlySet<string>;
+  /** Plugin names shipping a locked rule, declared by the outermost layer. */
+  outerShips: ReadonlySet<string>;
+  /** Provider name → what it provides (for messages). */
+  provides: ReadonlyMap<string, readonly string[]>;
+  /** Provider name → locked rules that lose a dependency with it. */
+  providerRules: ReadonlyMap<string, readonly string[]>;
+  /** Plugin name → locked rules it ships as plugin rules. */
+  ships: ReadonlyMap<string, readonly string[]>;
+}
+
+/**
+ * Compute the dependency closure of the outermost layer's locked rules.
+ *
+ * Scans EVERY declaration (layer rules and plugin rules) of a locked
+ * name: an inner duplicate is stripped before it can affect evaluation,
+ * but its references still count, so the closure errs on the side of
+ * protecting more.
+ */
+function collectLockDependencies(
+  layers: readonly SteeringConfig[],
+  locks: LockState,
+): LockDependencies {
+  const declarations: Rule[] = [];
+  for (const layer of layers) {
+    for (const rule of layer.rules ?? []) {
+      if (locks.outerLocked.has(rule.name)) declarations.push(rule);
+    }
+    for (const plugin of layer.plugins ?? []) {
+      for (const rule of plugin.rules ?? []) {
+        if (locks.outerLocked.has(rule.name)) declarations.push(rule);
+      }
+    }
+  }
+
+  const predicates = new Set<string>();
+  const observers = new Set<string>();
+  const descriptors = new Set<string>();
+  for (const rule of declarations) {
+    for (const key of Object.keys(rule.when ?? {})) predicates.add(key);
+    const not = rule.when?.not;
+    if (not !== undefined && typeof not === "object") {
+      for (const key of Object.keys(not)) predicates.add(key);
+    }
+    if (typeof rule.observer === "string") observers.add(rule.observer);
+    if (rule.tool === "bash") {
+      const commands = Array.isArray(rule.command)
+        ? rule.command
+        : [rule.command];
+      for (const command of commands) descriptors.add(command);
+    }
+  }
+
+  const provides = new Map<string, string[]>();
+  const providerRules = new Map<string, string[]>();
+  const ships = new Map<string, string[]>();
+  for (const layer of layers) {
+    for (const plugin of layer.plugins ?? []) {
+      const provided: string[] = [];
+      for (const key of Object.keys(plugin.predicates ?? {})) {
+        if (predicates.has(key)) provided.push(`predicate "${key}"`);
+      }
+      for (const observer of plugin.observers ?? []) {
+        if (observers.has(observer.name)) {
+          provided.push(`observer "${observer.name}"`);
+        }
+      }
+      for (const key of Object.keys(plugin.cliDescriptors ?? {})) {
+        if (descriptors.has(key)) provided.push(`descriptor "${key}"`);
+      }
+      if (provided.length > 0) {
+        provides.set(plugin.name, [
+          ...new Set([...(provides.get(plugin.name) ?? []), ...provided]),
+        ]);
+      }
+      for (const rule of plugin.rules ?? []) {
+        if (!locks.outerLocked.has(rule.name)) continue;
+        ships.set(plugin.name, [
+          ...new Set([...(ships.get(plugin.name) ?? []), rule.name]),
+        ]);
+      }
+      for (const rule of declarations) {
+        if (!provided.some((item) => ruleNeeds(rule, item))) continue;
+        providerRules.set(plugin.name, [
+          ...new Set([...(providerRules.get(plugin.name) ?? []), rule.name]),
+        ]);
+      }
+    }
+  }
+  const outerPlugins = layers[locks.outer]?.plugins ?? [];
+  const outerProviders = new Set<string>();
+  const outerShips = new Set<string>();
+  for (const plugin of outerPlugins) {
+    if (provides.has(plugin.name)) outerProviders.add(plugin.name);
+    if (ships.has(plugin.name)) outerShips.add(plugin.name);
+  }
+  return {
+    predicates,
+    observers,
+    descriptors,
+    providers: new Set(provides.keys()),
+    outerProviders,
+    outerShips,
+    provides,
+    providerRules,
+    ships,
+  };
+}
+
+/** Does `rule` reference the dependency described by `item`? */
+function ruleNeeds(rule: Rule, item: string): boolean {
+  const quoted = /"(.*)"/.exec(item);
+  const name = quoted?.[1];
+  if (name === undefined) return false;
+  if (item.startsWith("predicate ")) {
+    if (name in (rule.when ?? {})) return true;
+    const not = rule.when?.not;
+    return not !== undefined && typeof not === "object" && name in not;
+  }
+  if (item.startsWith("observer ")) return rule.observer === name;
+  if (item.startsWith("descriptor ")) {
+    if (rule.tool !== "bash") return false;
+    const commands = Array.isArray(rule.command)
+      ? rule.command
+      : [rule.command];
+    return commands.includes(name);
+  }
+  return false;
+}
+
+/** Render a provider plugin's contribution for a diagnostic. */
+function describeProvider(deps: LockDependencies, pluginName: string): string {
+  const provides = deps.provides.get(pluginName) ?? [];
+  const ships = deps.ships.get(pluginName) ?? [];
+  const parts: string[] = [];
+  if (ships.length > 0) parts.push(`ships locked ${pluralRules(ships)}`);
+  if (provides.length > 0) parts.push(`provides ${provides.join(", ")}`);
+  return parts.length === 0 ? "serves locked rules" : parts.join(" and ");
+}
+
+function pluralRules(names: readonly string[]): string {
+  const list = names.map((name) => `"${name}"`).join(", ");
+  return names.length === 1 ? `rule ${list}` : `rules ${list}`;
 }
 
 /** Render layer indices for a diagnostic message. */
@@ -675,12 +986,14 @@ function describeLayers(indices: readonly number[]): string {
 /**
  * Merge `disabledRules` across layers, minus disables a lock refuses.
  *
- * A disable is honored when EVERY layer that disables the rule also
- * locks it (an owner disabling its own rail). Otherwise the disable is
- * dropped and a warning-class `locked-rule-violation` diagnostic names
- * both sides. The rule therefore stays ACTIVE, which is the only
- * fail-safe outcome: a refused disable can never be mistaken for a
- * working one.
+ * A disable from layer i is honored only when no layer OUTER to i locks
+ * the rule. Otherwise the disable is dropped and a warning-class
+ * `locked-rule-violation` diagnostic names the rule, the refusing
+ * layer and the lock owner. The rule therefore stays ACTIVE, which is
+ * the only fail-safe outcome: a refused disable can never be mistaken
+ * for a working one. A lock a layer declared itself grants it nothing
+ * (self-exemption is gone), and the outermost layer is never protected
+ * from itself, so no owner is locked out of their own config.
  */
 function mergeDisabledRules(
   layers: readonly SteeringConfig[],
@@ -698,14 +1011,13 @@ function mergeDisabledRules(
   if (disablers.size === 0) return undefined;
   const kept: string[] = [];
   for (const [name, indices] of disablers) {
-    const owners = locks.owners.get(name);
-    if (owners === undefined) {
+    const refused = indices.filter((index) =>
+      isProtectedFrom(locks, name, index),
+    );
+    if (refused.length < indices.length) {
+      // At least one disabling layer is not protected (the outermost
+      // layer disabling its own rule) — the disable is authoritative.
       kept.push(name);
-      continue;
-    }
-    const violating = indices.filter((index) => !owners.has(index));
-    if (violating.length === 0) {
-      kept.push(name); // owner disabling its own lock — honored
       continue;
     }
     diagnostics.push({
@@ -713,8 +1025,9 @@ function mergeDisabledRules(
       kind: "locked-rule-violation",
       message:
         `refusing to disable locked rule "${name}" from ` +
-        `${describeLayers(violating)} (locked by ` +
-        `${describeLayers([...owners])}); the rule stays active.`,
+        `${describeLayers(refused)} (locked by ` +
+        `${describeLayers(ownersOuterThan(locks, name, Math.min(...refused)))}); ` +
+        "the rule stays active.",
     });
   }
   return kept.length > 0 ? kept : undefined;
@@ -723,15 +1036,20 @@ function mergeDisabledRules(
 /**
  * Merge `disabledPlugins` across layers, minus disables a lock refuses.
  *
- * Disabling a plugin removes every rule it ships, so a locked rule
- * would otherwise be disarmed through a plugin name instead of a rule
- * name. A plugin disable is refused when the plugin ships a locked rule
- * that the disabling layer does not own; the plugin stays ACTIVE and a
- * warning-class `locked-rule-violation` diagnostic names both sides.
+ * Disabling a plugin removes every rule it ships AND every predicate,
+ * observer and descriptor it provides, so a locked rule can be disarmed
+ * through a plugin name instead of a rule name. The earlier cut only
+ * looked at plugin-shipped rules, so `disabledPlugins: ["merge-guard"]`
+ * was accepted silently: merge-guard ships predicates and no rules, the
+ * locked rule then named an unregistered predicate, the engine threw,
+ * and the whole session ran unsteered (functional F2, trust F2). The
+ * refusal now covers the dependency closure and names the rule and the
+ * lock owner in the message.
  */
 function mergeDisabledPlugins(
   layers: readonly SteeringConfig[],
   locks: LockState,
+  deps: LockDependencies,
   diagnostics: SteeringDiagnostic[],
 ): string[] | undefined {
   const disablers = new Map<string, number[]>();
@@ -743,42 +1061,38 @@ function mergeDisabledPlugins(
     }
   }
   if (disablers.size === 0) return undefined;
-  // plugin name -> rule names it ships, from any layer that declares it
-  // (a plugin disabled in one layer is still declared somewhere).
-  const shipped = new Map<string, Set<string>>();
-  for (const layer of layers) {
-    for (const plugin of layer.plugins ?? []) {
-      const set = shipped.get(plugin.name) ?? new Set<string>();
-      for (const rule of plugin.rules ?? []) set.add(rule.name);
-      shipped.set(plugin.name, set);
-    }
-  }
+  // Locked rules a plugin serves: the ones it ships plus the ones that
+  // lose a dependency without it.
+  const served = (pluginName: string): string[] => [
+    ...new Set([
+      ...(deps.ships.get(pluginName) ?? []),
+      ...(deps.providerRules.get(pluginName) ?? []),
+    ]),
+  ];
   const kept: string[] = [];
   for (const [name, indices] of disablers) {
-    const rules = shipped.get(name);
-    const lockedRules =
-      rules === undefined
-        ? []
-        : [...rules].filter((rule) => locks.owners.has(rule));
-    if (lockedRules.length === 0) {
-      kept.push(name);
-      continue;
-    }
-    const violating = indices.filter((index) =>
-      lockedRules.some((rule) => !locks.owners.get(rule)?.has(index)),
+    const rules = served(name);
+    const refused = indices.filter((index) =>
+      rules.some((rule) => isProtectedFrom(locks, rule, index)),
     );
-    if (violating.length === 0) {
-      kept.push(name); // owner disabling its own lock — honored
+    if (refused.length < indices.length) {
+      kept.push(name); // at least one disabling layer is not protected
       continue;
     }
+    const lockedRules = [
+      ...new Set(
+        rules.filter((rule) =>
+          refused.some((index) => isProtectedFrom(locks, rule, index)),
+        ),
+      ),
+    ];
     diagnostics.push({
       type: "warning",
       kind: "locked-rule-violation",
       message:
-        `refusing to disable plugin "${name}" (ships locked ` +
-        `${lockedRules.length === 1 ? "rule" : "rules"} ` +
-        `${lockedRules.map((rule) => `"${rule}"`).join(", ")}) from ` +
-        `${describeLayers(violating)}; the plugin stays active.`,
+        `refusing to disable plugin "${name}" from ${describeLayers(refused)}: ` +
+        `it ${describeProvider(deps, name)} for locked ${pluralRules(lockedRules)} ` +
+        `(locked by ${describeLayers([locks.outer])}); the plugin stays active.`,
     });
   }
   return kept.length > 0 ? kept : undefined;
@@ -807,36 +1121,44 @@ function resolveLockOwnedBool(
   diagnostics: SteeringDiagnostic[],
   key: "failOnWarnings" | "defaultNoOverride",
 ): boolean | undefined {
-  if (locks.declarers.length === 0) {
+  // No binding lock (the outermost layer locks nothing): the ordinary
+  // inner-wins merge applies.
+  if (locks.outer < 0 || locks.outerLocked.size === 0) {
     return mergeBool(layers, key);
   }
-  let ownerValue: boolean | undefined;
-  for (const index of locks.declarers) {
-    const value = layers[index]?.[key];
-    if (typeof value === "boolean") {
-      ownerValue = value;
-      break;
-    }
-  }
-  if (ownerValue === undefined) return mergeBool(layers, key);
+  // The outermost layer decides, and only the outermost layer. An inner
+  // layer's value can never reach this point — the first cut took the
+  // FIRST declarer's value, so a project layer that named any rule
+  // became the policy owner (red-team R-F1 probe3).
+  const outerValue = layers[locks.outer]?.[key];
+  // Fail-safe default when the outer layer is silent: warnings stay
+  // non-fatal (a strict default would let any warning abort the runtime
+  // and disarm every rail) and rules stay non-overridable.
+  const effective =
+    typeof outerValue === "boolean"
+      ? outerValue
+      : key === "failOnWarnings"
+        ? false
+        : true;
   for (const [layerIndex, layer] of layers.entries()) {
+    if (layerIndex === locks.outer) continue;
     const value = layer[key];
-    if (typeof value !== "boolean") continue;
-    if (locks.declarers.includes(layerIndex)) continue;
-    if (value === ownerValue) continue;
+    if (typeof value !== "boolean" || value === effective) continue;
     diagnostics.push({
       type: "warning",
       kind: "locked-rule-violation",
       message:
         `ignoring ${key}=${value} from ${describeLayers([layerIndex])}: ` +
-        `${describeLayers(locks.declarers)} declare locked rules and set ` +
-        `${key}=${ownerValue}; ` +
+        `${describeLayers([locks.outer])} locks rules and ` +
+        (typeof outerValue === "boolean"
+          ? `sets ${key}=${effective}`
+          : `leaves ${key} to the fail-safe default (${effective})`) +
         (key === "failOnWarnings"
-          ? "warning escalation cannot be used to disarm them."
-          : "making every rule overridable by comment cannot be used to disarm them."),
+          ? "; warning escalation cannot be used to disarm locked rules."
+          : "; making every rule overridable by comment cannot be used to disarm locked rules."),
     });
   }
-  return ownerValue;
+  return effective;
 }
 
 /**
@@ -917,13 +1239,19 @@ export function buildConfig(layers: readonly SteeringConfig[]): {
   const diagnostics: SteeringDiagnostic[] = [];
 
   // Locks first: every merge below is lock-aware (disabledRules,
-  // disabledPlugins, rule overrides, exemptions, failOnWarnings).
+  // disabledPlugins, rule overrides, exemptions, plugin registry,
+  // failOnWarnings, defaultNoOverride).
   const locks = collectLocks(effective);
-  const lockedRulesList = mergeStringUnion(effective, "lockedRules");
+  const deps = collectLockDependencies(effective, locks);
+  // Only the outermost layer's declarations bind, so only those are
+  // echoed: a project layer's lockedRules must not read as protection.
+  const lockedRulesList =
+    locks.outerLocked.size > 0 ? [...locks.outerLocked] : undefined;
 
   const disabledPluginsList = mergeDisabledPlugins(
     effective,
     locks,
+    deps,
     diagnostics,
   );
   const disabledRulesList = mergeDisabledRules(effective, locks, diagnostics);
@@ -933,12 +1261,37 @@ export function buildConfig(layers: readonly SteeringConfig[]): {
   // Predicate + tracker-extension collisions are detected in
   // resolvePlugins, not here. buildConfig handles cross-layer and
   // within-layer name-collision shapes only.
-  const plugins = mergePlugins(effective, disabledPluginsSet, diagnostics);
+  const plugins = mergePlugins(
+    effective,
+    disabledPluginsSet,
+    locks,
+    deps,
+    diagnostics,
+  );
   detectTrackerNameCollisions(plugins, disabledPluginsSet, diagnostics);
 
   const rules = mergeRules(effective, disabledRulesSet, locks, diagnostics);
   const observers = mergeObservers(effective, diagnostics);
   const exemptions = mergeExemptions(effective, locks, diagnostics);
+
+  // A lock that names no rule protects nothing — a typo, or a stale lock
+  // after a rename. Compile-time typo checking (defineConfig) covers the
+  // config author; this covers JSON / satisfies configs and renames.
+  const ruleUniverse = new Set<string>();
+  for (const rule of rules) ruleUniverse.add(rule.name);
+  for (const plugin of plugins) {
+    for (const rule of plugin.rules ?? []) ruleUniverse.add(rule.name);
+  }
+  for (const name of locks.outerLocked) {
+    if (ruleUniverse.has(name)) continue;
+    diagnostics.push({
+      type: "warning",
+      kind: "locked-rule-violation",
+      message:
+        `lockedRules names "${name}", but no layer or plugin declares that ` +
+        "rule; the lock protects nothing (a typo, or a stale lock after a rename).",
+    });
+  }
 
   const out: SteeringConfig = {};
   if (plugins.length > 0) out.plugins = plugins;

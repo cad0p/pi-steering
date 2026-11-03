@@ -345,10 +345,11 @@ export interface DefineConfigInput<
   disabledRules?: readonly AllRuleNames<P, R>[];
   disabledPlugins?: readonly AllPluginNames<P>[];
   /**
-   * Rules this layer owns — no other layer may disable, redefine,
-   * exempt or remove them by disabling their plugin. Same name union
-   * as {@link disabledRules}, so a lock on a typo'd rule is a compile
-   * error (an inert lock protects nothing).
+   * Rules this layer owns. A lock binds OUTWARD only: it protects the
+   * rule from every layer inner to this one, never from this layer, and
+   * only the outermost (global) layer's locks bind. Same name union as
+   * {@link disabledRules}, so a lock on a typo'd rule is a compile error
+   * (an inert lock protects nothing).
    */
   lockedRules?: readonly AllRuleNames<P, R>[];
   /**

@@ -2377,25 +2377,53 @@ export interface SteeringConfig {
   disabledPlugins?: readonly string[];
 
   /**
-   * Rules this layer OWNS: no other config layer may remove them.
-   * Additive union across layers; the protection is per-layer, so a
-   * layer may still disable / exempt a rule it locked itself.
+   * Rules this layer owns: a lock binds OUTWARD only. A declaration
+   * protects its rule from every layer INNER to the declarer, never
+   * from the declarer itself — and with pi-steering's two layers
+   * (project = inner, global = outer) that means only the GLOBAL
+   * layer's locks bind. A project layer that declares `lockedRules`
+   * gains nothing: it cannot grant itself permission over a rail, it
+   * cannot exempt itself from an outer lock, and its own booleans never
+   * govern. There is no self-exemption, so retiring a rail is done by
+   * removing the lock (and the rule), not by disabling around it.
    *
    * A locked rule survives, at the loader merge, every cross-layer
    * disarm path that would otherwise be silent:
    *
    *   - `disabledRules` naming it in another layer;
-   *   - `disabledPlugins` naming the plugin that ships it;
+   *   - `disabledPlugins` naming a plugin that ships it OR provides a
+   *     predicate, observer or CLI descriptor it depends on (the
+   *     dependency closure: a plugin that ships only predicates is
+   *     enough to neuter a rule while its text stays intact);
    *   - a same-name `rules` entry in another layer (the documented
    *     "project overrides by name" path — refused for a locked name);
-   *   - an `exemptions` clause in another layer targeting it (the
-   *     registry accumulates across layers by design);
+   *   - an `exemptions` clause in another layer — or a plugin
+   *     exemption from another layer — targeting it;
+   *   - a plugin from another layer re-declaring one of its predicates,
+   *     observers or descriptors, or shadowing a provider plugin by
+   *     name;
    *   - a `failOnWarnings` escalation, which would turn the refusal
    *     diagnostic itself into a thrown abort that builds no runtime;
    *   - a `defaultNoOverride: false`, which would make every rule
    *     overridable by a `# steering-override: <rule>` comment.
-   *     For both booleans, a lock-declaring layer's explicit value
-   *     governs while locks are present.
+   *     Both booleans come from the outermost layer while locks are
+   *     present (its explicit value, else the fail-safe default:
+   *     warnings non-fatal, rules non-overridable).
+   *
+   * A lock that names no rule in the merged universe is a warning-class
+   * `locked-rule-violation` ("the lock protects nothing") — the
+   * compile-time typo check in `defineConfig` covers typed configs,
+   * this covers JSON, `satisfies` configs and stale locks after a
+   * rename.
+   *
+   * Each refusal is loud: a warning-class `locked-rule-violation`
+   * diagnostic names the rule, the refusing layer and the lock owner,
+   * and the rule stays ACTIVE. Warning-class — not error-class — on
+   * purpose: error-class diagnostics abort the session and would let a
+   * project layer disarm every rail by provoking one. For the same
+   * reason an error-class diagnostic produced by an inner layer drops
+   * that layer (innermost first, info-class `layer-dropped-on-error`)
+   * instead of leaving the session unsteered.
    *
    * Each refusal is loud: a warning-class `locked-rule-violation`
    * diagnostic names the rule, the refusing layer and the lock owner,
@@ -2665,6 +2693,15 @@ export type SteeringDiagnosticKind =
    * dropped, and the lock-declaring layer's warning policy governs.
    */
   | "locked-rule-violation"
+  /**
+   * An INNER config layer produced an error-class diagnostic, so the
+   * merge dropped that layer (innermost first) and rebuilt from the
+   * remaining outer layers. Info-class: the session keeps the outer
+   * rails, and an inner layer must not be able to leave the session
+   * unsteered by provoking a throw. The message quotes the dropped
+   * error. If the outermost layer itself is broken nothing is dropped.
+   */
+  | "layer-dropped-on-error"
   /**
    * A plugin's `cliDescriptors` entry is malformed (non-object
    * descriptor, malformed `flags` table, invalid

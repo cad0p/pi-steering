@@ -186,6 +186,17 @@ export { FromJSONError, fromJSON } from "./compat.ts";
 export type { DefineConfigInput } from "./define-config.ts";
 // Config helper (preferred entry point).
 export { defineConfig } from "./define-config.ts";
+/**
+ * Capability flag: this build enforces {@link SteeringConfig.lockedRules}
+ * and populates {@link PredicateContext.rawCommand}.
+ *
+ * Exported so a config that RELIES on lock enforcement can refuse to
+ * load on a framework that would silently ignore it (`lockedRules` is an
+ * unknown field to 0.2.0 — accepted, logged nowhere, and every rail
+ * stays disarmable by a project layer). Read it through a namespace
+ * import and fail loudly when it is not `true`.
+ */
+export const LOCKED_RULES_SUPPORTED = true;
 // Predicate helper.
 export { definePredicate } from "./define-predicate.ts";
 // Auto-tag key for session-entry writes. Exposed so plugin authors

@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 import { useIsolatedHome } from "./__test-helpers__.ts";
+import { LOCKED_RULES_SUPPORTED } from "./index.ts";
 import {
   buildConfig,
   configCandidates,
@@ -1341,7 +1342,7 @@ describe("loader: lockedRules", () => {
     assert.deepEqual(diagnostics, []);
   });
 
-  it("refuses a project override of a locked rule — locked definition wins in either layer order", () => {
+  it("refuses a project override of a locked rule — the locked definition wins", () => {
     const project: SteeringConfig = {
       rules: [rule("guard", "project shadow")],
     };
@@ -1350,34 +1351,17 @@ describe("loader: lockedRules", () => {
       lockedRules: ["guard"],
       failOnWarnings: false,
     };
-
-    const innerFirst = buildConfig([project, globalLayer]);
+    const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
     assert.deepEqual(
-      innerFirst.config.rules?.map((r) => r.reason),
+      merged.rules?.map((r) => r.reason),
       ["global guard"],
       "the locked definition must replace the project shadow",
     );
-    assert.ok(innerFirst.config.rules, "rule list present");
-    const innerDiag = innerFirst.diagnostics.filter(
-      (d) => d.kind === "locked-rule-violation",
-    );
-    assert.equal(innerDiag.length, 1);
+    const hits = diagnostics.filter((d) => d.kind === "locked-rule-violation");
+    assert.equal(hits.length, 1, JSON.stringify(diagnostics));
     assert.match(
-      innerDiag[0]?.message ?? "",
-      /refusing an override of locked rule "guard"/,
-    );
-
-    const outerFirst = buildConfig([globalLayer, project]);
-    assert.deepEqual(
-      outerFirst.config.rules?.map((r) => r.reason),
-      ["global guard"],
-      "the locked definition survives a later shadow",
-    );
-    assert.equal(
-      outerFirst.diagnostics.filter((d) => d.kind === "locked-rule-violation")
-        .length,
-      1,
-      "the refused shadow is loud in this order too",
+      hits[0]?.message ?? "",
+      /refusing a definition of locked rule "guard"/,
     );
   });
 
@@ -1424,12 +1408,16 @@ describe("loader: lockedRules", () => {
     assert.match(hit.message, /refusing to disable plugin "guarded-plugin"/);
   });
 
-  it("still disables a plugin that ships no locked rule, silently", () => {
+  it("still disables a plugin that neither ships nor serves a locked rule, silently", () => {
     const free: Plugin = { name: "free-plugin", rules: [rule("free")] };
+    const guarded: Plugin = {
+      name: "guarded-plugin",
+      rules: [rule("guarded")],
+    };
     const project: SteeringConfig = { disabledPlugins: ["free-plugin"] };
     const globalLayer: SteeringConfig = {
-      plugins: [free],
-      lockedRules: ["elsewhere"],
+      plugins: [free, guarded],
+      lockedRules: ["guarded"],
       failOnWarnings: false,
     };
     const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
@@ -1474,12 +1462,12 @@ describe("loader: lockedRules", () => {
     );
   });
 
-  it("unions lockedRules across layers and echoes it in the merged config", () => {
+  it("echoes only the outermost layer's lockedRules (inner declarations do not bind)", () => {
     const { config: merged } = buildConfig([
       { lockedRules: ["a"] },
       { lockedRules: ["b", "a"] },
     ]);
-    assert.deepEqual(merged.lockedRules, ["a", "b"]);
+    assert.deepEqual(merged.lockedRules, ["b", "a"]);
   });
 
   it("leaves unlocked configs byte-identical to the pre-lock merge", () => {
@@ -1498,6 +1486,291 @@ describe("loader: lockedRules", () => {
     assert.equal(merged.exemptions?.length, 1);
     assert.equal(merged.lockedRules, undefined);
     assert.deepEqual(diagnostics, []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lock authority, registry closure, fail-safe — the lens round-1 repros
+// ---------------------------------------------------------------------------
+
+describe("loader: lockedRules — capability flag", () => {
+  it("exports LOCKED_RULES_SUPPORTED so a config can refuse an inert lock", () => {
+    // `lockedRules` is an unknown field to 0.2.0: accepted, logged
+    // nowhere, every rail still disarmable. A config that relies on the
+    // lock reads this flag through a namespace import and refuses to
+    // load when it is not `true`.
+    assert.equal(LOCKED_RULES_SUPPORTED, true);
+  });
+});
+
+describe("loader: lockedRules — authority is outward-only", () => {
+  const rule = (name: string, reason = "r"): Rule => ({
+    name,
+    tool: "bash",
+    command: "gh",
+    reason,
+  });
+
+  /** The lens repro: an inner layer that declares the lock AND disarms. */
+  it("a project layer that locks the rule itself cannot disable it (functional F1 / R-F1)", () => {
+    const project: SteeringConfig = {
+      lockedRules: ["guard"],
+      disabledRules: ["guard"],
+    };
+    const globalLayer: SteeringConfig = {
+      rules: [rule("guard")],
+      lockedRules: ["guard"],
+      failOnWarnings: false,
+    };
+    const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
+    assert.ok(
+      !(merged.disabledRules ?? []).includes("guard"),
+      "self-declared ownership must not exempt the disable",
+    );
+    assert.equal(
+      merged.rules?.filter((r) => r.name === "guard").length,
+      1,
+      "the locked rule is still in the merged config",
+    );
+    const hits = diagnostics.filter((d) => d.kind === "locked-rule-violation");
+    assert.equal(hits.length, 1, JSON.stringify(diagnostics));
+    assert.match(
+      hits[0]?.message ?? "",
+      /refusing to disable locked rule "guard"/,
+    );
+    assert.match(hits[0]?.message ?? "", /locked by layer #1/);
+  });
+
+  it("a project layer that locks the rule itself cannot override it either", () => {
+    const project: SteeringConfig = {
+      lockedRules: ["guard"],
+      rules: [rule("guard", "project shadow")],
+    };
+    const globalLayer: SteeringConfig = {
+      rules: [rule("guard", "global guard")],
+      lockedRules: ["guard"],
+      failOnWarnings: false,
+    };
+    const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
+    assert.deepEqual(
+      merged.rules?.map((r) => r.reason),
+      ["global guard"],
+      "the outer definition wins regardless of the project's own lock claim",
+    );
+    assert.equal(
+      diagnostics.filter((d) => d.kind === "locked-rule-violation").length,
+      1,
+    );
+  });
+
+  it("a project layer that locks the rule itself cannot exempt it", () => {
+    const project: SteeringConfig = {
+      lockedRules: ["guard"],
+      exemptions: [{ rule: "guard", when: { cwd: "/anywhere/" } }],
+    };
+    const globalLayer: SteeringConfig = {
+      rules: [rule("guard")],
+      lockedRules: ["guard"],
+      failOnWarnings: false,
+    };
+    const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
+    assert.equal(
+      (merged.exemptions ?? []).some((e) => e.rule === "guard"),
+      false,
+      "the project carve-out must not reach the merged registry",
+    );
+    assert.equal(
+      diagnostics.filter((d) => d.kind === "locked-rule-violation").length,
+      1,
+    );
+  });
+
+  it("a project layer that locks any rule cannot own failOnWarnings / defaultNoOverride", () => {
+    const project: SteeringConfig = {
+      lockedRules: ["guard"],
+      failOnWarnings: true,
+      defaultNoOverride: false,
+    };
+    const globalLayer: SteeringConfig = {
+      rules: [rule("guard")],
+      lockedRules: ["guard"],
+      failOnWarnings: false,
+      defaultNoOverride: true,
+    };
+    const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
+    assert.equal(merged.failOnWarnings, false);
+    assert.equal(merged.defaultNoOverride, true);
+    assert.equal(
+      diagnostics.filter((d) => d.kind === "locked-rule-violation").length,
+      2,
+    );
+  });
+
+  it("a lock in an INNER layer protects nothing from an outer layer", () => {
+    // "can add locks but never grants permission": an inner claim is
+    // inert against any layer outer to it, so the outer layer can still
+    // disable / override the rule. No diagnostic either way.
+    const inner: SteeringConfig = {
+      rules: [rule("guard", "inner guard")],
+      lockedRules: ["guard"],
+    };
+    const outer: SteeringConfig = {
+      disabledRules: ["guard"],
+      failOnWarnings: false,
+    };
+    const { config: merged, diagnostics } = buildConfig([inner, outer]);
+    assert.deepEqual(merged.disabledRules, ["guard"]);
+    assert.deepEqual(
+      diagnostics.filter((d) => d.kind === "locked-rule-violation"),
+      [],
+    );
+  });
+});
+
+describe("loader: lockedRules — registry closure", () => {
+  const rule = (name: string, reason = "r"): Rule =>
+    ({
+      name,
+      tool: "bash",
+      command: "gh",
+      when: { attemptsDirectMerge: true },
+      reason,
+    }) as unknown as Rule;
+  const provider: Plugin = {
+    name: "merge-guard",
+    predicates: {
+      attemptsDirectMerge: () => true,
+    },
+  };
+  const globalLayer: SteeringConfig = {
+    plugins: [provider],
+    rules: [rule("guard")],
+    lockedRules: ["guard"],
+    failOnWarnings: false,
+  };
+
+  it("refuses disabledPlugins on a plugin that only PROVIDES a locked rule's predicate", () => {
+    const project: SteeringConfig = { disabledPlugins: ["merge-guard"] };
+    const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
+    assert.equal(merged.disabledPlugins, undefined);
+    assert.equal(
+      (merged.plugins ?? []).filter((p) => p.name === "merge-guard").length,
+      1,
+      "the provider plugin stays active",
+    );
+    const hits = diagnostics.filter((d) => d.kind === "locked-rule-violation");
+    assert.equal(hits.length, 1, JSON.stringify(diagnostics));
+    assert.match(
+      hits[0]?.message ?? "",
+      /refusing to disable plugin "merge-guard"/,
+    );
+    assert.match(hits[0]?.message ?? "", /predicate "attemptsDirectMerge"/);
+    assert.match(hits[0]?.message ?? "", /for locked rule "guard"/);
+  });
+
+  it("strips a project plugin's predicate handler for a key a locked rule uses", () => {
+    const project: SteeringConfig = {
+      plugins: [
+        {
+          name: "zz",
+          predicates: { attemptsDirectMerge: () => false },
+        },
+      ],
+    };
+    const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
+    const zz = (merged.plugins ?? []).find((p) => p.name === "zz");
+    assert.ok(zz, "the rest of the project plugin still loads");
+    assert.deepEqual(zz?.predicates, {}, "the protected key is stripped");
+    const kept = (merged.plugins ?? []).find((p) => p.name === "merge-guard");
+    assert.equal(
+      typeof kept?.predicates?.attemptsDirectMerge,
+      "function",
+      "the outer handler stays the registered one",
+    );
+    assert.equal(
+      diagnostics.filter((d) => d.kind === "locked-rule-violation").length,
+      1,
+    );
+  });
+
+  it("drops a project plugin that shadows the provider by NAME", () => {
+    // Same-name shadow: first-registered wins, so the project plugin would
+    // become the merge-guard and the locked rule would name an
+    // unregistered predicate (red-team probe5).
+    const project: SteeringConfig = {
+      plugins: [{ name: "merge-guard", predicates: {} }],
+    };
+    const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
+    const kept = (merged.plugins ?? []).filter((p) => p.name === "merge-guard");
+    assert.equal(kept.length, 1);
+    assert.equal(
+      typeof kept[0]?.predicates?.attemptsDirectMerge,
+      "function",
+      "the outer plugin kept the name",
+    );
+    assert.match(
+      diagnostics.find((d) => d.kind === "locked-rule-violation")?.message ??
+        "",
+      /refusing plugin "merge-guard"/,
+    );
+  });
+
+  it("strips a project plugin's descriptor for a basename a locked rule routes on", () => {
+    const project: SteeringConfig = {
+      plugins: [{ name: "zz", cliDescriptors: { gh: {} } }],
+    };
+    const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
+    const zz = (merged.plugins ?? []).find((p) => p.name === "zz");
+    assert.deepEqual(zz?.cliDescriptors, {});
+    assert.equal(
+      diagnostics.filter((d) => d.kind === "locked-rule-violation").length,
+      1,
+    );
+  });
+
+  it("drops a project plugin's exemption that targets a locked rule", () => {
+    const project: SteeringConfig = {
+      plugins: [
+        {
+          name: "zz",
+          exemptions: [{ rule: "guard", when: { cwd: "/anywhere/" } }],
+        },
+      ],
+    };
+    const { config: merged, diagnostics } = buildConfig([project, globalLayer]);
+    const zz = (merged.plugins ?? []).find((p) => p.name === "zz");
+    assert.deepEqual(zz?.exemptions, []);
+    assert.equal(
+      diagnostics.filter((d) => d.kind === "locked-rule-violation").length,
+      1,
+    );
+  });
+});
+
+describe("loader: lockedRules — loud typos", () => {
+  it("reports a lock that names no rule in the merged universe", () => {
+    const { diagnostics } = buildConfig([
+      {},
+      {
+        rules: [{ name: "guard", tool: "bash", command: "gh", reason: "r" }],
+        lockedRules: ["guardd"],
+      },
+    ]);
+    const hit = diagnostics.find((d) => d.kind === "locked-rule-violation");
+    assert.ok(hit, JSON.stringify(diagnostics));
+    assert.match(hit.message, /lockedRules names "guardd"/);
+    assert.match(hit.message, /protects nothing/);
+  });
+
+  it("stays silent when the locked name is declared in an inner layer", () => {
+    const { diagnostics } = buildConfig([
+      { rules: [{ name: "guard", tool: "bash", command: "gh", reason: "r" }] },
+      { lockedRules: ["guard"] },
+    ]);
+    assert.deepEqual(
+      diagnostics.filter((d) => d.kind === "locked-rule-violation"),
+      [],
+    );
   });
 });
 

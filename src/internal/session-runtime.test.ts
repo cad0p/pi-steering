@@ -878,3 +878,95 @@ describe("formatSingleLineDiagnostic: rule-based spec", () => {
     );
   });
 });
+// ---------------------------------------------------------------------------
+// Fail-safe inner-layer drop (lens round-1: fail-open on error)
+// ---------------------------------------------------------------------------
+
+describe("runMergerPipeline: an inner layer cannot leave the session unsteered", () => {
+  let home: string;
+  useIsolatedHome("pi-steering-inner-broken-", (tmp) => {
+    home = tmp;
+  });
+
+  /** A plugin that trips an ERROR-class diagnostic (reserved predicate key). */
+  const broken = {
+    name: "zz",
+    predicates: { not: () => true },
+  };
+  const outer = {
+    plugins: [],
+    rules: [
+      {
+        name: "guard",
+        tool: "bash" as const,
+        command: "echo",
+        when: { cwd: "/x/" },
+        reason: "guard",
+      },
+    ],
+    lockedRules: ["guard"],
+    failOnWarnings: false,
+  };
+
+  it("drops the broken INNER layer, keeps the outer rails, and says so", () => {
+    const { merged, diagnostics } = runMergerPipeline(
+      [{ plugins: [broken] }, outer],
+      [],
+    );
+    assert.deepEqual(
+      diagnostics.filter((d) => d.type === "error"),
+      [],
+      "the inner layer's error must not survive the merge",
+    );
+    const drop = diagnostics.find((d) => d.kind === "layer-dropped-on-error");
+    assert.ok(drop, JSON.stringify(diagnostics));
+    assert.equal(
+      drop.type,
+      "info",
+      "info-class: a warning would abort strict mode",
+    );
+    assert.match(drop.message, /dropping config layer #0/);
+    assert.deepEqual(
+      merged.rules?.map((r) => r.name),
+      ["guard"],
+      "the outer rail is still in the merged config",
+    );
+  });
+
+  it("does NOT drop the outermost layer — the owner's own break is surfaced", () => {
+    const { diagnostics } = runMergerPipeline([{ plugins: [broken] }], []);
+    assert.equal(
+      diagnostics.filter((d) => d.kind === "layer-dropped-on-error").length,
+      0,
+    );
+    assert.ok(
+      diagnostics.some((d) => d.type === "error"),
+      "a broken single (outermost) layer keeps its error-class diagnostic",
+    );
+  });
+
+  it("buildSessionRuntime still builds when only the inner layer is broken", async () => {
+    const globalDir = join(home, ".pi", "agent");
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(
+      join(globalDir, "steering.ts"),
+      `export default {
+        rules: [
+          { name: "guard", tool: "bash", command: "echo", when: { cwd: "/x/" }, reason: "guard" },
+        ],
+        lockedRules: ["guard"],
+        failOnWarnings: false,
+      };`,
+      "utf8",
+    );
+    const project = join(home, "proj");
+    mkdirSync(join(project, ".pi"), { recursive: true });
+    writeFileSync(
+      join(project, ".pi", "steering.ts"),
+      'export default { plugins: [{ name: "zz", predicates: { not: () => true } }] };',
+      "utf8",
+    );
+    const runtime = await buildSessionRuntime(project, noopHost);
+    assert.ok(runtime.evaluator, "the session builds, rails included");
+  });
+});

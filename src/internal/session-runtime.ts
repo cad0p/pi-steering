@@ -151,6 +151,53 @@ export function runMergerPipeline(
   resolved: ResolvedPluginState | null;
   diagnostics: SteeringDiagnostic[];
 } {
+  // Fail-safe layer drop: an error-class diagnostic from an INNER layer
+  // must not leave the session unsteered. The inner layers are dropped
+  // one at a time (innermost first) until the merge is clean; each drop
+  // is an info-class breadcrumb, and the outer layers — the rails the
+  // session is supposed to run under — still load. If the outermost
+  // layer itself is broken, nothing is dropped and the error surfaces as
+  // before (the owner's own content is not something to paper over).
+  //
+  // Why this exists: a project layer could otherwise disarm every rail
+  // for the whole session with one line, either by provoking an engine
+  // throw (disabledPlugins on a predicate-only plugin → unknown
+  // predicate; a reserved tracker name; an orphan exemption) or by
+  // flipping failOnWarnings so that a WARNING aborts the build. The
+  // lock closes the named paths; this closes the class.
+  let attemptLayers = [...layers];
+  const dropped: SteeringDiagnostic[] = [];
+  for (;;) {
+    const result = mergeLayersOnce(attemptLayers, builtinTrackers);
+    const hasError = result.diagnostics.some((d) => d.type === "error");
+    if (!hasError || attemptLayers.length <= 1) {
+      return { ...result, diagnostics: [...dropped, ...result.diagnostics] };
+    }
+    const droppedIndex = layers.length - attemptLayers.length;
+    const firstError = result.diagnostics.find((d) => d.type === "error");
+    dropped.push({
+      type: "info",
+      kind: "layer-dropped-on-error",
+      message:
+        `dropping config layer #${droppedIndex} after an error-class diagnostic; ` +
+        `${attemptLayers.length - 1} outer ` +
+        `${attemptLayers.length - 1 === 1 ? "layer still loads" : "layers still load"} ` +
+        "(an inner layer must not be able to leave the session unsteered). " +
+        `Dropped error: ${firstError?.message ?? "unknown"}`,
+    });
+    attemptLayers = attemptLayers.slice(1);
+  }
+}
+
+/** One merge attempt over a fixed layer list (see {@link runMergerPipeline}). */
+function mergeLayersOnce(
+  layers: readonly SteeringConfig[],
+  builtinTrackers: readonly string[],
+): {
+  merged: SteeringConfig;
+  resolved: ResolvedPluginState | null;
+  diagnostics: SteeringDiagnostic[];
+} {
   const { config: merged, diagnostics: mergeDiagnostics } = buildConfig(layers);
   const userConfigNameDiagnostics = validateUserConfigNames(layers);
   const exemptionOrphanDiagnostics = detectExemptionOrphans(merged);

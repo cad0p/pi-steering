@@ -2722,6 +2722,21 @@ export type SteeringDiagnosticKind =
    */
   | "evaluator-build-failed"
   /**
+   * Error-class: reading a layer's config object threw during the merge
+   * (a throwing getter or accessor). Treated like any other error: an
+   * inner layer's offending declaration (or the layer) is dropped; an
+   * outermost layer's surfaces in the aggregate.
+   */
+  | "layer-merge-failed"
+  /**
+   * Warning-class: `PI_CODING_AGENT_DIR` / `HOME` resolve to a different
+   * agent dir than at the first steering load in this process (a
+   * deferred write by earlier config code, e.g. a timer). The bridge
+   * keeps loading the global layer from the process snapshot, restores
+   * the variable, and raises this in-chat. Not produced by the loader.
+   */
+  | "agent-dir-env-drift"
+  /**
    * Warning-class: the project layer changed `PI_CODING_AGENT_DIR` or
    * `HOME` while it loaded. The global layer was loaded from the agent
    * dir resolved BEFORE any config code ran, and the variable was

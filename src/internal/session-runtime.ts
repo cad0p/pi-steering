@@ -183,6 +183,19 @@ export function runMergerPipeline(
     if (!hasError || attemptLayers.length <= 1) {
       return { ...result, diagnostics: [...dropped, ...result.diagnostics] };
     }
+    // Attribution guard (lens round 3, functional F1 NIT / F3): if the
+    // OUTER layers fail on their own, the error is theirs, not the inner
+    // layer's. Nothing is dropped and the error surfaces exactly as a
+    // broken outermost layer does — no misattributed "dropping config
+    // layer #0" notice for a fault the project layer did not cause.
+    const outerAlone = mergeWithTrialBuild(
+      attemptLayers.slice(1),
+      builtinTrackers,
+      { forceTrial: true },
+    );
+    if (outerAlone.diagnostics.some((d) => d.type === "error")) {
+      return { ...result, diagnostics: [...dropped, ...result.diagnostics] };
+    }
     const droppedIndex = layers.length - attemptLayers.length;
     const pruned = pruneInnermostLayer(
       attemptLayers,
@@ -223,7 +236,11 @@ export function runMergerPipeline(
 export const IN_CHAT_KINDS: ReadonlySet<SteeringDiagnostic["kind"]> = new Set([
   "layer-dropped-on-error",
   "layer-part-dropped-on-error",
+  // A layer that failed to import loads nothing it declares (lens
+  // round 3, functional F2): as loud as a drop.
+  "layer-import-failed",
   "agent-dir-env-mutated",
+  "agent-dir-env-drift",
   "global-layer-pin-mismatch",
 ] as const);
 
@@ -240,6 +257,8 @@ function errorCount(result: MergeResult): number {
 /** One droppable declaration of a layer, with a label for the notice. */
 interface LayerUnit {
   label: string;
+  /** The declaration's own name, used to attribute an error message. */
+  name: string;
   without: (layer: SteeringConfig) => SteeringConfig;
 }
 
@@ -253,12 +272,14 @@ function layerUnits(layer: SteeringConfig): LayerUnit[] {
   for (const [i, plugin] of (layer.plugins ?? []).entries()) {
     units.push({
       label: `plugin "${String(plugin?.name)}"`,
+      name: String(plugin?.name),
       without: (l) => ({ ...l, plugins: withoutIndex(l.plugins ?? [], i) }),
     });
   }
   for (const [i, rule] of (layer.rules ?? []).entries()) {
     units.push({
       label: `rule "${String(rule?.name)}"`,
+      name: String(rule?.name),
       without: (l) => ({ ...l, rules: withoutIndex(l.rules ?? [], i) }),
     });
   }
@@ -267,6 +288,7 @@ function layerUnits(layer: SteeringConfig): LayerUnit[] {
       typeof observer === "string" ? observer : String(observer?.name);
     units.push({
       label: `observer "${name}"`,
+      name,
       without: (l) => ({
         ...l,
         observers: withoutIndex(l.observers ?? [], i),
@@ -276,6 +298,7 @@ function layerUnits(layer: SteeringConfig): LayerUnit[] {
   for (const [i, exemption] of (layer.exemptions ?? []).entries()) {
     units.push({
       label: `exemption for rule "${String(exemption?.rule)}"`,
+      name: String(exemption?.rule),
       without: (l) => ({
         ...l,
         exemptions: withoutIndex(l.exemptions ?? [], i),
@@ -285,6 +308,7 @@ function layerUnits(layer: SteeringConfig): LayerUnit[] {
   for (const [i, name] of (layer.disabledPlugins ?? []).entries()) {
     units.push({
       label: `disabledPlugins entry "${String(name)}"`,
+      name: String(name),
       without: (l) => ({
         ...l,
         disabledPlugins: withoutIndex(l.disabledPlugins ?? [], i),
@@ -296,12 +320,23 @@ function layerUnits(layer: SteeringConfig): LayerUnit[] {
 
 /**
  * Drop the offending declarations of the INNERMOST layer instead of the
- * whole layer. Greedy and bounded: each pass tries every remaining
- * declaration on its own and keeps the first removal that strictly
- * lowers the error count; it stops when the merge is clean (success) or
- * when no single removal helps (null → the caller drops the layer).
- * Removing an inner declaration only ever moves the merge toward the
- * outer layers alone, so it cannot weaken an outer rail.
+ * whole layer. Greedy and bounded by the layer's declaration count: each
+ * pass tries every remaining declaration on its own and keeps, in order
+ * of preference,
+ *   1. the first removal that strictly lowers the error count;
+ *   2. else the first removal that makes a current error disappear and
+ *      whose own name appears in that error's message (an
+ *      `evaluator-build-failed` reports ONE fault per build, so two
+ *      typo'd rules trade one error for the other and the count never
+ *      falls — lens round 3, functional F1);
+ *   3. else the first removal that makes a current error disappear
+ *      without raising the count.
+ * Every accepted removal takes one declaration out, so the loop ends
+ * after at most as many passes as the layer has declarations. It stops
+ * when the merge is clean (success) or when no removal helps (null → the
+ * caller drops the layer). Removing an inner declaration only ever moves
+ * the merge toward the outer layers alone, so it cannot weaken an outer
+ * rail.
  */
 function pruneInnermostLayer(
   attemptLayers: readonly SteeringConfig[],
@@ -315,37 +350,71 @@ function pruneInnermostLayer(
   let result = initial;
   let errors = errorCount(result);
   const notices: SteeringDiagnostic[] = [];
-  while (errors > 0) {
-    let improved = false;
-    for (const unit of layerUnits(current)) {
-      const candidate = unit.without(current);
+  let budget: number;
+  try {
+    budget = layerUnits(current).length;
+  } catch {
+    return null; // a layer whose declarations cannot even be listed
+  }
+  while (errors > 0 && budget > 0) {
+    let units: LayerUnit[];
+    try {
+      units = layerUnits(current);
+    } catch {
+      return null;
+    }
+    const errorMessages = result.diagnostics
+      .filter((d) => d.type === "error")
+      .map((d) => d.message);
+    let best: {
+      rank: number;
+      unit: LayerUnit;
+      candidate: SteeringConfig;
+      trial: MergeResult;
+      gone: string[];
+    } | null = null;
+    for (const unit of units) {
+      let candidate: SteeringConfig;
+      try {
+        candidate = unit.without(current);
+      } catch {
+        continue;
+      }
       const trial = mergeWithTrialBuild([candidate, ...outer], builtinTrackers);
       const trialErrors = errorCount(trial);
-      if (trialErrors >= errors) continue;
-      const gone = result.diagnostics.filter(
-        (d) =>
-          d.type === "error" &&
-          !trial.diagnostics.some(
-            (t) => t.type === "error" && t.message === d.message,
-          ),
+      const gone = errorMessages.filter(
+        (m) =>
+          !trial.diagnostics.some((t) => t.type === "error" && t.message === m),
       );
-      notices.push({
-        type: "info",
-        kind: "layer-part-dropped-on-error",
-        message:
-          `dropping ${unit.label} from config layer #${layerIndex} after an ` +
-          "error-class diagnostic; the rest of that layer and every outer " +
-          "layer still load (an inner layer must not be able to leave the " +
-          `session unsteered). Dropped error: ${gone[0]?.message ?? "unknown"}`,
-      });
-      current = candidate;
-      result = trial;
-      errors = trialErrors;
-      improved = true;
-      break;
+      let rank = 0;
+      if (trialErrors < errors) rank = 3;
+      else if (
+        trialErrors <= errors &&
+        gone.some((m) => m.includes(`"${unit.name}"`))
+      )
+        rank = 2;
+      else if (trialErrors <= errors && gone.length > 0) rank = 1;
+      if (rank > (best?.rank ?? 0)) {
+        best = { rank, unit, candidate, trial, gone };
+        if (rank === 3) break;
+      }
     }
-    if (!improved) return null;
+    if (best === null) return null;
+    notices.push({
+      type: "info",
+      kind: "layer-part-dropped-on-error",
+      message:
+        `dropping ${best.unit.label} from config layer #${layerIndex} after an ` +
+        "error-class diagnostic; the rest of that layer and every outer " +
+        "layer still load (an inner layer must not be able to leave the " +
+        `session unsteered). Dropped error: ${best.gone[0] ?? "unknown"}`,
+    });
+    current = best.candidate;
+    result = best.trial;
+    errors = errorCount(result);
+    budget -= 1;
   }
+  if (errors > 0) return null;
   return { result, notices };
 }
 
@@ -406,9 +475,32 @@ const TRIAL_HOST: EvaluatorHost = {
 function mergeWithTrialBuild(
   layers: readonly SteeringConfig[],
   builtinTrackers: readonly string[],
+  opts: { forceTrial?: boolean } = {},
 ): MergeResult {
-  const result = mergeLayersOnce(layers, builtinTrackers);
-  if (layers.length <= 1 || result.resolved === null) return result;
+  let result: MergeResult;
+  try {
+    result = mergeLayersOnce(layers, builtinTrackers);
+  } catch (err) {
+    // A config OBJECT that throws while it is read (a throwing getter on
+    // a plugin's `predicates`, a `rules` accessor) used to escape the
+    // diagnostic path and leave the session unsteered (lens round 3,
+    // functional F3). Here it becomes an error-class diagnostic that the
+    // drop logic can attribute like any other.
+    const body = err instanceof Error ? err.message : String(err);
+    return {
+      merged: {},
+      resolved: null,
+      diagnostics: [
+        {
+          type: "error",
+          kind: "layer-merge-failed",
+          message: `reading the config threw: ${body}`,
+        },
+      ],
+    };
+  }
+  if (!opts.forceTrial && layers.length <= 1) return result;
+  if (result.resolved === null) return result;
   if (result.diagnostics.some((d) => d.type === "error")) return result;
   try {
     const { filteredConfig, filteredResolved, userKept } =

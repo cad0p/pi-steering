@@ -13,8 +13,11 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { EvaluatorHost } from "./evaluator.ts";
-import { buildSessionRuntime } from "./internal/session-runtime.ts";
-import { resolveAgentDir } from "./loader.ts";
+import { processAgentDir } from "./internal/agent-dir-snapshot.ts";
+import {
+  buildSessionRuntime,
+  formatSingleLineDiagnostic,
+} from "./internal/session-runtime.ts";
 
 /**
  * Pi extension factory. Wires the steering engine onto pi's
@@ -59,6 +62,26 @@ import { resolveAgentDir } from "./loader.ts";
  * The optional `deps` parameter is a TEST-ONLY injection seam for the
  * runtime builder; pi calls `register(pi)` with a single argument.
  */
+/** In-chat notices shown in full before the summary says "and N more". */
+const NOTICE_SUMMARY_LIMIT = 5;
+
+/**
+ * One in-chat message for every notice of a load: the first
+ * {@link NOTICE_SUMMARY_LIMIT} in full, then a count (each one is
+ * already on the console). Exported for tests.
+ */
+export function summarizeNotices(notices: readonly string[]): string | null {
+  if (notices.length === 0) return null;
+  if (notices.length === 1) return notices[0] ?? null;
+  const shown = notices.slice(0, NOTICE_SUMMARY_LIMIT);
+  const rest = notices.length - shown.length;
+  return (
+    `pi-steering: ${notices.length} steering notices this load\n` +
+    shown.join("\n") +
+    (rest > 0 ? `\n... and ${rest} more (all printed on the console)` : "")
+  );
+}
+
 export default function register(
   pi: ExtensionAPI,
   deps: { buildSessionRuntime?: typeof buildSessionRuntime } = {},
@@ -68,11 +91,13 @@ export default function register(
 
   const build = deps.buildSessionRuntime ?? buildSessionRuntime;
   const host: EvaluatorHost = { exec: pi.exec, appendEntry: pi.appendEntry };
-  // Snapshot where the GLOBAL layer lives at factory time, before any
-  // steering config code runs: a project layer that assigns
-  // process.env.PI_CODING_AGENT_DIR / HOME at import time must not move
-  // the global layer (lens round 2: functional F1, trust F1).
-  const agentDir = resolveAgentDir();
+  // Where the GLOBAL layer lives: resolved ONCE per process, at the first
+  // steering load, and reused by every later factory call (each /reload
+  // re-runs it). A project layer that assigns PI_CODING_AGENT_DIR / HOME
+  // at import time (lens round 2) or later, from a timer (lens round 3,
+  // red-team F1), must not move the global layer; a drift is restored
+  // and raised in-chat at session_start.
+  const { agentDir, drift } = processAgentDir();
 
   pi.on("agent_start", () => {
     agentLoopIndex += 1;
@@ -81,6 +106,15 @@ export default function register(
   pi.on("session_start", async (_event, ctx: ExtensionContext) => {
     if (runtime !== null) return; // safety net; fresh instance per session anyway
     const ui = ctx.ui; // capture BEFORE await (getter asserts active)
+    const driftNotice =
+      drift === null
+        ? null
+        : formatSingleLineDiagnostic({
+            type: "warning",
+            kind: "agent-dir-env-drift",
+            message: drift,
+          });
+    if (driftNotice !== null) console.warn(driftNotice);
     try {
       // Capture pi's resolved project-trust decision BEFORE the await
       // (same D3 pattern as `ui` — the getter must run against the
@@ -103,8 +137,15 @@ export default function register(
       });
       runtime = built;
       // Drops and agent-dir moves are already on the console; raise them
-      // in-chat too, so a repo whose rails were dropped is never silent.
-      for (const notice of built.notices ?? []) ui.notify(notice, "warning");
+      // in-chat too, so a repo whose rails were dropped is never silent —
+      // as ONE summary per load (lens round 3, red-team F4: a layer with
+      // 200 broken declarations must not post 200 toasts).
+      const notices = [
+        ...(driftNotice ? [driftNotice] : []),
+        ...(built.notices ?? []),
+      ];
+      const summary = summarizeNotices(notices);
+      if (summary !== null) ui.notify(summary, "warning");
     } catch (err) {
       if (
         !(err instanceof Error) ||

@@ -39,6 +39,7 @@ import type {
   ExecResult as PiExecResult,
 } from "@earendil-works/pi-coding-agent";
 import type { EvaluatorHost } from "./evaluator-internals/context.ts";
+import { resetProcessAgentDirForTests } from "./internal/agent-dir-snapshot.ts";
 
 // ---------------------------------------------------------------------------
 // Isolated $HOME fixture
@@ -72,6 +73,8 @@ export function useIsolatedHome(
     tmp = mkdtempSync(join(tmpdir(), prefix));
     priorHome = process.env.HOME;
     process.env.HOME = tmp;
+    // Each case is a fresh "process" for the agent-dir snapshot.
+    resetProcessAgentDirForTests();
     onReady?.(tmp);
   });
   afterEach(() => {
@@ -101,6 +104,8 @@ export function useScratchHome(
     tmp = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
     priorHome = process.env.HOME;
     process.env.HOME = tmp;
+    // Each case is a fresh "process" for the agent-dir snapshot.
+    resetProcessAgentDirForTests();
     process.chdir(tmp);
     onReady?.(tmp);
   });

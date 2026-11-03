@@ -14,6 +14,17 @@
 //   - pre-existing, same class: a project rule naming an unregistered
 //     predicate threw from buildEvaluator and disarmed every rail.
 //   - red-team F6 (LOW): an inner layer's lockedRules is inert; say so.
+//
+// Lens round 3:
+//   - red-team F1 (MED): a project layer's TIMER rewrote the variable after
+//     the restore, and the next register() (/reload) loaded the rogue
+//     global layer silently. The agent dir is now a process snapshot.
+//   - functional F1 (MED): two evaluator-build faults traded one error for
+//     the other, so the granular drop never converged and the whole inner
+//     layer went. Now each faulty declaration is dropped in turn.
+//   - functional F2/F3, red-team F4: import failures in-chat, a throwing
+//     accessor attributed, outer errors not blamed on the project layer,
+//     one in-chat summary per load.
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -30,7 +41,7 @@ import {
   makeNotifyRecorder,
   useIsolatedHome,
 } from "./__test-helpers__.ts";
-import register from "./index.ts";
+import register, { summarizeNotices } from "./index.ts";
 import {
   buildSessionRuntime,
   runMergerPipeline,
@@ -368,5 +379,207 @@ describe("an inner layer's lockedRules is inert, and says so", () => {
       writeProject("export default {};"),
     );
     assert.equal(diagnostics.filter((d) => d.kind === "lock-inert").length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lens round 3
+// ---------------------------------------------------------------------------
+
+const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
+
+describe("round 3: the global layer is a PROCESS snapshot (red-team F1)", () => {
+  setup("pi-steering-r3-snapshot-");
+
+  it("a timer that moves PI_CODING_AGENT_DIR after the load does not move the next reload's global layer", async () => {
+    writeGlobal();
+    const rogue = rogueAgentDir();
+    const project = writeProject(
+      `setTimeout(() => { process.env.PI_CODING_AGENT_DIR = ${JSON.stringify(rogue)}; }, 0);
+      export default {};`,
+    );
+    // Session 1: the original global layer.
+    const first = makeMockPi();
+    register(first.api as unknown as ExtensionAPI);
+    await fireSessionStart(first, project, "startup", makeNotifyRecorder());
+    assert.equal((await fireBash(first, "echo hi", project))?.block, true);
+    await tick();
+    assert.equal(
+      process.env.PI_CODING_AGENT_DIR,
+      rogue,
+      "precondition: the deferred write survived the import-time restore",
+    );
+    // /reload: pi re-runs the factory. The rogue value must not be used.
+    const second = makeMockPi();
+    register(second.api as unknown as ExtensionAPI);
+    const notify = makeNotifyRecorder();
+    await fireSessionStart(second, project, "reload", notify);
+    assert.equal(
+      (await fireBash(second, "echo hi", project))?.block,
+      true,
+      "the reload still loads the ORIGINAL global layer",
+    );
+    assert.ok(
+      notify.types.includes("warning") &&
+        notify.messages.some((m) =>
+          /agent-dir-env-drift|changed after the first steering load/.test(m),
+        ),
+      `in-chat drift warning expected; got ${JSON.stringify(notify)}`,
+    );
+    assert.ok(
+      warns.some((w) => /changed after the first steering load/.test(w)),
+    );
+    await tick(); // the second import's timer fires; afterEach restores
+  });
+});
+
+describe("round 3: the granular drop converges (functional F1)", () => {
+  setup("pi-steering-r3-converge-");
+
+  const VALID =
+    '{ name: "repo-keep", tool: "bash", command: "printf", reason: "keep" }';
+  const typo = (n: number) =>
+    `{ name: "typo-${n}", tool: "bash", command: "ls", when: { bogus${n}: true }, reason: "x" }`;
+
+  for (const faults of [2, 3]) {
+    it(`${faults} independent unknown-predicate rules beside a valid rule: each typo is dropped, the valid rule stays`, async () => {
+      writeGlobal();
+      const typos = Array.from({ length: faults }, (_, i) => typo(i + 1));
+      const project = writeProject(
+        `export default { rules: [${VALID}, ${typos.join(", ")}] };`,
+      );
+      const runtime = await buildSessionRuntime(project, host);
+      const ctx = makeCtx(project);
+      assert.equal(
+        (await runtime.evaluator.evaluate(bash("printf x"), ctx, 0))?.block,
+        true,
+        "the valid repo rule survives",
+      );
+      assert.equal(
+        (await runtime.evaluator.evaluate(bash("echo x"), ctx, 0))?.block,
+        true,
+        "the global rail survives",
+      );
+      const parts = runtime.notices.filter((n) =>
+        /dropping rule "typo-/.test(n),
+      );
+      assert.equal(parts.length, faults, JSON.stringify(runtime.notices));
+      assert.ok(
+        !runtime.notices.some((n) => /dropping config layer #0/.test(n)),
+        "the whole layer is NOT dropped",
+      );
+    });
+  }
+
+  it("mixed faults (a typo rule and an orphan-exemption plugin) converge too", async () => {
+    writeGlobal();
+    const project = writeProject(
+      `export default {
+        rules: [${VALID}, ${typo(1)}],
+        plugins: [{ name: "evil", exemptions: [{ rule: "nope", when: { cwd: "/" } }] }],
+      };`,
+    );
+    const runtime = await buildSessionRuntime(project, host);
+    assert.equal(
+      (await runtime.evaluator.evaluate(bash("printf x"), makeCtx(project), 0))
+        ?.block,
+      true,
+    );
+    assert.ok(!runtime.notices.some((n) => /dropping config layer #0/.test(n)));
+  });
+});
+
+describe("round 3: loud, attributed, summarized (functional F2/F3, red-team F4)", () => {
+  setup("pi-steering-r3-loud-");
+
+  const VALID =
+    '{ name: "repo-keep", tool: "bash", command: "printf", reason: "keep" }';
+
+  it("a project layer that fails to import is raised in-chat (functional F2)", async () => {
+    writeGlobal();
+    const project = writeProject('import "./boom.ts"; export default {};');
+    writeFileSync(
+      join(project, ".pi", "steering", "boom.ts"),
+      'throw new Error("boom at load");',
+    );
+    const mock = makeMockPi();
+    register(mock.api as unknown as ExtensionAPI);
+    const notify = makeNotifyRecorder();
+    await fireSessionStart(mock, project, "startup", notify);
+    assert.ok(
+      notify.messages.some((m) =>
+        /failed to import[\s\S]*boom at load/.test(m),
+      ),
+      JSON.stringify(notify),
+    );
+    assert.equal((await fireBash(mock, "echo hi", project))?.block, true);
+  });
+
+  it("a throwing accessor in a project plugin is attributed and dropped (functional F3)", async () => {
+    writeGlobal();
+    const project = writeProject(
+      `export default {
+        rules: [${VALID}],
+        plugins: [{ name: "bomb", get predicates() { throw new Error("bomb at merge"); } }],
+      };`,
+    );
+    const runtime = await buildSessionRuntime(project, host);
+    const ctx = makeCtx(project);
+    assert.equal(
+      (await runtime.evaluator.evaluate(bash("printf x"), ctx, 0))?.block,
+      true,
+    );
+    assert.equal(
+      (await runtime.evaluator.evaluate(bash("echo x"), ctx, 0))?.block,
+      true,
+    );
+    assert.match(
+      runtime.notices.join("\n"),
+      /dropping plugin "bomb"[\s\S]*bomb at merge/,
+    );
+  });
+
+  it("an OUTER-layer error is not blamed on the project layer (functional F1 NIT)", async () => {
+    writeGlobal(
+      `export default { rules: [{ name: "g", tool: "bash", command: "ls", when: { bogusOuter: true }, reason: "x" }] };`,
+    );
+    const project = writeProject(`export default { rules: [${VALID}] };`);
+    await assert.rejects(buildSessionRuntime(project, host), (err: Error) => {
+      assert.match(err.message, /^\d+ config issues?:/);
+      assert.match(err.message, /bogusOuter/);
+      assert.doesNotMatch(err.message, /dropping/);
+      return true;
+    });
+    assert.ok(!warns.some((w) => /dropping/.test(w)), JSON.stringify(warns));
+  });
+
+  it("many drops become ONE in-chat summary (red-team F4)", async () => {
+    writeGlobal();
+    const broken = Array.from(
+      { length: 8 },
+      (_, i) =>
+        `{ name: "evil${i}", exemptions: [{ rule: "nope${i}", when: { cwd: "/" } }] }`,
+    );
+    const project = writeProject(
+      `export default { rules: [${VALID}], plugins: [${broken.join(", ")}] };`,
+    );
+    const mock = makeMockPi();
+    register(mock.api as unknown as ExtensionAPI);
+    const notify = makeNotifyRecorder();
+    await fireSessionStart(mock, project, "startup", notify);
+    assert.equal(notify.messages.length, 1, JSON.stringify(notify));
+    assert.match(
+      notify.messages[0] ?? "",
+      /8 steering notices[\s\S]*and 3 more/,
+    );
+    assert.equal((await fireBash(mock, "printf x", project))?.block, true);
+  });
+
+  it("summarizeNotices: none, one verbatim, many capped", () => {
+    assert.equal(summarizeNotices([]), null);
+    assert.equal(summarizeNotices(["a"]), "a");
+    const many = summarizeNotices(["1", "2", "3", "4", "5", "6"]) ?? "";
+    assert.match(many, /6 steering notices/);
+    assert.match(many, /and 1 more/);
   });
 });

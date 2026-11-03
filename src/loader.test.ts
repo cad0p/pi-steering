@@ -27,15 +27,18 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 import { useIsolatedHome } from "./__test-helpers__.ts";
 import { LOCKED_RULES_SUPPORTED } from "./index.ts";
+import { resolveAgentDirFrom } from "./internal/agent-dir-snapshot.ts";
 import {
   buildConfig,
   configCandidates,
   findConfigFile,
   loadConfigs,
   loadSteeringConfig,
-  resolveAgentDir,
   resolveJitiCacheDir,
 } from "./loader.ts";
+
+const resolveAgentDir = (): string => resolveAgentDirFrom().agentDir;
+
 import type { Plugin, Rule, SteeringConfig } from "./schema.ts";
 
 // ---------------------------------------------------------------------------

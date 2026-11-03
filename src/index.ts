@@ -96,10 +96,11 @@ export default function register(
   // steering load, and reused by every later factory call (each /reload
   // re-runs it). A project layer that assigns PI_CODING_AGENT_DIR / HOME
   // at import time (lens round 2) or later, from a timer (lens round 3,
-  // red-team F1), must not move the global layer. Round 4: every
-  // snapshotted variable (PI_CODING_AGENT_DIR, HOME, USERPROFILE) is
-  // compared on its own, so a HOME-only move is caught too; a drift is
-  // restored here and raised in-chat at session_start.
+  // red-team F1), must not move the global layer. Round 5: no steering
+  // decision reads those variables after the first read (the loader, the
+  // CLI and the walker's HOME take the snapshot); the drift check here is
+  // advisory — a changed variable is restored for everything outside
+  // steering and raised in-chat at session_start.
   const { agentDir, drift } = processAgentDir();
 
   pi.on("agent_start", () => {
@@ -289,11 +290,12 @@ export { INFO_FLAGS } from "./helpers/flags.ts";
 export { walkerUnknownCwdReason } from "./helpers/walker-unknown-cwd-reason.ts";
 /**
  * The agent dir and home directory as they were at the FIRST steering
- * load in this process. A global layer that derives a path from the home
- * directory should read `homeDir` here rather than call `homedir()`: the
- * layer is re-evaluated on every load, and a fresh read follows whatever
- * `HOME` earlier config code left behind. Read-only (never restores or
- * reports; the extension does that at each load).
+ * read in this process (see the first-read rule in the README's Security
+ * section). A global layer that derives a path from the home directory
+ * should read `homeDir` here rather than call `homedir()` or read
+ * `process.env.HOME`: the layer is re-evaluated on every load, and a live
+ * read follows whatever `HOME` earlier config code left behind. Read-only
+ * (never restores or reports; the extension does that at each load).
  */
 export { agentDirSnapshot } from "./internal/agent-dir-snapshot.ts";
 // Loader — two-layer config discovery + merge.

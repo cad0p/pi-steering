@@ -74,6 +74,7 @@ import {
   type Tracker,
 } from "@cad0p/unbash-walker";
 import type { ResolvedPluginState } from "../plugin-merger.ts";
+import { agentDirSnapshot } from "./agent-dir-snapshot.ts";
 
 /**
  * Build the effective walker registry for a resolved plugin state:
@@ -155,7 +156,24 @@ function composeBuiltinCwd(
 function composeBuiltinEnv(
   extras: Record<string, Modifier<unknown>[]> | undefined,
 ): Tracker<EnvState> {
-  return composeBuiltin(envTracker, extras);
+  return withSnapshotHome(composeBuiltin(envTracker, extras));
+}
+
+/**
+ * The built-in env tracker seeds `HOME` from `process.env.HOME` when the
+ * walker module is first evaluated, which can be after a project layer's
+ * timer moved it. Every walk the engine runs seeds `HOME` from the
+ * process snapshot instead (lens round 5: no live HOME read after the
+ * first read), so `~`, `$HOME` and a bare `cd` resolve against the
+ * first-load home. A command that assigns HOME itself (`export HOME=…`)
+ * still moves it for that command, as bash would. `USER` / `PWD` keep
+ * the walker's own seed. A plugin that registers its own env tracker
+ * owns its seed.
+ */
+function withSnapshotHome(tracker: Tracker<EnvState>): Tracker<EnvState> {
+  const initial = new Map(tracker.initial);
+  initial.set("HOME", agentDirSnapshot().homeDir);
+  return { ...tracker, initial };
 }
 
 /**

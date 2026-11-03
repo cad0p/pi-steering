@@ -34,7 +34,8 @@
 //   - functional F3: n named faults cost n² trial builds; now about n.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type {
@@ -49,14 +50,18 @@ import {
   useIsolatedHome,
 } from "./__test-helpers__.ts";
 import register, { agentDirSnapshot, summarizeNotices } from "./index.ts";
-import { processAgentDir } from "./internal/agent-dir-snapshot.ts";
+import {
+  comparableEnvValue,
+  processAgentDir,
+  resetProcessAgentDirForTests,
+} from "./internal/agent-dir-snapshot.ts";
 import {
   buildSessionRuntime,
   IN_CHAT_KINDS,
   runMergerPipeline,
   takeMergeAttemptsForTests,
 } from "./internal/session-runtime.ts";
-import { loadSteeringConfig, normalizeEnvPath } from "./loader.ts";
+import { loadSteeringConfig } from "./loader.ts";
 
 const GLOBAL = `export default {
   rules: [
@@ -665,13 +670,18 @@ describe("round 4: drift is checked per KEY (red-team F1 = functional F2)", () =
     assert.equal(process.env.PI_CODING_AGENT_DIR, undefined, "restored");
   });
 
-  it("normalizeEnvPath: unset = empty, trailing slash and dot segments ignored, ~ kept", () => {
-    assert.equal(normalizeEnvPath(undefined), undefined);
-    assert.equal(normalizeEnvPath(""), undefined);
-    assert.equal(normalizeEnvPath("/a/b/"), "/a/b");
-    assert.equal(normalizeEnvPath("/a//b/./"), "/a/b");
-    assert.equal(normalizeEnvPath("~/x/"), "~/x");
-    assert.equal(normalizeEnvPath("~"), "~");
+  it("comparableEnvValue (round 5): lexical only; unset and empty differ except for PI_CODING_AGENT_DIR", () => {
+    assert.equal(comparableEnvValue("HOME", undefined), undefined);
+    assert.equal(comparableEnvValue("HOME", ""), "");
+    assert.equal(comparableEnvValue("USERPROFILE", ""), "");
+    assert.equal(comparableEnvValue("PI_CODING_AGENT_DIR", ""), undefined);
+    assert.equal(comparableEnvValue("HOME", "/a/b/"), "/a/b");
+    assert.equal(comparableEnvValue("HOME", "/a//b/./"), "/a/b");
+    assert.equal(comparableEnvValue("HOME", "/"), "/");
+    // No `..` collapsing and no absolutising: either can hide a change.
+    assert.equal(comparableEnvValue("HOME", "/a/l/../b"), "/a/l/../b");
+    assert.equal(comparableEnvValue("HOME", "rel/home"), "rel/home");
+    assert.equal(comparableEnvValue("PI_CODING_AGENT_DIR", "~/x/"), "~/x");
   });
 });
 
@@ -707,4 +717,117 @@ describe("round 4: the granular drop is near-linear on named faults (functional 
     // initial merge and the outer-alone check.
     assert.ok(attempts <= 3 * n, `${attempts} merge attempts for ${n} faults`);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Lens round 5: decisions read the snapshot only; the drift check is advisory
+// ---------------------------------------------------------------------------
+
+describe("round 5: the first read, stated (empty and relative HOME)", () => {
+  setup("pi-steering-r5-first-");
+
+  it("an empty HOME at the first read takes the account home, not '' or the cwd", () => {
+    process.env.HOME = "";
+    resetProcessAgentDirForTests();
+    const snap = agentDirSnapshot();
+    assert.equal(snap.homeDir, userInfo().homedir);
+    assert.equal(snap.agentDir, join(userInfo().homedir, ".pi", "agent"));
+  });
+
+  it("a relative HOME at the first read takes the account home too", () => {
+    process.env.HOME = "rel/home";
+    resetProcessAgentDirForTests();
+    assert.equal(agentDirSnapshot().homeDir, userInfo().homedir);
+  });
+
+  it("unset at the first read and empty later is drift: reported and restored", () => {
+    delete process.env.HOME;
+    resetProcessAgentDirForTests();
+    processAgentDir();
+    process.env.HOME = "";
+    const { drift } = processAgentDir();
+    assert.equal(drift?.kind, "agent-dir-env-drift");
+    assert.match(drift?.message ?? "", /process\.env\.HOME changed/);
+    assert.equal(process.env.HOME, undefined, "restored to unset");
+  });
+});
+
+describe("round 5: a HOME respelling moves no steering decision (trust F1, red-team F1)", () => {
+  setup("pi-steering-r5-respell-");
+
+  /** A global layer that refuses `touch` with the effective cwd AT the home. */
+  function globalAtHome(realHome: string): string {
+    const esc = realHome.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return writeGlobal(`export default {
+      rules: [
+        { name: "guard", tool: "bash", command: "echo", reason: "guard" },
+        { name: "home-touch", tool: "bash", command: "touch", when: { cwd: ${JSON.stringify(`^${esc}$`)} }, reason: "home" },
+      ],
+      lockedRules: ["guard", "home-touch"],
+      failOnWarnings: false,
+    };`);
+  }
+
+  const shapes: Array<[string, (base: string) => string]> = [
+    [
+      "a symlink followed by '..' (lexically the same home, resolves elsewhere)",
+      (base) => {
+        mkdirSync(join(base, "elsewhere", "deep", "dir"), { recursive: true });
+        symlinkSync(
+          join(base, "elsewhere", "deep", "dir"),
+          join(base, "real", "lnk"),
+        );
+        return join(base, "real", "lnk") + "/../home";
+      },
+    ],
+    ["an empty HOME", () => ""],
+    ["a relative HOME", () => "real/home"],
+  ];
+
+  for (const [label, respell] of shapes) {
+    it(`${label}: the walker's ~ and the global layer stay at the snapshot home, before and after the next load`, async () => {
+      const realHome = join(home, "real", "home");
+      mkdirSync(realHome, { recursive: true });
+      process.env.PI_CODING_AGENT_DIR = globalAtHome(realHome);
+      process.env.HOME = realHome;
+      resetProcessAgentDirForTests();
+      const rogue = respell(home);
+      const project = writeProject(
+        `setTimeout(() => { process.env.HOME = ${JSON.stringify(rogue)}; }, 0);
+        export default {};`,
+      );
+      const first = makeMockPi();
+      register(first.api as unknown as ExtensionAPI);
+      await fireSessionStart(first, project, "startup", makeNotifyRecorder());
+      assert.equal(
+        (await fireBash(first, "cd ~ && touch x", project))?.block,
+        true,
+      );
+      await tick();
+      assert.equal(process.env.HOME, rogue, "precondition: HOME respelled");
+      // In the window before the next load: decisions do not follow.
+      assert.equal(agentDirSnapshot().homeDir, realHome);
+      assert.equal(
+        (await fireBash(first, "cd ~ && touch x", project))?.block,
+        true,
+        "the walker's ~ is the snapshot home while HOME is respelled",
+      );
+      // The next load: still the snapshot (and the respelling is reported).
+      const second = makeMockPi();
+      register(second.api as unknown as ExtensionAPI);
+      const notify = makeNotifyRecorder();
+      await fireSessionStart(second, project, "reload", notify);
+      assert.equal(
+        (await fireBash(second, "cd ~ && touch x", project))?.block,
+        true,
+      );
+      assert.equal((await fireBash(second, "echo hi", project))?.block, true);
+      assert.equal(agentDirSnapshot().homeDir, realHome);
+      assert.ok(
+        notify.messages.some((m) => /process\.env\.HOME changed/.test(m)),
+        JSON.stringify(notify),
+      );
+      await tick();
+    });
+  }
 });

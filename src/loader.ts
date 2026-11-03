@@ -22,11 +22,15 @@ import {
   mkdirSync,
   readFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, normalize, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createJiti } from "jiti";
 import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
+import {
+  agentDirSnapshot,
+  currentAgentDirEnv,
+  restoreAgentDirEnv,
+} from "./internal/agent-dir-snapshot.ts";
 import { runMergerPipeline } from "./internal/session-runtime.ts";
 import { verifyLayerPin } from "./layer-pin.ts";
 import { formatTrackerNameCollisionMessage } from "./plugin-merger.ts";
@@ -95,25 +99,6 @@ function unexpectedFilesUnderSteering(
 }
 
 /**
- * Resolve the pi agent directory: `$PI_CODING_AGENT_DIR` when set
- * (tilde-expanded: `"~"` → home, `"~/x"` → `<home>/x`, anything else
- * as-is), else `<home>/.pi/agent`. Mirrors pi's `getAgentDir()` in
- * @earendil-works/pi-coding-agent.
- *
- * Exported for tests.
- */
-export function resolveAgentDir(): string {
-  const envDir = process.env["PI_CODING_AGENT_DIR"];
-  if (envDir !== undefined && envDir !== "") {
-    // mirror pi's expandTildePath: "~" -> homedir, "~/x" -> homedir/x, else as-is
-    if (envDir === "~") return homedir();
-    if (envDir.startsWith("~/")) return join(homedir(), envDir.slice(2));
-    return envDir;
-  }
-  return join(homedir(), ".pi", "agent");
-}
-
-/**
  * Find the config file (if any) for a single layer. Returns the
  * resolved file path and a `layer-form-coexistence` diagnostic when
  * both `<slot>/index.ts` and `<slot>.ts` coexist in the same
@@ -173,8 +158,9 @@ export interface LoadConfigsOptions {
   /**
    * The agent directory the GLOBAL layer is loaded from, resolved by the
    * caller BEFORE any config code ran (the bridge snapshots it at
-   * extension-factory time). When absent, {@link loadConfigs} resolves it
-   * itself, still before importing the project layer. Either way the
+   * extension-factory time). When absent, {@link loadConfigs} takes it
+   * from the process snapshot (`agentDirSnapshot()`), never from a live
+   * read of the environment, still before importing the project layer. Either way the
    * project layer can no longer move the global layer by assigning
    * `process.env.PI_CODING_AGENT_DIR` or `HOME` at import time (lens
    * round 2: functional F1 / trust F1).
@@ -190,41 +176,6 @@ export interface LoadConfigsOptions {
    * writer-independent tripwire.
    */
   globalLayerPin?: string;
-}
-
-/**
- * Env keys that locate the global layer, or that the global layer reads
- * through `homedir()`: `PI_CODING_AGENT_DIR`, and the home directory
- * (`homedir()` reads `HOME` on POSIX and `USERPROFILE` on Windows).
- * Nothing else is read on that path: no XDG variable locates the agent
- * dir (pi's `getAgentDir()` reads the same two). Shared with the
- * process snapshot (internal/agent-dir-snapshot.ts) so the import-time
- * check and the per-load drift check watch the same keys.
- */
-export const AGENT_DIR_ENV_KEYS = [
-  "PI_CODING_AGENT_DIR",
-  "HOME",
-  "USERPROFILE",
-] as const;
-
-/**
- * Normal form of a path-valued env variable, for comparing two values
- * of it: unset and empty are the same (pi and `homedir()` both ignore an
- * empty value), a trailing slash, `.` / `..` segments and doubled
- * slashes do not count as a change, a relative value is made absolute.
- * A `~`-prefixed value keeps its `~` (its expansion depends on the home
- * directory, which is compared on its own key). Exported for tests.
- */
-export function normalizeEnvPath(
-  value: string | undefined,
-): string | undefined {
-  if (value === undefined || value === "") return undefined;
-  if (value === "~") return value;
-  if (value.startsWith("~/")) {
-    const rest = normalize(value.slice(1)).replace(/\/+$/, "");
-    return `~${rest}`;
-  }
-  return resolve(value);
 }
 
 /**
@@ -361,7 +312,7 @@ async function importConfigFile(path: string): Promise<SteeringConfig> {
 /**
  * Load the two fixed config layers for `cwd`: the project layer at
  * `<cwd>/.pi/steering/` (or `.pi/steering.ts`) and the global layer
- * at `<agentDir>/steering/` (see {@link resolveAgentDir}). Returns
+ * at `<agentDir>/steering/` (see {@link agentDirSnapshot}). Returns
  * the layers INNER-FIRST (project first, then global; caller passes
  * to {@link buildConfig}, which expects inner-first so early entries
  * take precedence on collisions).
@@ -397,8 +348,9 @@ export async function loadConfigs(
   // process.env.PI_CODING_AGENT_DIR (or HOME) at import time and the
   // loader, resolving the agent dir afterwards, loaded an
   // attacker-chosen "global" layer with every lock gone and zero
-  // diagnostics (lens round 2: functional F1, trust F1).
-  const agentDir = opts?.agentDir ?? resolveAgentDir();
+  // diagnostics (lens round 2: functional F1, trust F1). The location is
+  // the PROCESS snapshot (lens round 5): never a live read of the env.
+  const agentDir = opts?.agentDir ?? agentDirSnapshot().agentDir;
   const globalLayers: SteeringConfig[] = [];
   const globalDiagnostics: SteeringDiagnostic[] = [];
   if (opts?.globalLayerPin !== undefined) {
@@ -412,7 +364,7 @@ export async function loadConfigs(
   await loadLayer(agentDir, "steering", globalLayers, globalDiagnostics);
   // Snapshot AFTER the global layer ran: only the project layer's
   // changes are attributed to it below.
-  const envBefore = AGENT_DIR_ENV_KEYS.map((k) => process.env[k]);
+  const envBefore = currentAgentDirEnv();
 
   const layers: SteeringConfig[] = [];
   const diagnostics: SteeringDiagnostic[] = [];
@@ -433,13 +385,11 @@ export async function loadConfigs(
   } else {
     await loadLayer(cwd, ".pi/steering", layers, diagnostics);
   }
-  // A project layer that changed where the global layer lives is told
-  // so loudly, and the change is undone: a later session in the same
-  // process (/new, /reload) and pi itself would otherwise follow it.
-  for (const [i, key] of AGENT_DIR_ENV_KEYS.entries()) {
-    const before = envBefore[i];
-    if (normalizeEnvPath(process.env[key]) === normalizeEnvPath(before))
-      continue;
+  // A project layer that changed a variable that locates the global layer
+  // is told so loudly, and the change is undone for everything outside
+  // steering (child processes, lazy readers). Advisory: no steering
+  // decision reads these variables after the first read (lens round 5).
+  for (const key of restoreAgentDirEnv(envBefore)) {
     diagnostics.push({
       type: "warning",
       kind: "agent-dir-env-mutated",
@@ -449,8 +399,6 @@ export async function loadConfigs(
         `the global layer was loaded from ${agentDir} (resolved before any ` +
         "config code ran) and the variable was restored.",
     });
-    if (before === undefined) delete process.env[key];
-    else process.env[key] = before;
   }
   layers.push(...globalLayers);
   // Diagnostics keep their historical order: project first, then global.

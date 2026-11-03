@@ -28,16 +28,16 @@
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { FromJSONError, fromJSON } from "../compat.ts";
 import { EVALUATOR_BUILTIN_TRACKERS } from "../evaluator.ts";
+import { agentDirSnapshot } from "../internal/agent-dir-snapshot.ts";
 import { finalizePluginState } from "../internal/finalize-plugin-state.ts";
 import {
   formatSingleLineDiagnostic,
   runMergerPipeline,
 } from "../internal/session-runtime.ts";
-import { loadConfigs, resolveAgentDir } from "../loader.ts";
+import { loadConfigs } from "../loader.ts";
 import type {
   Exemption,
   Observer,
@@ -364,7 +364,11 @@ function canonicalizePath(p: string): string {
  * row exercises this parity.
  */
 export function hasTrustRequiringProjectResourcesMirror(cwd: string): boolean {
-  const homeDir = canonicalizePath(resolve(process.env.HOME || homedir()));
+  // pi reads `process.env.HOME || homedir()` here; the CLI takes the
+  // process snapshot instead (lens round 5: no live HOME read outside
+  // the snapshot module). Same value in a one-shot CLI, except for an
+  // empty or relative HOME, where the snapshot takes the account home.
+  const homeDir = canonicalizePath(resolve(agentDirSnapshot().homeDir));
   const userAgentsSkillsDir = join(homeDir, ".agents", "skills");
   let currentDir = canonicalizePath(resolve(cwd));
   if (
@@ -405,7 +409,7 @@ export function hasTrustRequiringProjectResourcesMirror(cwd: string): boolean {
  * throws) is asserted deliberately in the fidelity test.
  */
 export function trustStoreGetMirror(cwd: string): boolean | null {
-  const agentDir = resolveAgentDir();
+  const { agentDir } = agentDirSnapshot();
   const trustPath = join(agentDir, "trust.json");
   let parsed: unknown;
   try {

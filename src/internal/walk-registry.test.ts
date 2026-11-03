@@ -32,6 +32,7 @@ import {
 import { EVALUATOR_BUILTIN_TRACKERS } from "../evaluator.ts";
 import { resolvePlugins } from "../plugin-merger.ts";
 import type { Plugin } from "../schema.ts";
+import { agentDirSnapshot } from "./agent-dir-snapshot.ts";
 import { buildWalkRegistry, WATCH_DEFAULT_WALK } from "./walk-registry.ts";
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,17 @@ describe("buildWalkRegistry: builtin fallbacks", () => {
   it("with zero plugins, registry contains the builtin env + cwd trackers", () => {
     const resolved = resolvePlugins([], {}, EVALUATOR_BUILTIN_TRACKERS);
     const registry = buildWalkRegistry(resolved);
-    assert.equal(registry["env"], envTracker, "builtin env fallback present");
+    // The builtin env tracker, with HOME seeded from the process snapshot
+    // (lens round 5) instead of the walker's import-time process.env read.
+    const env = registry["env"] as typeof envTracker;
+    assert.equal(
+      env.modifiers,
+      envTracker.modifiers,
+      "builtin env fallback present",
+    );
+    assert.equal(env.unknown, envTracker.unknown);
+    assert.equal(env.initial.get("HOME"), agentDirSnapshot().homeDir);
+    assert.equal(env.initial.get("USER"), envTracker.initial.get("USER"));
     assert.equal(registry["cwd"], cwdTracker, "builtin cwd fallback present");
     // No plugin registered anything, so no composites are created.
     assert.deepEqual(Object.keys(registry).sort(), ["cwd", "env"]);

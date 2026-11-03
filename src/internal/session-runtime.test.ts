@@ -908,7 +908,7 @@ describe("runMergerPipeline: an inner layer cannot leave the session unsteered",
     failOnWarnings: false,
   };
 
-  it("drops the broken INNER layer, keeps the outer rails, and says so", () => {
+  it("drops the broken INNER declaration, keeps the outer rails, and says so", () => {
     const { merged, diagnostics } = runMergerPipeline(
       [{ plugins: [broken] }, outer],
       [],
@@ -918,14 +918,17 @@ describe("runMergerPipeline: an inner layer cannot leave the session unsteered",
       [],
       "the inner layer's error must not survive the merge",
     );
-    const drop = diagnostics.find((d) => d.kind === "layer-dropped-on-error");
+    // Round 2: only the offending plugin goes, not the whole layer.
+    const drop = diagnostics.find(
+      (d) => d.kind === "layer-part-dropped-on-error",
+    );
     assert.ok(drop, JSON.stringify(diagnostics));
     assert.equal(
       drop.type,
       "info",
       "info-class: a warning would abort strict mode",
     );
-    assert.match(drop.message, /dropping config layer #0/);
+    assert.match(drop.message, /dropping plugin "zz" from config layer #0/);
     assert.deepEqual(
       merged.rules?.map((r) => r.name),
       ["guard"],

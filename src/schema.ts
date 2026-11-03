@@ -2703,6 +2703,43 @@ export type SteeringDiagnosticKind =
    */
   | "layer-dropped-on-error"
   /**
+   * An INNER config layer produced an error-class diagnostic and the
+   * merge dropped only the offending declaration (a plugin, rule,
+   * observer, exemption or `disabledPlugins` entry) — the rest of that
+   * layer still loads. Info-class in the stream (a warning would let
+   * strict mode abort the session), printed with `console.warn` and
+   * raised in-chat by the bridge. The message names the declaration and
+   * quotes the dropped error.
+   */
+  | "layer-part-dropped-on-error"
+  /**
+   * Error-class, produced only while merging MORE than one layer: the
+   * trial evaluator build threw (an unknown predicate key, an empty
+   * `when:` clause, `onUnknown` in an exemption). Attributed to the
+   * innermost layer and dropped like any other inner error, so a
+   * project rule naming an unregistered predicate no longer disarms the
+   * whole session.
+   */
+  | "evaluator-build-failed"
+  /**
+   * Warning-class: the project layer changed `PI_CODING_AGENT_DIR` or
+   * `HOME` while it loaded. The global layer was loaded from the agent
+   * dir resolved BEFORE any config code ran, and the variable was
+   * restored. Raised in-chat by the bridge.
+   */
+  | "agent-dir-env-mutated"
+  /**
+   * Warning-class: an inner layer declares `lockedRules`. A lock binds
+   * outward only, so the declaration has no effect.
+   */
+  | "lock-inert"
+  /**
+   * Warning-class, prototype (off unless `globalLayerPin` is set): the
+   * global layer's files differ from the integrity pin, or the layer
+   * about to load sits outside every pinned root.
+   */
+  | "global-layer-pin-mismatch"
+  /**
    * A plugin's `cliDescriptors` entry is malformed (non-object
    * descriptor, malformed `flags` table, invalid
    * `positionPolicy`). The entry is skipped at merge time (never throws

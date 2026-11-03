@@ -14,6 +14,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { EvaluatorHost } from "./evaluator.ts";
 import { buildSessionRuntime } from "./internal/session-runtime.ts";
+import { resolveAgentDir } from "./loader.ts";
 
 /**
  * Pi extension factory. Wires the steering engine onto pi's
@@ -67,6 +68,11 @@ export default function register(
 
   const build = deps.buildSessionRuntime ?? buildSessionRuntime;
   const host: EvaluatorHost = { exec: pi.exec, appendEntry: pi.appendEntry };
+  // Snapshot where the GLOBAL layer lives at factory time, before any
+  // steering config code runs: a project layer that assigns
+  // process.env.PI_CODING_AGENT_DIR / HOME at import time must not move
+  // the global layer (lens round 2: functional F1, trust F1).
+  const agentDir = resolveAgentDir();
 
   pi.on("agent_start", () => {
     agentLoopIndex += 1;
@@ -91,7 +97,14 @@ export default function register(
         );
       }
       const projectLayerTrusted = ctx.isProjectTrusted?.() ?? true;
-      runtime = await build(ctx.cwd, host, { projectLayerTrusted });
+      const built = await build(ctx.cwd, host, {
+        projectLayerTrusted,
+        agentDir,
+      });
+      runtime = built;
+      // Drops and agent-dir moves are already on the console; raise them
+      // in-chat too, so a repo whose rails were dropped is never silent.
+      for (const notice of built.notices ?? []) ui.notify(notice, "warning");
     } catch (err) {
       if (
         !(err instanceof Error) ||

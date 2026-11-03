@@ -996,6 +996,10 @@ pi-steering is a guardrail layer, not a sandbox. Several parts of the system exe
 
 One-shot CLI contexts (`pi config`, `pi list`) never fire `session_start`, so they **never execute steering configs** — a trust improvement: running `pi config` in an untrusted directory no longer runs that directory's config code, and a strict-mode config can't pollute the CLI's output (see "Strict mode + load failures" below).
 
+Load order: the agent dir is resolved (from `$PI_CODING_AGENT_DIR` / `HOME`) and the GLOBAL layer is imported BEFORE any project-layer code runs; a project layer that changes either variable while it loads gets a warning-class `agent-dir-env-mutated` diagnostic and the variable is restored. This closes the declarative env swap only: a project layer is code in the pi process and can still subvert the process itself (monkey-patching `node:fs`, globals, the engine), so `lockedRules` binds what a layer DECLARES, not what its code DOES. The boundary against hostile project code is pi's project-trust gate.
+
+Error isolation: an error-class diagnostic caused by an inner layer drops the offending declaration of that layer (a plugin, rule, observer, exemption or `disabledPlugins` entry), or the whole inner layer when no single declaration is to blame; each drop is printed with `console.warn` and raised in-chat. An error in the OUTERMOST (global) layer is not dropped: it aborts the build and the session runs unsteered, loudly.
+
 Implication: running pi inside a directory hierarchy whose steering configs you don't trust is equivalent to running `node -e '…'` with that same file. Symlinked config directories are followed — a symlinked `.pi/steering/` landing in an unexpected directory executes as if it had been placed there directly.
 
 Only run pi in directory hierarchies whose steering configs you trust.

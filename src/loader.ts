@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { createJiti } from "jiti";
 import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
 import { runMergerPipeline } from "./internal/session-runtime.ts";
+import { verifyLayerPin } from "./layer-pin.ts";
 import { formatTrackerNameCollisionMessage } from "./plugin-merger.ts";
 import type {
   AnyPredicateHandler,
@@ -169,7 +170,30 @@ export function findConfigFile(
  */
 export interface LoadConfigsOptions {
   projectLayerTrusted?: boolean;
+  /**
+   * The agent directory the GLOBAL layer is loaded from, resolved by the
+   * caller BEFORE any config code ran (the bridge snapshots it at
+   * extension-factory time). When absent, {@link loadConfigs} resolves it
+   * itself, still before importing the project layer. Either way the
+   * project layer can no longer move the global layer by assigning
+   * `process.env.PI_CODING_AGENT_DIR` or `HOME` at import time (lens
+   * round 2: functional F1 / trust F1).
+   */
+  agentDir?: string;
+  /**
+   * PROTOTYPE, off unless set: path to an integrity pin manifest for the
+   * global layer (see {@link verifyLayerPin}). When set, the loader
+   * verifies the pinned files BEFORE importing the global layer and
+   * reports a warning-class `global-layer-pin-mismatch` on any
+   * difference. It is a boundary only when the manifest AND this code
+   * live where the agent's uid cannot write; otherwise it is a
+   * writer-independent tripwire.
+   */
+  globalLayerPin?: string;
 }
+
+/** Env keys that locate the global layer (`homedir()` reads `HOME`). */
+const AGENT_DIR_ENV_KEYS = ["PI_CODING_AGENT_DIR", "HOME"] as const;
 
 /**
  * jiti's id-relative default cache resolution (prepareCacheDir) treats
@@ -335,6 +359,29 @@ export async function loadConfigs(
   layers: SteeringConfig[];
   diagnostics: SteeringDiagnostic[];
 }> {
+  // Resolve the global layer's location ONCE, before any config code
+  // runs, and import the global layer FIRST. The project layer is
+  // arbitrary TypeScript: before this ordering it could assign
+  // process.env.PI_CODING_AGENT_DIR (or HOME) at import time and the
+  // loader, resolving the agent dir afterwards, loaded an
+  // attacker-chosen "global" layer with every lock gone and zero
+  // diagnostics (lens round 2: functional F1, trust F1).
+  const agentDir = opts?.agentDir ?? resolveAgentDir();
+  const globalLayers: SteeringConfig[] = [];
+  const globalDiagnostics: SteeringDiagnostic[] = [];
+  if (opts?.globalLayerPin !== undefined) {
+    globalDiagnostics.push(
+      ...verifyLayerPin(
+        opts.globalLayerPin,
+        findConfigFile(agentDir, "steering").file,
+      ),
+    );
+  }
+  await loadLayer(agentDir, "steering", globalLayers, globalDiagnostics);
+  // Snapshot AFTER the global layer ran: only the project layer's
+  // changes are attributed to it below.
+  const envBefore = AGENT_DIR_ENV_KEYS.map((k) => process.env[k]);
+
   const layers: SteeringConfig[] = [];
   const diagnostics: SteeringDiagnostic[] = [];
   if (opts?.projectLayerTrusted === false) {
@@ -354,7 +401,27 @@ export async function loadConfigs(
   } else {
     await loadLayer(cwd, ".pi/steering", layers, diagnostics);
   }
-  await loadLayer(resolveAgentDir(), "steering", layers, diagnostics);
+  // A project layer that changed where the global layer lives is told
+  // so loudly, and the change is undone: a later session in the same
+  // process (/new, /reload) and pi itself would otherwise follow it.
+  for (const [i, key] of AGENT_DIR_ENV_KEYS.entries()) {
+    const before = envBefore[i];
+    if (process.env[key] === before) continue;
+    diagnostics.push({
+      type: "warning",
+      kind: "agent-dir-env-mutated",
+      path: join(cwd, ".pi", "steering"),
+      message:
+        `the project layer changed process.env.${key} while it loaded; ` +
+        `the global layer was loaded from ${agentDir} (resolved before any ` +
+        "config code ran) and the variable was restored.",
+    });
+    if (before === undefined) delete process.env[key];
+    else process.env[key] = before;
+  }
+  layers.push(...globalLayers);
+  // Diagnostics keep their historical order: project first, then global.
+  diagnostics.push(...globalDiagnostics);
   return { layers, diagnostics };
 }
 
@@ -1290,6 +1357,21 @@ export function buildConfig(layers: readonly SteeringConfig[]): {
       message:
         `lockedRules names "${name}", but no layer or plugin declares that ` +
         "rule; the lock protects nothing (a typo, or a stale lock after a rename).",
+    });
+  }
+  // A lock binds outward only, so an INNER layer's lockedRules is inert.
+  // Say so once per inner declarer instead of letting a repo believe it
+  // locked something (lens round 2: red-team F6).
+  for (const layerIndex of locks.declarers) {
+    if (layerIndex === locks.outer) continue;
+    const names = effective[layerIndex]?.lockedRules ?? [];
+    diagnostics.push({
+      type: "warning",
+      kind: "lock-inert",
+      message:
+        `lockedRules from config layer #${layerIndex} (${names.join(", ")}) has ` +
+        "no effect: a lock binds outward only, so only the outermost (global) " +
+        "layer can lock a rule.",
     });
   }
 

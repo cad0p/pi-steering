@@ -151,29 +151,55 @@ export function runMergerPipeline(
   resolved: ResolvedPluginState | null;
   diagnostics: SteeringDiagnostic[];
 } {
-  // Fail-safe layer drop: an error-class diagnostic from an INNER layer
-  // must not leave the session unsteered. The inner layers are dropped
-  // one at a time (innermost first) until the merge is clean; each drop
-  // is an info-class breadcrumb, and the outer layers — the rails the
-  // session is supposed to run under — still load. If the outermost
-  // layer itself is broken, nothing is dropped and the error surfaces as
-  // before (the owner's own content is not something to paper over).
+  // Fail-safe drop: an error-class diagnostic from an INNER layer must
+  // not leave the session unsteered. First the offending DECLARATIONS
+  // of the innermost layer are dropped (a plugin, a rule, an observer,
+  // an exemption or a disabledPlugins entry — one at a time, each kept
+  // out only when that strictly reduces the error count) so the rest of
+  // that layer still loads; only when no such pruning makes the merge
+  // clean is the whole layer dropped (innermost first). Each drop is a
+  // `layer-part-dropped-on-error` / `layer-dropped-on-error` breadcrumb
+  // that the session runtime prints with console.warn and the bridge
+  // raises in-chat (info-class in the stream so strict mode never turns
+  // the drop itself into a full disarm). If the outermost layer itself
+  // is broken nothing is dropped and the error surfaces as before (the
+  // owner's own content is not something to paper over).
   //
   // Why this exists: a project layer could otherwise disarm every rail
   // for the whole session with one line, either by provoking an engine
   // throw (disabledPlugins on a predicate-only plugin → unknown
-  // predicate; a reserved tracker name; an orphan exemption) or by
+  // predicate; a reserved tracker name; an orphan exemption; a rule
+  // naming an unknown predicate, which threw from buildEvaluator) or by
   // flipping failOnWarnings so that a WARNING aborts the build. The
-  // lock closes the named paths; this closes the class.
+  // lock closes the named paths; this closes the class. Dropping only
+  // the offending declaration keeps a legitimate per-repo rail alive
+  // beside a broken plugin (lens round 2: functional F2, trust F2,
+  // red-team F5).
   let attemptLayers = [...layers];
   const dropped: SteeringDiagnostic[] = [];
   for (;;) {
-    const result = mergeLayersOnce(attemptLayers, builtinTrackers);
+    const result = mergeWithTrialBuild(attemptLayers, builtinTrackers);
     const hasError = result.diagnostics.some((d) => d.type === "error");
     if (!hasError || attemptLayers.length <= 1) {
       return { ...result, diagnostics: [...dropped, ...result.diagnostics] };
     }
     const droppedIndex = layers.length - attemptLayers.length;
+    const pruned = pruneInnermostLayer(
+      attemptLayers,
+      result,
+      builtinTrackers,
+      droppedIndex,
+    );
+    if (pruned !== null) {
+      return {
+        ...pruned.result,
+        diagnostics: [
+          ...dropped,
+          ...pruned.notices,
+          ...pruned.result.diagnostics,
+        ],
+      };
+    }
     const firstError = result.diagnostics.find((d) => d.type === "error");
     dropped.push({
       type: "info",
@@ -186,6 +212,219 @@ export function runMergerPipeline(
         `Dropped error: ${firstError?.message ?? "unknown"}`,
     });
     attemptLayers = attemptLayers.slice(1);
+  }
+}
+
+/**
+ * Diagnostic kinds the bridge raises in-chat as well as on the console:
+ * each one means the session runs with LESS than its config declares,
+ * or under a layer other than the one it was pointed at.
+ */
+export const IN_CHAT_KINDS: ReadonlySet<SteeringDiagnostic["kind"]> = new Set([
+  "layer-dropped-on-error",
+  "layer-part-dropped-on-error",
+  "agent-dir-env-mutated",
+  "global-layer-pin-mismatch",
+] as const);
+
+type MergeResult = {
+  merged: SteeringConfig;
+  resolved: ResolvedPluginState | null;
+  diagnostics: SteeringDiagnostic[];
+};
+
+function errorCount(result: MergeResult): number {
+  return result.diagnostics.filter((d) => d.type === "error").length;
+}
+
+/** One droppable declaration of a layer, with a label for the notice. */
+interface LayerUnit {
+  label: string;
+  without: (layer: SteeringConfig) => SteeringConfig;
+}
+
+function withoutIndex<T>(list: readonly T[], index: number): T[] {
+  return list.filter((_, i) => i !== index);
+}
+
+/** Every declaration of `layer` that the pruning may drop on its own. */
+function layerUnits(layer: SteeringConfig): LayerUnit[] {
+  const units: LayerUnit[] = [];
+  for (const [i, plugin] of (layer.plugins ?? []).entries()) {
+    units.push({
+      label: `plugin "${String(plugin?.name)}"`,
+      without: (l) => ({ ...l, plugins: withoutIndex(l.plugins ?? [], i) }),
+    });
+  }
+  for (const [i, rule] of (layer.rules ?? []).entries()) {
+    units.push({
+      label: `rule "${String(rule?.name)}"`,
+      without: (l) => ({ ...l, rules: withoutIndex(l.rules ?? [], i) }),
+    });
+  }
+  for (const [i, observer] of (layer.observers ?? []).entries()) {
+    const name =
+      typeof observer === "string" ? observer : String(observer?.name);
+    units.push({
+      label: `observer "${name}"`,
+      without: (l) => ({
+        ...l,
+        observers: withoutIndex(l.observers ?? [], i),
+      }),
+    });
+  }
+  for (const [i, exemption] of (layer.exemptions ?? []).entries()) {
+    units.push({
+      label: `exemption for rule "${String(exemption?.rule)}"`,
+      without: (l) => ({
+        ...l,
+        exemptions: withoutIndex(l.exemptions ?? [], i),
+      }),
+    });
+  }
+  for (const [i, name] of (layer.disabledPlugins ?? []).entries()) {
+    units.push({
+      label: `disabledPlugins entry "${String(name)}"`,
+      without: (l) => ({
+        ...l,
+        disabledPlugins: withoutIndex(l.disabledPlugins ?? [], i),
+      }),
+    });
+  }
+  return units;
+}
+
+/**
+ * Drop the offending declarations of the INNERMOST layer instead of the
+ * whole layer. Greedy and bounded: each pass tries every remaining
+ * declaration on its own and keeps the first removal that strictly
+ * lowers the error count; it stops when the merge is clean (success) or
+ * when no single removal helps (null → the caller drops the layer).
+ * Removing an inner declaration only ever moves the merge toward the
+ * outer layers alone, so it cannot weaken an outer rail.
+ */
+function pruneInnermostLayer(
+  attemptLayers: readonly SteeringConfig[],
+  initial: MergeResult,
+  builtinTrackers: readonly string[],
+  layerIndex: number,
+): { result: MergeResult; notices: SteeringDiagnostic[] } | null {
+  const [inner, ...outer] = attemptLayers;
+  if (inner === undefined) return null;
+  let current = inner;
+  let result = initial;
+  let errors = errorCount(result);
+  const notices: SteeringDiagnostic[] = [];
+  while (errors > 0) {
+    let improved = false;
+    for (const unit of layerUnits(current)) {
+      const candidate = unit.without(current);
+      const trial = mergeWithTrialBuild([candidate, ...outer], builtinTrackers);
+      const trialErrors = errorCount(trial);
+      if (trialErrors >= errors) continue;
+      const gone = result.diagnostics.filter(
+        (d) =>
+          d.type === "error" &&
+          !trial.diagnostics.some(
+            (t) => t.type === "error" && t.message === d.message,
+          ),
+      );
+      notices.push({
+        type: "info",
+        kind: "layer-part-dropped-on-error",
+        message:
+          `dropping ${unit.label} from config layer #${layerIndex} after an ` +
+          "error-class diagnostic; the rest of that layer and every outer " +
+          "layer still load (an inner layer must not be able to leave the " +
+          `session unsteered). Dropped error: ${gone[0]?.message ?? "unknown"}`,
+      });
+      current = candidate;
+      result = trial;
+      errors = trialErrors;
+      improved = true;
+      break;
+    }
+    if (!improved) return null;
+  }
+  return { result, notices };
+}
+
+/**
+ * Prepare the evaluator inputs exactly as the session runtime does:
+ * disabled rules filtered out, plugin observers / exemptions finalised.
+ * Shared by {@link buildSessionRuntime} and the trial build below so the
+ * two can never disagree.
+ */
+function prepareEvaluatorInputs(
+  merged: SteeringConfig,
+  resolved: ResolvedPluginState,
+): {
+  filteredConfig: SteeringConfig;
+  filteredResolved: ResolvedPluginState;
+  userKept: ReturnType<typeof finalizePluginState>["userKept"];
+} {
+  const disabled = new Set(merged.disabledRules ?? []);
+  const filteredConfig: SteeringConfig = { ...merged };
+  if (merged.rules !== undefined) {
+    const kept = merged.rules.filter((r) => !disabled.has(r.name));
+    if (kept.length > 0) filteredConfig.rules = kept;
+    else delete filteredConfig.rules;
+  }
+
+  const { pluginKept, userKept } = finalizePluginState(
+    filteredConfig.rules ?? [],
+    resolved.rules,
+    filteredConfig.observers ?? [],
+    resolved.observers,
+    filteredConfig.exemptions ?? [],
+    resolved.exemptions ?? [],
+  );
+  const filteredResolved = {
+    ...resolved,
+    observers: [...pluginKept],
+  };
+  return { filteredConfig, filteredResolved, userKept };
+}
+
+/** Host for a trial build: construction never execs or appends. */
+const TRIAL_HOST: EvaluatorHost = {
+  exec: () => Promise.reject(new Error("trial build host: no exec")),
+  appendEntry: () => {},
+};
+
+/**
+ * {@link mergeLayersOnce}, plus — when an inner layer is present and the
+ * merge is otherwise clean — a trial evaluator / dispatcher build. The
+ * evaluator validates `when:` clauses (unknown predicate keys, empty
+ * clauses, `onUnknown` in an exemption) by THROWING, which the bridge
+ * cannot tell from an engine crash, so a project rule naming a predicate
+ * nobody registers used to disarm every rail. Here the throw becomes an
+ * error-class `evaluator-build-failed` diagnostic that the drop logic
+ * can attribute. A single (outermost) layer is not trial-built: its
+ * failure surfaces exactly as before.
+ */
+function mergeWithTrialBuild(
+  layers: readonly SteeringConfig[],
+  builtinTrackers: readonly string[],
+): MergeResult {
+  const result = mergeLayersOnce(layers, builtinTrackers);
+  if (layers.length <= 1 || result.resolved === null) return result;
+  if (result.diagnostics.some((d) => d.type === "error")) return result;
+  try {
+    const { filteredConfig, filteredResolved, userKept } =
+      prepareEvaluatorInputs(result.merged, result.resolved);
+    buildEvaluator(filteredConfig, filteredResolved, TRIAL_HOST);
+    buildObserverDispatcher(filteredResolved, userKept, TRIAL_HOST);
+    return result;
+  } catch (err) {
+    const body = err instanceof Error ? err.message : String(err);
+    return {
+      ...result,
+      diagnostics: [
+        ...result.diagnostics,
+        { type: "error", kind: "evaluator-build-failed", message: body },
+      ],
+    };
   }
 }
 
@@ -285,6 +524,13 @@ export async function buildSessionRuntime(
 ): Promise<{
   evaluator: EvaluatorRuntime;
   dispatcher: ObserverDispatcher;
+  /**
+   * Single-line renders of the diagnostics the bridge must also raise
+   * IN-CHAT (see {@link IN_CHAT_KINDS}): a dropped layer or declaration,
+   * a project layer that moved the agent dir, a pin mismatch. Already
+   * printed with `console.warn`.
+   */
+  notices: string[];
 }> {
   const aggregated: SteeringDiagnostic[] = [];
 
@@ -308,6 +554,18 @@ export async function buildSessionRuntime(
     diagnostics: mergeAndResolveDiagnostics,
   } = runMergerPipeline(rawLayers, EVALUATOR_BUILTIN_TRACKERS);
   aggregated.push(...mergeAndResolveDiagnostics);
+
+  // Loud drops: the drop breadcrumbs are info-class in the stream (so
+  // strict mode cannot turn a drop into a full disarm), but losing a
+  // repo's rails must never be silent — console.warn here, in-chat via
+  // the bridge (lens round 2: functional F2, trust F2, red-team F5).
+  const notices: string[] = [];
+  for (const d of aggregated) {
+    if (!IN_CHAT_KINDS.has(d.kind)) continue;
+    const line = formatSingleLineDiagnostic(d);
+    notices.push(line);
+    if (d.type === "info") console.warn(line);
+  }
 
   const failOnWarnings = merged.failOnWarnings;
   const treatWarningsAsErrors = failOnWarnings !== false;
@@ -333,28 +591,12 @@ export async function buildSessionRuntime(
     throw new Error("internal: resolved null without error diagnostic");
   }
 
-  const disabled = new Set(merged.disabledRules ?? []);
-  const filteredConfig: SteeringConfig = { ...merged };
-  if (merged.rules !== undefined) {
-    const kept = merged.rules.filter((r) => !disabled.has(r.name));
-    if (kept.length > 0) filteredConfig.rules = kept;
-    else delete filteredConfig.rules;
-  }
-
-  const { pluginKept, userKept } = finalizePluginState(
-    filteredConfig.rules ?? [],
-    resolved.rules,
-    filteredConfig.observers ?? [],
-    resolved.observers,
-    filteredConfig.exemptions ?? [],
-    resolved.exemptions ?? [],
+  const { filteredConfig, filteredResolved, userKept } = prepareEvaluatorInputs(
+    merged,
+    resolved,
   );
-  const filteredResolved = {
-    ...resolved,
-    observers: [...pluginKept],
-  };
 
   const evaluator = buildEvaluator(filteredConfig, filteredResolved, host);
   const dispatcher = buildObserverDispatcher(filteredResolved, userKept, host);
-  return { evaluator, dispatcher };
+  return { evaluator, dispatcher, notices };
 }

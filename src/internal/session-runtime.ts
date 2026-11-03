@@ -154,8 +154,8 @@ export function runMergerPipeline(
   // Fail-safe drop: an error-class diagnostic from an INNER layer must
   // not leave the session unsteered. First the offending DECLARATIONS
   // of the innermost layer are dropped (a plugin, a rule, an observer,
-  // an exemption or a disabledPlugins entry — one at a time, each kept
-  // out only when that strictly reduces the error count) so the rest of
+  // an exemption or a disabledPlugins entry — one at a time, in the
+  // preference order of pruneInnermostLayer) so the rest of
   // that layer still loads; only when no such pruning makes the merge
   // clean is the whole layer dropped (innermost first). Each drop is a
   // `layer-part-dropped-on-error` / `layer-dropped-on-error` breadcrumb
@@ -332,7 +332,21 @@ function layerUnits(layer: SteeringConfig): LayerUnit[] {
  *   3. else the first removal that makes a current error disappear
  *      without raising the count.
  * Every accepted removal takes one declaration out, so the loop ends
- * after at most as many passes as the layer has declarations. It stops
+ * after at most as many passes as the layer has declarations.
+ *
+ * Cost (lens round 4, functional F3): each pass tries FIRST the
+ * declarations whose own name appears in a current error message, and
+ * when one of them reaches preference 1 or 2 it is accepted without
+ * trying the rest. The evaluator-build class names its fault, so a layer
+ * with n such faults costs about n trial builds instead of n² (200
+ * unknown-predicate rules: one trial per pass). The full scan of every
+ * declaration runs only when no named declaration helps (an unnamed
+ * fault, or preference 3), which is where the quadratic bound — at most
+ * n passes of n trials — still applies. Preferring a named removal that
+ * clears its own error can, in principle, pick it over an unnamed
+ * removal elsewhere that would have cleared more errors in one step;
+ * the next pass then handles what is left, so the outcome differs only
+ * in which declarations are dropped, each one printed. It stops
  * when the merge is clean (success) or when no removal helps (null → the
  * caller drops the layer). Removing an inner declaration only ever moves
  * the merge toward the outer layers alone, so it cannot weaken an outer
@@ -373,7 +387,15 @@ function pruneInnermostLayer(
       trial: MergeResult;
       gone: string[];
     } | null = null;
-    for (const unit of units) {
+    const named = (u: LayerUnit) =>
+      errorMessages.some((m) => m.includes(`"${u.name}"`));
+    const namedUnits = units.filter(named);
+    const ordered = [...namedUnits, ...units.filter((u) => !named(u))];
+    for (const [i, unit] of ordered.entries()) {
+      // Every named declaration has been tried: a removal that clears
+      // its own error (or lowers the count) is taken without scanning
+      // the rest (functional F3: the full scan made n faults cost n²).
+      if (i === namedUnits.length && (best?.rank ?? 0) >= 2) break;
       let candidate: SteeringConfig;
       try {
         candidate = unit.without(current);
@@ -455,6 +477,16 @@ function prepareEvaluatorInputs(
   return { filteredConfig, filteredResolved, userKept };
 }
 
+/** Merge attempts since the last reset; TEST-ONLY cost probe. */
+let mergeAttempts = 0;
+
+/** TEST-ONLY: read and reset the merge-attempt counter. */
+export function takeMergeAttemptsForTests(): number {
+  const n = mergeAttempts;
+  mergeAttempts = 0;
+  return n;
+}
+
 /** Host for a trial build: construction never execs or appends. */
 const TRIAL_HOST: EvaluatorHost = {
   exec: () => Promise.reject(new Error("trial build host: no exec")),
@@ -469,14 +501,20 @@ const TRIAL_HOST: EvaluatorHost = {
  * cannot tell from an engine crash, so a project rule naming a predicate
  * nobody registers used to disarm every rail. Here the throw becomes an
  * error-class `evaluator-build-failed` diagnostic that the drop logic
- * can attribute. A single (outermost) layer is not trial-built: its
- * failure surfaces exactly as before.
+ * can attribute. A single (outermost) layer is not trial-built: a
+ * `when:` clause it gets wrong still throws from the session build as
+ * before. A config object that throws while it is READ is caught for
+ * every layer count, a single layer included, and becomes a
+ * `layer-merge-failed` error diagnostic (so the session build aborts
+ * with an aggregated "1 config issue" instead of an escaping extension
+ * error — loud either way, unsteered either way).
  */
 function mergeWithTrialBuild(
   layers: readonly SteeringConfig[],
   builtinTrackers: readonly string[],
   opts: { forceTrial?: boolean } = {},
 ): MergeResult {
+  mergeAttempts += 1;
   let result: MergeResult;
   try {
     result = mergeLayersOnce(layers, builtinTrackers);

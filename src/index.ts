@@ -17,6 +17,7 @@ import { processAgentDir } from "./internal/agent-dir-snapshot.ts";
 import {
   buildSessionRuntime,
   formatSingleLineDiagnostic,
+  IN_CHAT_KINDS,
 } from "./internal/session-runtime.ts";
 
 /**
@@ -95,8 +96,10 @@ export default function register(
   // steering load, and reused by every later factory call (each /reload
   // re-runs it). A project layer that assigns PI_CODING_AGENT_DIR / HOME
   // at import time (lens round 2) or later, from a timer (lens round 3,
-  // red-team F1), must not move the global layer; a drift is restored
-  // and raised in-chat at session_start.
+  // red-team F1), must not move the global layer. Round 4: every
+  // snapshotted variable (PI_CODING_AGENT_DIR, HOME, USERPROFILE) is
+  // compared on its own, so a HOME-only move is caught too; a drift is
+  // restored here and raised in-chat at session_start.
   const { agentDir, drift } = processAgentDir();
 
   pi.on("agent_start", () => {
@@ -106,14 +109,12 @@ export default function register(
   pi.on("session_start", async (_event, ctx: ExtensionContext) => {
     if (runtime !== null) return; // safety net; fresh instance per session anyway
     const ui = ctx.ui; // capture BEFORE await (getter asserts active)
+    // The drift diagnostic takes the same route as the runtime's
+    // IN_CHAT_KINDS notices: console now, in-chat with the load summary.
     const driftNotice =
-      drift === null
-        ? null
-        : formatSingleLineDiagnostic({
-            type: "warning",
-            kind: "agent-dir-env-drift",
-            message: drift,
-          });
+      drift !== null && IN_CHAT_KINDS.has(drift.kind)
+        ? formatSingleLineDiagnostic(drift)
+        : null;
     if (driftNotice !== null) console.warn(driftNotice);
     try {
       // Capture pi's resolved project-trust decision BEFORE the await
@@ -286,6 +287,15 @@ export { INFO_FLAGS } from "./helpers/flags.ts";
 // `if (ctx.walkerState?.cwd === "unknown") return "unknown";`,
 // then the engine projects via `onUnknown:` policy).
 export { walkerUnknownCwdReason } from "./helpers/walker-unknown-cwd-reason.ts";
+/**
+ * The agent dir and home directory as they were at the FIRST steering
+ * load in this process. A global layer that derives a path from the home
+ * directory should read `homeDir` here rather than call `homedir()`: the
+ * layer is re-evaluated on every load, and a fresh read follows whatever
+ * `HOME` earlier config code left behind. Read-only (never restores or
+ * reports; the extension does that at each load).
+ */
+export { agentDirSnapshot } from "./internal/agent-dir-snapshot.ts";
 // Loader — two-layer config discovery + merge.
 export { buildConfig, loadConfigs, loadSteeringConfig } from "./loader.ts";
 // Schema types — the public authoring surface.

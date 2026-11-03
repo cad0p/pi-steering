@@ -23,7 +23,7 @@ import {
   readFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createJiti } from "jiti";
 import { EVALUATOR_BUILTIN_TRACKERS } from "./evaluator.ts";
@@ -192,8 +192,40 @@ export interface LoadConfigsOptions {
   globalLayerPin?: string;
 }
 
-/** Env keys that locate the global layer (`homedir()` reads `HOME`). */
-const AGENT_DIR_ENV_KEYS = ["PI_CODING_AGENT_DIR", "HOME"] as const;
+/**
+ * Env keys that locate the global layer, or that the global layer reads
+ * through `homedir()`: `PI_CODING_AGENT_DIR`, and the home directory
+ * (`homedir()` reads `HOME` on POSIX and `USERPROFILE` on Windows).
+ * Nothing else is read on that path: no XDG variable locates the agent
+ * dir (pi's `getAgentDir()` reads the same two). Shared with the
+ * process snapshot (internal/agent-dir-snapshot.ts) so the import-time
+ * check and the per-load drift check watch the same keys.
+ */
+export const AGENT_DIR_ENV_KEYS = [
+  "PI_CODING_AGENT_DIR",
+  "HOME",
+  "USERPROFILE",
+] as const;
+
+/**
+ * Normal form of a path-valued env variable, for comparing two values
+ * of it: unset and empty are the same (pi and `homedir()` both ignore an
+ * empty value), a trailing slash, `.` / `..` segments and doubled
+ * slashes do not count as a change, a relative value is made absolute.
+ * A `~`-prefixed value keeps its `~` (its expansion depends on the home
+ * directory, which is compared on its own key). Exported for tests.
+ */
+export function normalizeEnvPath(
+  value: string | undefined,
+): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (value === "~") return value;
+  if (value.startsWith("~/")) {
+    const rest = normalize(value.slice(1)).replace(/\/+$/, "");
+    return `~${rest}`;
+  }
+  return resolve(value);
+}
 
 /**
  * jiti's id-relative default cache resolution (prepareCacheDir) treats
@@ -406,7 +438,8 @@ export async function loadConfigs(
   // process (/new, /reload) and pi itself would otherwise follow it.
   for (const [i, key] of AGENT_DIR_ENV_KEYS.entries()) {
     const before = envBefore[i];
-    if (process.env[key] === before) continue;
+    if (normalizeEnvPath(process.env[key]) === normalizeEnvPath(before))
+      continue;
     diagnostics.push({
       type: "warning",
       kind: "agent-dir-env-mutated",

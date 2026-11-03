@@ -25,6 +25,13 @@
 //   - functional F2/F3, red-team F4: import failures in-chat, a throwing
 //     accessor attributed, outer errors not blamed on the project layer,
 //     one in-chat summary per load.
+//
+// Lens round 4:
+//   - red-team F1 = functional F2: the drift check compared the RESOLVED
+//     agent dir, so a timer that pinned PI_CODING_AGENT_DIR and moved
+//     HOME was neither restored nor warned, and a trailing slash was
+//     drift. Now every snapshotted key is compared on its own, normalised.
+//   - functional F3: n named faults cost n² trial builds; now about n.
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -41,12 +48,15 @@ import {
   makeNotifyRecorder,
   useIsolatedHome,
 } from "./__test-helpers__.ts";
-import register, { summarizeNotices } from "./index.ts";
+import register, { agentDirSnapshot, summarizeNotices } from "./index.ts";
+import { processAgentDir } from "./internal/agent-dir-snapshot.ts";
 import {
   buildSessionRuntime,
+  IN_CHAT_KINDS,
   runMergerPipeline,
+  takeMergeAttemptsForTests,
 } from "./internal/session-runtime.ts";
-import { loadSteeringConfig } from "./loader.ts";
+import { loadSteeringConfig, normalizeEnvPath } from "./loader.ts";
 
 const GLOBAL = `export default {
   rules: [
@@ -581,5 +591,120 @@ describe("round 3: loud, attributed, summarized (functional F2/F3, red-team F4)"
     const many = summarizeNotices(["1", "2", "3", "4", "5", "6"]) ?? "";
     assert.match(many, /6 steering notices/);
     assert.match(many, /and 1 more/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lens round 4
+// ---------------------------------------------------------------------------
+
+describe("round 4: drift is checked per KEY (red-team F1 = functional F2)", () => {
+  setup("pi-steering-r4-drift-");
+
+  it("a timer that leaves PI_CODING_AGENT_DIR pinned and moves HOME only is restored and warned; the snapshot home is unchanged", async () => {
+    const agentDir = writeGlobal();
+    // The runner pinned the agent dir to the real one (as a launcher or a
+    // test harness does); the resolution therefore never moves.
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const rogueHome = mkdtempSync(join(home, "roguehome-"));
+    const project = writeProject(
+      `setTimeout(() => { process.env.HOME = ${JSON.stringify(rogueHome)}; }, 0);
+      export default {};`,
+    );
+    const first = makeMockPi();
+    register(first.api as unknown as ExtensionAPI);
+    await fireSessionStart(first, project, "startup", makeNotifyRecorder());
+    assert.equal(agentDirSnapshot().homeDir, home);
+    await tick();
+    assert.equal(process.env.HOME, rogueHome, "precondition: HOME moved");
+    assert.equal(
+      agentDirSnapshot().homeDir,
+      home,
+      "the snapshot home does not follow the timer",
+    );
+    const second = makeMockPi();
+    register(second.api as unknown as ExtensionAPI);
+    assert.equal(process.env.HOME, home, "HOME restored at the next load");
+    const notify = makeNotifyRecorder();
+    await fireSessionStart(second, project, "reload", notify);
+    assert.equal((await fireBash(second, "echo hi", project))?.block, true);
+    assert.ok(
+      notify.messages.some((m) =>
+        /process\.env\.HOME changed after the first steering load[\s\S]*still resolved to the same agent dir/.test(
+          m,
+        ),
+      ),
+      `in-chat HOME drift expected; got ${JSON.stringify(notify)}`,
+    );
+    assert.ok(warns.some((w) => /process\.env\.HOME changed/.test(w)));
+    await tick(); // the second import's timer fires; afterEach restores HOME
+  });
+
+  it("a trailing-slash respelling of the same dir is not drift", () => {
+    const agentDir = writeGlobal();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    assert.equal(processAgentDir().drift, null);
+    process.env.PI_CODING_AGENT_DIR = `${agentDir}/`;
+    assert.equal(processAgentDir().drift, null);
+    process.env.PI_CODING_AGENT_DIR = `${agentDir}//.`;
+    assert.equal(processAgentDir().drift, null);
+    process.env.HOME = `${home}/`;
+    assert.equal(processAgentDir().drift, null);
+    process.env.HOME = home;
+  });
+
+  it("the drift diagnostic is produced as agent-dir-env-drift, an IN_CHAT kind", () => {
+    writeGlobal();
+    processAgentDir();
+    process.env.PI_CODING_AGENT_DIR = rogueAgentDir();
+    const { drift } = processAgentDir();
+    assert.equal(drift?.kind, "agent-dir-env-drift");
+    assert.equal(drift?.type, "warning");
+    assert.ok(IN_CHAT_KINDS.has(drift.kind));
+    assert.match(drift.message, /it resolved to .*evilagent-/);
+    assert.equal(process.env.PI_CODING_AGENT_DIR, undefined, "restored");
+  });
+
+  it("normalizeEnvPath: unset = empty, trailing slash and dot segments ignored, ~ kept", () => {
+    assert.equal(normalizeEnvPath(undefined), undefined);
+    assert.equal(normalizeEnvPath(""), undefined);
+    assert.equal(normalizeEnvPath("/a/b/"), "/a/b");
+    assert.equal(normalizeEnvPath("/a//b/./"), "/a/b");
+    assert.equal(normalizeEnvPath("~/x/"), "~/x");
+    assert.equal(normalizeEnvPath("~"), "~");
+  });
+});
+
+describe("round 4: the granular drop is near-linear on named faults (functional F3)", () => {
+  setup("pi-steering-r4-cost-");
+
+  it("200 unknown-predicate rules beside a valid rule: all dropped, the valid rule stays, about one trial per fault", async () => {
+    writeGlobal();
+    const n = 200;
+    const typos = Array.from(
+      { length: n },
+      (_, i) =>
+        `{ name: "typo-${i}", tool: "bash", command: "ls", when: { bogus${i}: true }, reason: "x" }`,
+    );
+    const project = writeProject(
+      `export default { rules: [{ name: "repo-keep", tool: "bash", command: "printf", reason: "keep" }, ${typos.join(", ")}] };`,
+    );
+    takeMergeAttemptsForTests();
+    const runtime = await buildSessionRuntime(project, host);
+    const attempts = takeMergeAttemptsForTests();
+    const ctx = makeCtx(project);
+    assert.equal(
+      (await runtime.evaluator.evaluate(bash("printf x"), ctx, 0))?.block,
+      true,
+    );
+    assert.equal(
+      runtime.notices.filter((m) => /dropping rule "typo-/.test(m)).length,
+      n,
+    );
+    assert.ok(!runtime.notices.some((m) => /dropping config layer #0/.test(m)));
+    // Round 3 tried every remaining declaration per pass (about n²/2 =
+    // 20 000 merges here); now one named trial per pass plus the
+    // initial merge and the outer-alone check.
+    assert.ok(attempts <= 3 * n, `${attempts} merge attempts for ${n} faults`);
   });
 });

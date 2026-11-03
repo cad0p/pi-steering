@@ -182,6 +182,12 @@ export function validateUserConfigNames(
       const d = validateName("rule", exemption.rule, "exemption");
       if (d !== undefined) diagnostics.push(d);
     }
+    // lockedRules names surface in `locked-rule-violation` messages and
+    // in `pi-steering list`; validate them like disabledRules names.
+    for (const name of layer.lockedRules ?? []) {
+      const d = validateName("rule", name, "lockedRules");
+      if (d !== undefined) diagnostics.push(d);
+    }
   }
   return diagnostics;
 }

@@ -606,6 +606,9 @@ function renderListJSON(
       rules: config.disabledRules ?? [],
       plugins: config.disabledPlugins ?? [],
     },
+    // Additive `lockedRules` key: rules a layer owns, i.e. names no
+    // other layer could disable/override/exempt (see the schema docs).
+    lockedRules: config.lockedRules ?? [],
     defaultNoOverride: config.defaultNoOverride ?? null,
     projectLayerTrusted,
   };
@@ -618,6 +621,7 @@ function emptyListJSON(projectLayerTrusted: boolean): unknown {
     userObservers: [],
     exemptions: [],
     disabled: { rules: [], plugins: [] },
+    lockedRules: [],
     defaultNoOverride: null,
     projectLayerTrusted,
   };
@@ -733,6 +737,12 @@ function renderListText(config: SteeringConfig): string {
     if (disabledPlugins.length > 0) {
       lines.push(`Disabled plugins: ${disabledPlugins.join(", ")}`);
     }
+  }
+  // Locked block — rendered ONLY when non-empty so the pinned
+  // empty-case output stays byte-identical.
+  const locked = config.lockedRules ?? [];
+  if (locked.length > 0) {
+    lines.push(`Locked rules: ${locked.join(", ")}`);
   }
   lines.push("");
 

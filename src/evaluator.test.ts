@@ -418,6 +418,61 @@ describe("buildEvaluator: requires/unless as PredicateFn", () => {
     assert.equal(seen[1]!.agentLoopIndex, 4);
   });
 
+  it("bash predicates see ctx.rawCommand (redirects included); write/edit see it absent", async () => {
+    // `input.command` is the per-ref view: a redirect target is not a
+    // ref, so `echo hi > f` arrives as `echo hi`. Guards that decide by
+    // the FILE a shell line writes need the raw tool_call text.
+    const bashSeen: Array<string | undefined> = [];
+    const bashRule: Rule = {
+      name: "raw-cmd-bash",
+      tool: "bash",
+      command: "echo",
+      reason: "raw-cmd-bash",
+      requires: (ctx) => {
+        bashSeen.push(ctx.rawCommand);
+        return false;
+      },
+    };
+    const writeSeen: Array<string | undefined> = [];
+    const writeRule: Rule = {
+      name: "raw-cmd-write",
+      tool: "write",
+      field: "path",
+      pattern: /.*/,
+      reason: "raw-cmd-write",
+      requires: (ctx) => {
+        writeSeen.push(ctx.rawCommand);
+        return false;
+      },
+    };
+    const evaluator = buildEvaluator(
+      { rules: [bashRule, writeRule] },
+      resolve(),
+      makeHost(),
+    );
+
+    const raw = "echo hi > /repo/.pi/steering/index.ts";
+    await evaluator.evaluate(bashEvent(raw), makeCtx("/repo"), 0);
+    assert.deepEqual(bashSeen, [raw], "rawCommand carries the redirect");
+    assert.deepEqual(writeSeen, [], "the write rule does not route an echo");
+    assert.equal(
+      (bashSeen[0] ?? "").includes(".pi/steering/index.ts"),
+      true,
+      "the file being written is visible only through rawCommand",
+    );
+
+    await evaluator.evaluate(
+      writeEvent("/repo/x.ts", "x"),
+      makeCtx("/repo"),
+      1,
+    );
+    assert.deepEqual(
+      writeSeen,
+      [undefined],
+      "write candidates have no rawCommand (no shell)",
+    );
+  });
+
   it("requires-fn sync throw projects to satisfied: rule fires, single warn", async () => {
     const rule: Rule = {
       name: "req-throws",

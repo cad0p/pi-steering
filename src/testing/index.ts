@@ -571,6 +571,16 @@ export interface MockContextOptions {
   readonly descriptors?: Readonly<
     Record<string, import("../schema.ts").CLIDescriptor>
   >;
+
+  /**
+   * Full tool_call command text for a bash candidate — mirrors
+   * {@link PredicateContext.rawCommand} (redirects / heredoc bodies
+   * included). Omitted: the field stays absent, exactly as a write /
+   * edit candidate sees it. Tests that exercise a guard reading
+   * `ctx.rawCommand` should set this to the same string they passed as
+   * `input.command` plus any redirect they want visible.
+   */
+  readonly rawCommand?: string;
 }
 
 /**
@@ -640,6 +650,9 @@ export function mockContext(
     tool,
     input,
     command: commandFromInput(input, mockArity),
+    ...(options.rawCommand !== undefined
+      ? { rawCommand: options.rawCommand }
+      : {}),
     agentLoopIndex,
     exec: buildExec(options.exec, "mockContext"),
     appendEntry: createAppendEntry(bufferingHost, agentLoopIndex),

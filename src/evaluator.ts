@@ -886,6 +886,11 @@ async function runPredicateChain(
       tool: cand.tool,
       input: cand.input,
       command: commandFromInput(cand.input, arity),
+      // Bash only: the FULL tool_call text, redirects and heredoc bodies
+      // included. `input.command` is the per-ref view and deliberately
+      // drops them, so a "which file does this shell write" guard needs
+      // this field. Write / edit have no shell — the field is absent.
+      ...(cand.tool === "bash" ? { rawCommand: cand.overrideCarrier } : {}),
       agentLoopIndex: shared.agentLoopIndex,
       exec: shared.exec,
       appendEntry: shared.appendEntry,

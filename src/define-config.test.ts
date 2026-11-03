@@ -563,6 +563,24 @@ describe("defineConfig: rule + plugin name unions track declared plugins", () =>
     assert.deepEqual(cfg.disabledRules, ["no-force-push"]);
   });
 
+  it("lockedRules uses the same rule-name union as disabledRules", () => {
+    const cfg = defineConfig({
+      plugins: [shippedGitPlugin],
+      lockedRules: ["no-main-commit", "no-force-push"],
+    });
+    assert.deepEqual(cfg.lockedRules, ["no-main-commit", "no-force-push"]);
+  });
+
+  it("lockedRules rejects a typo'd rule name (compile error)", () => {
+    // An inert lock protects nothing, so a typo must not compile.
+    defineConfig({
+      plugins: [shippedGitPlugin],
+      // @ts-expect-error — "no-main-commit-typo" is not a rule name of the
+      // declared git plugin (same universe as disabledRules).
+      lockedRules: ["no-main-commit-typo"],
+    });
+  });
+
   it("disabledRules rejects an ex-default name WITHOUT its shipping plugin (compile error)", () => {
     const cfg = defineConfig({
       plugins: [shippedRmPlugin],

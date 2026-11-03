@@ -1998,6 +1998,23 @@ export interface PredicateContext {
   command: SteeringCommand;
 
   /**
+   * FULL tool_call command text for a `bash` rule — the same string
+   * scanned for `# steering-override:` comments — including the parts
+   * the per-ref {@link PredicateToolInput.command} deliberately drops:
+   * output redirects (`echo x > f`), heredoc bodies, and the untouched
+   * segments around `&&` / `;`.
+   *
+   * Why it exists: a redirect target is NOT a ref, so a bash rule
+   * routed on the writer (`echo`, `cat`, `sh`) cannot see the file it
+   * writes through `input.command`. A guard whose subject is "which
+   * FILE does this shell line write" reads this field; guards that need
+   * the parsed argv keep using `input.command` / `ctx.command`.
+   *
+   * Absent for `write` / `edit` rules (there is no shell).
+   */
+  rawCommand?: string;
+
+  /**
    * Engine-maintained agent-loop counter (bumped on each pi
    * `agent_start` event). See {@link ObserverContext.agentLoopIndex}.
    */
@@ -2360,6 +2377,43 @@ export interface SteeringConfig {
   disabledPlugins?: readonly string[];
 
   /**
+   * Rules this layer OWNS: no other config layer may remove them.
+   * Additive union across layers; the protection is per-layer, so a
+   * layer may still disable / exempt a rule it locked itself.
+   *
+   * A locked rule survives, at the loader merge, every cross-layer
+   * disarm path that would otherwise be silent:
+   *
+   *   - `disabledRules` naming it in another layer;
+   *   - `disabledPlugins` naming the plugin that ships it;
+   *   - a same-name `rules` entry in another layer (the documented
+   *     "project overrides by name" path — refused for a locked name);
+   *   - an `exemptions` clause in another layer targeting it (the
+   *     registry accumulates across layers by design);
+   *   - a `failOnWarnings` escalation, which would turn the refusal
+   *     diagnostic itself into a thrown abort that builds no runtime;
+   *   - a `defaultNoOverride: false`, which would make every rule
+   *     overridable by a `# steering-override: <rule>` comment.
+   *     For both booleans, a lock-declaring layer's explicit value
+   *     governs while locks are present.
+   *
+   * Each refusal is loud: a warning-class `locked-rule-violation`
+   * diagnostic names the rule, the refusing layer and the lock owner,
+   * and the rule stays ACTIVE. Warning-class — not error-class — on
+   * purpose: error-class diagnostics abort the session and would let a
+   * project layer disarm every rail by provoking one.
+   *
+   * Scope: this is config-load integrity, not a trust boundary. It
+   * stops a config LAYER from disarming a rail; it does not stop a
+   * write to `.pi/steering/` from replacing the global config file
+   * itself (a write guard is a separate, global-layer rule).
+   *
+   * Inside `defineConfig`, names are typo-checked against the same
+   * rule-name union as {@link disabledRules}.
+   */
+  lockedRules?: readonly string[];
+
+  /**
    * Strict-mode opt-out. When `true` (default), any warning-class
    * {@link SteeringDiagnostic} produced while loading the config
    * escalates to a thrown error that disables the bridge for the
@@ -2599,6 +2653,18 @@ export type SteeringDiagnosticKind =
    * state-dimension claims).
    */
   | "descriptor-collision"
+  /**
+   * Another layer tried to disarm a rule this layer locked via
+   * {@link SteeringConfig.lockedRules}: it named the rule in
+   * `disabledRules`, disabled the plugin that ships it, redefined the
+   * rule by name, added an `exemptions` clause targeting it, or tried
+   * to change `failOnWarnings` while locks are present. Warning-class
+   * (see the field docs for why it cannot be error-class) and the
+   * refusal ALWAYS takes effect: the rule stays active, the plugin
+   * stays loaded, the locked definition wins, the exemption is
+   * dropped, and the lock-declaring layer's warning policy governs.
+   */
+  | "locked-rule-violation"
   /**
    * A plugin's `cliDescriptors` entry is malformed (non-object
    * descriptor, malformed `flags` table, invalid

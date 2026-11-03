@@ -461,16 +461,23 @@ function mergePlugins(
  * collisions stay silent: overriding a rule by name is the documented
  * customization path.
  *
+ * LOCKED NAMES are the exception: a rule locked by one layer
+ * ({@link SteeringConfig.lockedRules}) cannot be redefined by another
+ * layer. The lock-declaring layer's definition wins in either layer
+ * order, and the refused override is a warning-class
+ * `locked-rule-violation` diagnostic instead of a silent shadow.
+ *
  * Disabled rules are merged but exempt from collision detection (see
  * {@link mergePlugins} for rationale).
  */
 function mergeRules(
   layers: readonly SteeringConfig[],
   disabledRules: ReadonlySet<string>,
+  locks: LockState,
   diagnostics: SteeringDiagnostic[],
 ): Rule[] {
-  const byName = new Map<string, Rule>();
-  for (const layer of layers) {
+  const byName = new Map<string, { rule: Rule; layer: number }>();
+  for (const [layerIndex, layer] of layers.entries()) {
     if (!layer.rules) continue;
     const seenInLayer = new Set<string>();
     for (const rule of layer.rules) {
@@ -487,12 +494,41 @@ function mergeRules(
         continue;
       }
       seenInLayer.add(rule.name);
-      if (!byName.has(rule.name)) {
-        byName.set(rule.name, rule);
+      const existing = byName.get(rule.name);
+      if (existing === undefined) {
+        byName.set(rule.name, { rule, layer: layerIndex });
+        continue;
+      }
+      const owners = locks.owners.get(rule.name);
+      if (owners === undefined) continue;
+      const existingLocked = owners.has(existing.layer);
+      const incomingLocked = owners.has(layerIndex);
+      if (incomingLocked && !existingLocked) {
+        // Keep the insertion slot, swap in the locked definition.
+        byName.set(rule.name, { rule, layer: layerIndex });
+        diagnostics.push({
+          type: "warning",
+          kind: "locked-rule-violation",
+          message:
+            `refusing an override of locked rule "${rule.name}" from ` +
+            `${describeLayers([existing.layer])} (locked by ` +
+            `${describeLayers([layerIndex])}); the locked definition wins.`,
+        });
+        continue;
+      }
+      if (existingLocked && !incomingLocked) {
+        diagnostics.push({
+          type: "warning",
+          kind: "locked-rule-violation",
+          message:
+            `refusing an override of locked rule "${rule.name}" from ` +
+            `${describeLayers([layerIndex])} (locked by ` +
+            `${describeLayers([...owners])}); the locked definition wins.`,
+        });
       }
     }
   }
-  return [...byName.values()];
+  return [...byName.values()].map((entry) => entry.rule);
 }
 
 /**
@@ -534,7 +570,7 @@ function mergeObservers(
  */
 function mergeStringUnion(
   layers: readonly SteeringConfig[],
-  key: "disabledRules" | "disabledPlugins",
+  key: "disabledRules" | "disabledPlugins" | "lockedRules",
 ): string[] | undefined {
   const seen = new Set<string>();
   let any = false;
@@ -557,16 +593,250 @@ function mergeStringUnion(
  * deterministic output in tests. Duplicates are intentionally NOT
  * deduped: the registry has no collision concept, and evaluation is
  * idempotent under duplicates.
+ *
+ * LOCKED NAMES are the exception: an exemption targeting a rule locked
+ * by ANOTHER layer is dropped with a warning-class
+ * `locked-rule-violation` diagnostic. Otherwise a project layer could
+ * neutralise a global rail without touching `disabledRules` at all —
+ * the exemption registry accumulates across layers by design.
  */
 function mergeExemptions(
   layers: readonly SteeringConfig[],
+  locks: LockState,
+  diagnostics: SteeringDiagnostic[],
 ): Exemption[] | undefined {
   const out: Exemption[] = [];
-  for (const layer of layers) {
+  for (const [layerIndex, layer] of layers.entries()) {
     if (!layer.exemptions) continue;
-    out.push(...layer.exemptions);
+    for (const exemption of layer.exemptions) {
+      const owners = locks.owners.get(exemption.rule);
+      if (owners !== undefined && !owners.has(layerIndex)) {
+        diagnostics.push({
+          type: "warning",
+          kind: "locked-rule-violation",
+          message:
+            `refusing an exemption of locked rule "${exemption.rule}" from ` +
+            `${describeLayers([layerIndex])} (locked by ` +
+            `${describeLayers([...owners])}); the exemption is dropped.`,
+        });
+        continue;
+      }
+      out.push(exemption);
+    }
   }
   return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Lock bookkeeping for {@link buildConfig}.
+ *
+ * `lockedRules` is a LAYER-OWNED claim: a layer that lists a rule name
+ * says "no OTHER layer may disable it, redefine it, exempt it, or
+ * remove it by disabling the plugin that ships it". The claim is
+ * per-layer rather than global on purpose — a layer may still disable
+ * or exempt a rule it locked itself, because that is the owner editing
+ * their own config, not another layer overriding a rail.
+ */
+interface LockState {
+  /** Rule name → indices of the layers that lock it. */
+  owners: ReadonlyMap<string, ReadonlySet<number>>;
+  /** Indices of layers that declare at least one lock. */
+  declarers: readonly number[];
+}
+
+/**
+ * Collect every layer's `lockedRules` claim. Names are NOT validated
+ * here (see `validateUserConfigNames`): an unknown locked name is inert
+ * — it simply protects nothing.
+ */
+function collectLocks(layers: readonly SteeringConfig[]): LockState {
+  const owners = new Map<string, Set<number>>();
+  const declarers: number[] = [];
+  for (const [layerIndex, layer] of layers.entries()) {
+    const names = layer.lockedRules ?? [];
+    if (names.length > 0) declarers.push(layerIndex);
+    for (const name of names) {
+      const set = owners.get(name);
+      if (set === undefined) owners.set(name, new Set([layerIndex]));
+      else set.add(layerIndex);
+    }
+  }
+  return { owners, declarers };
+}
+
+/** Render layer indices for a diagnostic message. */
+function describeLayers(indices: readonly number[]): string {
+  const sorted = [...indices].sort((a, b) => a - b);
+  return sorted.length === 1
+    ? `layer #${sorted[0]}`
+    : `layers #${sorted.join(", #")}`;
+}
+
+/**
+ * Merge `disabledRules` across layers, minus disables a lock refuses.
+ *
+ * A disable is honored when EVERY layer that disables the rule also
+ * locks it (an owner disabling its own rail). Otherwise the disable is
+ * dropped and a warning-class `locked-rule-violation` diagnostic names
+ * both sides. The rule therefore stays ACTIVE, which is the only
+ * fail-safe outcome: a refused disable can never be mistaken for a
+ * working one.
+ */
+function mergeDisabledRules(
+  layers: readonly SteeringConfig[],
+  locks: LockState,
+  diagnostics: SteeringDiagnostic[],
+): string[] | undefined {
+  const disablers = new Map<string, number[]>();
+  for (const [layerIndex, layer] of layers.entries()) {
+    for (const name of layer.disabledRules ?? []) {
+      const list = disablers.get(name);
+      if (list === undefined) disablers.set(name, [layerIndex]);
+      else list.push(layerIndex);
+    }
+  }
+  if (disablers.size === 0) return undefined;
+  const kept: string[] = [];
+  for (const [name, indices] of disablers) {
+    const owners = locks.owners.get(name);
+    if (owners === undefined) {
+      kept.push(name);
+      continue;
+    }
+    const violating = indices.filter((index) => !owners.has(index));
+    if (violating.length === 0) {
+      kept.push(name); // owner disabling its own lock — honored
+      continue;
+    }
+    diagnostics.push({
+      type: "warning",
+      kind: "locked-rule-violation",
+      message:
+        `refusing to disable locked rule "${name}" from ` +
+        `${describeLayers(violating)} (locked by ` +
+        `${describeLayers([...owners])}); the rule stays active.`,
+    });
+  }
+  return kept.length > 0 ? kept : undefined;
+}
+
+/**
+ * Merge `disabledPlugins` across layers, minus disables a lock refuses.
+ *
+ * Disabling a plugin removes every rule it ships, so a locked rule
+ * would otherwise be disarmed through a plugin name instead of a rule
+ * name. A plugin disable is refused when the plugin ships a locked rule
+ * that the disabling layer does not own; the plugin stays ACTIVE and a
+ * warning-class `locked-rule-violation` diagnostic names both sides.
+ */
+function mergeDisabledPlugins(
+  layers: readonly SteeringConfig[],
+  locks: LockState,
+  diagnostics: SteeringDiagnostic[],
+): string[] | undefined {
+  const disablers = new Map<string, number[]>();
+  for (const [layerIndex, layer] of layers.entries()) {
+    for (const name of layer.disabledPlugins ?? []) {
+      const list = disablers.get(name);
+      if (list === undefined) disablers.set(name, [layerIndex]);
+      else list.push(layerIndex);
+    }
+  }
+  if (disablers.size === 0) return undefined;
+  // plugin name -> rule names it ships, from any layer that declares it
+  // (a plugin disabled in one layer is still declared somewhere).
+  const shipped = new Map<string, Set<string>>();
+  for (const layer of layers) {
+    for (const plugin of layer.plugins ?? []) {
+      const set = shipped.get(plugin.name) ?? new Set<string>();
+      for (const rule of plugin.rules ?? []) set.add(rule.name);
+      shipped.set(plugin.name, set);
+    }
+  }
+  const kept: string[] = [];
+  for (const [name, indices] of disablers) {
+    const rules = shipped.get(name);
+    const lockedRules =
+      rules === undefined
+        ? []
+        : [...rules].filter((rule) => locks.owners.has(rule));
+    if (lockedRules.length === 0) {
+      kept.push(name);
+      continue;
+    }
+    const violating = indices.filter((index) =>
+      lockedRules.some((rule) => !locks.owners.get(rule)?.has(index)),
+    );
+    if (violating.length === 0) {
+      kept.push(name); // owner disabling its own lock — honored
+      continue;
+    }
+    diagnostics.push({
+      type: "warning",
+      kind: "locked-rule-violation",
+      message:
+        `refusing to disable plugin "${name}" (ships locked ` +
+        `${lockedRules.length === 1 ? "rule" : "rules"} ` +
+        `${lockedRules.map((rule) => `"${rule}"`).join(", ")}) from ` +
+        `${describeLayers(violating)}; the plugin stays active.`,
+    });
+  }
+  return kept.length > 0 ? kept : undefined;
+}
+
+/**
+ * Resolve an inner-wins boolean that can itself disarm the rails:
+ *
+ *   - `failOnWarnings: true` turns ANY warning — including the very
+ *     diagnostic that reports a refused disable — into a thrown error
+ *     that builds no steering runtime at all;
+ *   - `defaultNoOverride: false` makes every rule overridable by a
+ *     `# steering-override: <rule>` comment, so an agent could walk
+ *     straight through a locked rule.
+ *
+ * When a layer declares locks, both values come from a lock-declaring
+ * layer, and a non-owning layer that asks for a different value is
+ * ignored with a warning-class `locked-rule-violation` diagnostic.
+ *
+ * When no lock-declaring layer sets the field, the ordinary inner-wins
+ * merge still applies (there is no owner value to protect).
+ */
+function resolveLockOwnedBool(
+  layers: readonly SteeringConfig[],
+  locks: LockState,
+  diagnostics: SteeringDiagnostic[],
+  key: "failOnWarnings" | "defaultNoOverride",
+): boolean | undefined {
+  if (locks.declarers.length === 0) {
+    return mergeBool(layers, key);
+  }
+  let ownerValue: boolean | undefined;
+  for (const index of locks.declarers) {
+    const value = layers[index]?.[key];
+    if (typeof value === "boolean") {
+      ownerValue = value;
+      break;
+    }
+  }
+  if (ownerValue === undefined) return mergeBool(layers, key);
+  for (const [layerIndex, layer] of layers.entries()) {
+    const value = layer[key];
+    if (typeof value !== "boolean") continue;
+    if (locks.declarers.includes(layerIndex)) continue;
+    if (value === ownerValue) continue;
+    diagnostics.push({
+      type: "warning",
+      kind: "locked-rule-violation",
+      message:
+        `ignoring ${key}=${value} from ${describeLayers([layerIndex])}: ` +
+        `${describeLayers(locks.declarers)} declare locked rules and set ` +
+        `${key}=${ownerValue}; ` +
+        (key === "failOnWarnings"
+          ? "warning escalation cannot be used to disarm them."
+          : "making every rule overridable by comment cannot be used to disarm them."),
+    });
+  }
+  return ownerValue;
 }
 
 /**
@@ -646,8 +916,17 @@ export function buildConfig(layers: readonly SteeringConfig[]): {
 
   const diagnostics: SteeringDiagnostic[] = [];
 
-  const disabledPluginsList = mergeStringUnion(effective, "disabledPlugins");
-  const disabledRulesList = mergeStringUnion(effective, "disabledRules");
+  // Locks first: every merge below is lock-aware (disabledRules,
+  // disabledPlugins, rule overrides, exemptions, failOnWarnings).
+  const locks = collectLocks(effective);
+  const lockedRulesList = mergeStringUnion(effective, "lockedRules");
+
+  const disabledPluginsList = mergeDisabledPlugins(
+    effective,
+    locks,
+    diagnostics,
+  );
+  const disabledRulesList = mergeDisabledRules(effective, locks, diagnostics);
   const disabledPluginsSet = new Set(disabledPluginsList ?? []);
   const disabledRulesSet = new Set(disabledRulesList ?? []);
 
@@ -657,9 +936,9 @@ export function buildConfig(layers: readonly SteeringConfig[]): {
   const plugins = mergePlugins(effective, disabledPluginsSet, diagnostics);
   detectTrackerNameCollisions(plugins, disabledPluginsSet, diagnostics);
 
-  const rules = mergeRules(effective, disabledRulesSet, diagnostics);
+  const rules = mergeRules(effective, disabledRulesSet, locks, diagnostics);
   const observers = mergeObservers(effective, diagnostics);
-  const exemptions = mergeExemptions(effective);
+  const exemptions = mergeExemptions(effective, locks, diagnostics);
 
   const out: SteeringConfig = {};
   if (plugins.length > 0) out.plugins = plugins;
@@ -671,12 +950,23 @@ export function buildConfig(layers: readonly SteeringConfig[]): {
   if (disabledPluginsList !== undefined) {
     out.disabledPlugins = disabledPluginsList;
   }
+  if (lockedRulesList !== undefined) out.lockedRules = lockedRulesList;
 
-  const defaultNoOverride = mergeBool(effective, "defaultNoOverride");
+  const defaultNoOverride = resolveLockOwnedBool(
+    effective,
+    locks,
+    diagnostics,
+    "defaultNoOverride",
+  );
   if (defaultNoOverride !== undefined) {
     out.defaultNoOverride = defaultNoOverride;
   }
-  const failOnWarnings = mergeBool(effective, "failOnWarnings");
+  const failOnWarnings = resolveLockOwnedBool(
+    effective,
+    locks,
+    diagnostics,
+    "failOnWarnings",
+  );
   if (failOnWarnings !== undefined) out.failOnWarnings = failOnWarnings;
 
   return { config: out, diagnostics };

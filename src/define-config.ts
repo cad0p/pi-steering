@@ -324,8 +324,8 @@ export type AllWrites<
  * through the call and drive name inference.
  *
  * Generic constraints:
- *   - `disabledRules` / `disabledPlugins` typed against the rule / plugin
- *     name unions — typos rejected at compile time.
+ *   - `disabledRules` / `disabledPlugins` / `lockedRules` typed against
+ *     the rule / plugin name unions — typos rejected at compile time.
  *   - `exemptions[].rule` typed against the same rule-name union as
  *     `disabledRules` — a carve-out targeting a typo'd rule name is
  *     rejected at compile time.
@@ -344,6 +344,13 @@ export interface DefineConfigInput<
 > extends SteeringConfig {
   disabledRules?: readonly AllRuleNames<P, R>[];
   disabledPlugins?: readonly AllPluginNames<P>[];
+  /**
+   * Rules this layer owns — no other layer may disable, redefine,
+   * exempt or remove them by disabling their plugin. Same name union
+   * as {@link disabledRules}, so a lock on a typo'd rule is a compile
+   * error (an inert lock protects nothing).
+   */
+  lockedRules?: readonly AllRuleNames<P, R>[];
   /**
    * Guard-rule carve-outs, typed so `rule` must name a real rule
    * (plugin rules or inline rules — same union as
@@ -469,6 +476,9 @@ export function defineConfig<
   }
   if (config.disabledPlugins !== undefined) {
     out.disabledPlugins = [...config.disabledPlugins];
+  }
+  if (config.lockedRules !== undefined) {
+    out.lockedRules = [...config.lockedRules];
   }
   if (config.failOnWarnings !== undefined) {
     out.failOnWarnings = config.failOnWarnings;

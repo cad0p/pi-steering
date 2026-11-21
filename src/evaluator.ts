@@ -59,7 +59,6 @@ import type {
   ToolCallEvent,
   ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
-import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import {
   arityOf,
   MissingDescriptorError,
@@ -109,6 +108,33 @@ import type {
   TopLevelWhenClause,
   WhenWalkerState,
 } from "./schema.ts";
+
+/**
+ * Local copy of pi's `isToolCallEventType`.
+ *
+ * pi's own implementation is the single comparison below — identical
+ * in every published `@earendil-works/pi-coding-agent` since 0.74.0
+ * (verified across 0.74.0, 0.79.1, 0.85.1, 0.99.2, 1.0.4, 1.5.2 and
+ * 1.6.0; this repo's peer floor is 0.79.1). It is a pure predicate
+ * over `event.toolName`: no registry, no state, no module identity
+ * dependency.
+ *
+ * Importing it as a VALUE is the only runtime edge from this package
+ * to pi. In a user-config tree (`<agentDir>/steering/`, loaded through
+ * `loader.ts` with jiti) that edge resolves against the CONFIG's own
+ * `pi-coding-agent` — typically a different, older pi — so a whole
+ * second pi (agent, pi-ai, providers) loads inside the running one:
+ * measured +100 MB RSS and +0.6 s on a real global config. Keeping the
+ * import type-only removes the edge entirely; the signature below is
+ * re-derived from pi's discriminated union on `toolName`, so every
+ * call site narrows exactly as before.
+ */
+function isToolCallEventType<T extends ToolCallEvent["toolName"]>(
+  toolName: T,
+  event: ToolCallEvent,
+): event is Extract<ToolCallEvent, { toolName: T }> {
+  return event.toolName === toolName;
+}
 
 // ---------------------------------------------------------------------------
 // Built-in trackers
